@@ -1,0 +1,94 @@
+.tev {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+/* Acento de marca en el borde superior */
+.tev::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 5px;
+  background: linear-gradient(90deg, var(--color-primario), #c026d3);
+}
+.tev:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 30px rgba(80, 30, 140, 0.18);
+  border-color: var(--color-primario);
+}
+
+.tev__fila {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 4px;
+}
+
+/* Tile de fecha */
+.tev__fecha {
+  flex: none;
+  width: 66px;
+  height: 66px;
+  border-radius: 16px;
+  background: linear-gradient(150deg, var(--color-primario), #c026d3);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 5px 14px rgba(124, 58, 237, 0.35);
+}
+.tev__dia { font-size: 28px; font-weight: 700; line-height: 1; }
+.tev__mes { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.92; }
+
+.tev__cuerpo { flex: 1; min-width: 0; }
+.tev__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.tev__nombre {
+  color: var(--color-primario-oscuro);
+  font-size: var(--texto-lg);
+  word-break: break-word;
+}
+.tev__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+  color: var(--color-texto-suave);
+  font-size: var(--texto-sm);
+}
+.tev__meta svg { flex: none; color: var(--color-primario); }
+
+/* Barra de aforo */
+.tev__aforo { margin-top: 16px; }
+.tev__barra {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-primario-suave);
+  overflow: hidden;
+}
+.tev__barra-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-primario), #c026d3);
+}
+.tev__aforo-txt {
+  display: block;
+  margin-top: 7px;
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+}
+.tev__aforo-txt strong { color: var(--color-texto); }
+
+/* Eventos finalizados: tono apagado */
+.tev--fin::before { background: #cbd2d9; }
+.tev--fin .tev__fecha {
+  background: linear-gradient(150deg, #9aa1ad, #6b7280);
+  box-shadow: none;
+}
+.tev--fin .tev__barra-fill { background: #9aa1ad; }

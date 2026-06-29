@@ -1,0 +1,38 @@
+/* Design tokens. Fuentes GRANDES por accesibilidad (la usuaria es mayor). */
+:root {
+  /* Colores */
+  --color-fondo: #f7f5fb;
+  --color-superficie: #ffffff;
+  --color-borde: #d8d2e6;
+  --color-texto: #1f1a2e;
+  --color-texto-suave: #5b5470;
+
+  --color-primario: #7c3aed;
+  --color-primario-oscuro: #6024c9;
+  --color-primario-suave: #ede7fb;
+
+  --color-exito: #15803d;
+  --color-exito-suave: #dcfce7;
+  --color-alerta: #b45309;
+  --color-alerta-suave: #fef3c7;
+  --color-error: #b91c1c;
+  --color-error-suave: #fee2e2;
+
+  /* Tipografía — base grande para leer con comodidad */
+  --texto-base: 20px;
+  --texto-sm: 17px;
+  --texto-lg: 24px;
+  --texto-xl: 30px;
+  --texto-2xl: 40px;
+  --peso-normal: 500;
+  --peso-fuerte: 700;
+
+  /* Espaciado y formas */
+  --radio: 16px;
+  --radio-sm: 10px;
+  --sombra: 0 6px 20px rgba(40, 20, 80, 0.08);
+  --gap: 16px;
+
+  /* Tamaño mínimo de toque cómodo */
+  --toque: 56px;
+}

@@ -1,0 +1,19 @@
+.cab__titulo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cab__titulo h1 {
+  color: var(--color-primario-oscuro);
+}
+.cab__dato {
+  color: var(--color-texto-suave);
+  margin-top: 6px;
+}
+.cab__acciones {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}

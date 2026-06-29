@@ -1,0 +1,41 @@
+/* Entradas: una columna en celular, varias en pantallas anchas. */
+.entradas-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap);
+}
+@media (min-width: 560px) {
+  .entradas-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+
+.fila__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.fila__nombre {
+  font-size: var(--texto-lg);
+}
+.fila__tipo {
+  color: var(--color-primario-oscuro);
+  font-weight: var(--peso-fuerte);
+}
+.fila__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+.fila__medio {
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+}
+.fila__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}

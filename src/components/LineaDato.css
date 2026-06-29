@@ -1,0 +1,11 @@
+.linea-dato {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--color-texto-suave);
+}
+.linea-dato svg {
+  flex: none;
+  color: var(--color-primario);
+}

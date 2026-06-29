@@ -1,0 +1,17 @@
+/* En celular se apila; en PC: acciones/resumen a un lado y entradas al otro. */
+.detalle-cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap);
+}
+@media (min-width: 980px) {
+  .detalle-cols {
+    grid-template-columns: 360px 1fr;
+    align-items: start;
+  }
+  /* El panel lateral acompaña al hacer scroll de la lista de entradas. */
+  .detalle-cols__lado {
+    position: sticky;
+    top: 84px;
+  }
+}

@@ -1,0 +1,19 @@
+.tipos__fila {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tipos__precio {
+  max-width: 120px;
+}
+.tipos__quitar {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border: 2px solid var(--color-error-suave);
+  background: var(--color-error-suave);
+  color: var(--color-error);
+  border-radius: var(--radio-sm);
+  font-size: var(--texto-base);
+  cursor: pointer;
+}

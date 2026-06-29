@@ -1,0 +1,19 @@
+.rcheck {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 24px 16px;
+  border-radius: var(--radio);
+  border: 3px solid transparent;
+}
+.rcheck__icono { font-size: 56px; line-height: 1; }
+.rcheck__titulo { font-size: var(--texto-xl); }
+.rcheck__nombre { font-size: var(--texto-lg); }
+.rcheck__hora { color: var(--color-texto-suave); }
+
+.rcheck--espera { background: var(--color-superficie); border-color: var(--color-borde); color: var(--color-texto-suave); }
+.rcheck--ok { background: var(--color-exito-suave); border-color: var(--color-exito); color: var(--color-exito); }
+.rcheck--aviso { background: var(--color-alerta-suave); border-color: var(--color-alerta); color: var(--color-alerta); }
+.rcheck--mal { background: var(--color-error-suave); border-color: var(--color-error); color: var(--color-error); }

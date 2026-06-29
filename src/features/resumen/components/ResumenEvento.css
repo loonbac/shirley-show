@@ -1,0 +1,6 @@
+/* auto-fit según el ancho disponible (sirve igual en columna angosta o ancha). */
+.resumen__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+}

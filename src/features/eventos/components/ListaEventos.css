@@ -1,0 +1,42 @@
+/* Encabezado de cada grupo: icono + título + contador */
+.grupo__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.grupo__icono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--color-primario-suave);
+  color: var(--color-primario-oscuro);
+}
+.grupo__chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: var(--color-primario);
+  color: #fff;
+  font-size: var(--texto-sm);
+  font-weight: var(--peso-fuerte);
+}
+
+/* Tarjetas de evento: una columna en celular, varias columnas en pantallas anchas. */
+.eventos-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap);
+}
+@media (min-width: 640px) {
+  .eventos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+}

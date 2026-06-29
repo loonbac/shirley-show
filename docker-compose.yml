@@ -1,0 +1,36 @@
+# Producción con Docker. Dos formas de publicar en shirleyshow.site:
+#
+#  A) Coolify: NO uses este compose; apunta Coolify al repo, construye el Dockerfile,
+#     define las variables de entorno y deja que Coolify maneje el dominio.
+#
+#  B) Self-host con Cloudflare Tunnel: usa este compose tal cual.
+#     1. Crea un túnel en el panel de Cloudflare (Zero Trust > Tunnels) y copia su TOKEN.
+#     2. En el panel del túnel, publica el hostname  shirleyshow.site -> http://app:3001
+#     3. Pon CLOUDFLARE_TUNNEL_TOKEN en un archivo .env junto a este compose.
+#     4. docker compose up -d --build
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      JWT_SECRET: "${JWT_SECRET:?define un secreto largo en .env}"
+      ADMIN_USUARIO: "${ADMIN_USUARIO:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?define la clave de admin en .env}"
+      WHATSAPP_ON: "${WHATSAPP_ON:-false}"
+    volumes:
+      - datos:/app/data
+    # Sin Cloudflare puedes exponer el puerto directamente (opcional):
+    # ports:
+    #   - "3001:3001"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
+
+volumes:
+  datos:

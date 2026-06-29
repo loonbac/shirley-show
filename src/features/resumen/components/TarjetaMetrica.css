@@ -1,0 +1,24 @@
+.metrica {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border-radius: var(--radio);
+  background: var(--color-superficie);
+  border: 1px solid var(--color-borde);
+}
+.metrica__valor {
+  font-size: var(--texto-2xl);
+  font-weight: var(--peso-fuerte);
+  line-height: 1.1;
+}
+.metrica__etiqueta {
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+}
+.metrica--exito { background: var(--color-exito-suave); }
+.metrica--exito .metrica__valor { color: var(--color-exito); }
+.metrica--alerta { background: var(--color-alerta-suave); }
+.metrica--alerta .metrica__valor { color: var(--color-alerta); }
+.metrica--primario { background: var(--color-primario-suave); }
+.metrica--primario .metrica__valor { color: var(--color-primario-oscuro); }

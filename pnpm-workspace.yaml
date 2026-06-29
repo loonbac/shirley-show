@@ -1,0 +1,6 @@
+# Control de scripts de instalación (seguridad de cadena de suministro).
+# pnpm BLOQUEA por defecto los postinstall de todas las dependencias.
+# Aquí solo se permite explícitamente esbuild: su script únicamente descarga
+# el binario nativo que Vite necesita para compilar. Todo lo demás sigue bloqueado.
+allowBuilds:
+  esbuild: true

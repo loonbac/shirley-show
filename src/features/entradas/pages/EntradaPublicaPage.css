@@ -1,0 +1,10 @@
+.entrada-publica {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: var(--gap);
+  padding: 24px var(--gap);
+  background: linear-gradient(170deg, #f7f5fb 0%, #fdf2f8 100%);
+}

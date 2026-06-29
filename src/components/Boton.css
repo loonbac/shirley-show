@@ -1,0 +1,23 @@
+.boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--toque);
+  padding: 12px 22px;
+  border: 2px solid transparent;
+  border-radius: var(--radio);
+  font-size: var(--texto-base);
+  font-weight: var(--peso-fuerte);
+  cursor: pointer;
+  transition: filter 0.15s, background 0.15s;
+}
+.boton:active { filter: brightness(0.92); }
+.boton:disabled { opacity: 0.5; cursor: not-allowed; }
+.boton--ancho { width: 100%; }
+
+.boton--primario { background: var(--color-primario); color: #fff; }
+.boton--secundario { background: var(--color-primario-suave); color: var(--color-primario-oscuro); }
+.boton--peligro { background: var(--color-error); color: #fff; }
+.boton--exito { background: var(--color-exito); color: #fff; }
+.boton--texto { background: transparent; color: var(--color-primario-oscuro); min-height: auto; padding: 6px 8px; }

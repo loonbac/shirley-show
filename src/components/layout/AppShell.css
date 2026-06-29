@@ -1,0 +1,29 @@
+.shell__cabecera {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 10px 16px;
+  background: var(--color-superficie);
+  border-bottom: 1px solid var(--color-borde);
+}
+.shell__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.shell__marca {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Brush Script MT', 'Segoe Script', cursive;
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--color-primario-oscuro);
+  text-decoration: none;
+}
+.shell__nota {
+  color: #c026d3;
+}

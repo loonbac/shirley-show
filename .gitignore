@@ -1,0 +1,16 @@
+# Dependencias y artefactos de build
+node_modules
+dist
+/bin
+*.log
+
+# Base de datos local (SQLite) y sesión de WhatsApp
+data/*.db
+data/*.db-*
+
+# Variables de entorno
+.env
+.env.local
+
+# Herramientas locales
+.claude

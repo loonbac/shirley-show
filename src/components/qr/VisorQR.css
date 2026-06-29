@@ -1,0 +1,51 @@
+.visorqr {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px;
+  border-radius: var(--radio);
+  background: linear-gradient(160deg, #faf5ff 0%, #fdf2f8 100%);
+  border: 3px solid var(--color-primario);
+}
+
+.visorqr__titulo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.visorqr__marca {
+  font-family: 'Brush Script MT', 'Segoe Script', cursive;
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--color-primario-oscuro);
+  letter-spacing: 0.5px;
+}
+.visorqr__titulo svg {
+  color: #c026d3;
+}
+
+/* Marco del QR */
+.visorqr__marco {
+  position: relative;
+  padding: 14px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--sombra);
+  line-height: 0;
+}
+.visorqr__marco svg {
+  display: block;
+}
+
+.visorqr__pie {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--texto-sm);
+  font-weight: var(--peso-fuerte);
+  color: var(--color-primario-oscuro);
+}
+.visorqr__pie svg {
+  color: var(--color-primario);
+}
