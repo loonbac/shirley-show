@@ -37,4 +37,10 @@ ENV PORT=3001 \
 EXPOSE 3001
 # Monta /app/data como volumen para conservar la base de datos entre despliegues.
 VOLUME ["/app/data"]
+
+# Health check: Coolify/Docker esperan a que /api/health responda antes de enviar tráfico.
+# wget viene incluido en Alpine (busybox).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:3001/api/health || exit 1
+
 CMD ["server"]

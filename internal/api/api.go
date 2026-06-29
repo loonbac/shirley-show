@@ -65,6 +65,9 @@ func (s *Server) authMW(next http.Handler) http.Handler {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	// Salud (para el health check de Coolify/Docker; pública y sin estado)
+	mux.HandleFunc("GET /api/health", s.health)
+
 	// Públicas
 	mux.HandleFunc("POST /api/auth/login", s.h(s.login))
 	mux.HandleFunc("GET /api/publico/entrada/{codigo}", s.h(s.entradaPublica))
@@ -91,6 +94,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.servirSPA)
 
 	return cors(mux)
+}
+
+// health responde 200 para indicar que el servidor está listo para recibir tráfico.
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	escribirJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // servirSPA entrega archivos de dist/ y, si no existe el archivo, devuelve index.html
