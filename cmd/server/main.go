@@ -4,6 +4,7 @@ package main
 import (
 	"errors"
 	"log"
+	"net"
 	"net/http"
 
 	"shirleyshow/internal/api"
@@ -45,8 +46,8 @@ func main() {
 	}
 
 	srv := api.New(st, cfg, wa)
-	addr := ":" + cfg.Puerto
-	log.Printf("Servidor escuchando en http://localhost%s", addr)
+	addr := net.JoinHostPort(cfg.BindAddr, cfg.Puerto)
+	log.Printf("Servidor escuchando en %s", addr)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
 		log.Fatal(err)
 	}

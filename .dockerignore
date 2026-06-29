@@ -7,5 +7,5 @@ data
 *.log
 .claude
 deploy
+cloudflared
 *.md
-Caddyfile

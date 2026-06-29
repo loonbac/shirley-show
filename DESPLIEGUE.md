@@ -70,6 +70,31 @@ Cada `git push` puede redeployar solo si activas el auto-deploy.
 
 Cloudflare pone el HTTPS y el dominio; no hay que abrir puertos en el servidor.
 
+## Opción C — Cloudflare Tunnel manual (sin docker-compose)
+
+La app ya está **lista para HTTPS detrás de un túnel**: detecta el esquema real por
+`X-Forwarded-Proto` (genera enlaces `https://` y manda HSTS solo sobre HTTPS). Tú pones el
+túnel a mano:
+
+1. Instala `cloudflared` y autentícate: `cloudflared tunnel login`.
+2. Crea el túnel y enruta el dominio:
+   ```bash
+   cloudflared tunnel create shirley-show
+   cloudflared tunnel route dns shirley-show shirleyshow.site
+   ```
+3. Copia `cloudflared/config.example.yml` a `~/.cloudflared/config.yml` y completa el UUID y
+   la ruta del archivo de credenciales.
+4. Levanta la app escuchando **solo en local** (así no queda expuesta; solo entra por el túnel):
+   ```bash
+   BIND_ADDR=127.0.0.1 PORT=3001 JWT_SECRET="secreto-largo" ADMIN_PASSWORD="..." ./server
+   ```
+   O con Docker: `docker run -p 127.0.0.1:3001:3001 -e JWT_SECRET=... -v shirley_datos:/app/data shirley-show`
+5. Corre el túnel: `cloudflared tunnel run shirley-show`
+6. En el panel de Cloudflare activa **Always Use HTTPS** (SSL/TLS → Edge Certificates).
+
+Cloudflare termina el TLS en su borde y el tramo hasta tu app va cifrado por el túnel; no
+necesitas abrir puertos ni certificados en el servidor.
+
 ---
 
 ## WhatsApp directo (whatsmeow) — opcional

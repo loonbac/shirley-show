@@ -12,6 +12,7 @@ import (
 // Config centraliza la configuración del servidor, leída de variables de entorno.
 type Config struct {
 	Puerto        string
+	BindAddr      string // interfaz donde escuchar ("" = todas; "127.0.0.1" = solo local/túnel)
 	JWTSecret     string
 	RutaDB        string
 	AdminUsuario  string
@@ -28,6 +29,7 @@ func Cargar() Config {
 	secreto, generado := resolverSecreto()
 	return Config{
 		Puerto:        env("PORT", "3001"),
+		BindAddr:      env("BIND_ADDR", ""),
 		JWTSecret:     secreto,
 		RutaDB:        env("DB_PATH", "data/eventos.db"),
 		AdminUsuario:  env("ADMIN_USUARIO", "shirleyshow"),

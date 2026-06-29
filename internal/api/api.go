@@ -103,11 +103,22 @@ func (s *Server) Handler() http.Handler {
 // cabecerasSeguridad agrega cabeceras defensivas a todas las respuestas.
 func cabecerasSeguridad(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")       // no adivinar tipos MIME
-		w.Header().Set("X-Frame-Options", "DENY")                 // anti clickjacking
-		w.Header().Set("Referrer-Policy", "no-referrer")          // no filtrar URLs
+		w.Header().Set("X-Content-Type-Options", "nosniff") // no adivinar tipos MIME
+		w.Header().Set("X-Frame-Options", "DENY")           // anti clickjacking
+		w.Header().Set("Referrer-Policy", "no-referrer")    // no filtrar URLs
+		// HSTS solo cuando la conexión llega por HTTPS (terminado en Cloudflare):
+		// obliga al navegador a usar siempre HTTPS para el dominio.
+		if esHTTPS(r) {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// esHTTPS detecta si la petición original llegó por HTTPS, ya sea directamente
+// (TLS local) o terminada por un proxy/túnel (Cloudflare manda X-Forwarded-Proto).
+func esHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // health responde 200 para indicar que el servidor está listo para recibir tráfico.

@@ -48,11 +48,12 @@ func (s *Server) enviarWhatsApp(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// linkEntrada arma el enlace público de la entrada usando el host de la petición.
+// linkEntrada arma el enlace público de la entrada usando el host y el esquema reales
+// (https cuando viene por Cloudflare Tunnel; ver esHTTPS).
 func linkEntrada(r *http.Request, codigo string) string {
-	esquema := "https"
-	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") != "https" {
-		esquema = "http"
+	esquema := "http"
+	if esHTTPS(r) {
+		esquema = "https"
 	}
 	return fmt.Sprintf("%s://%s/entrada/%s", esquema, r.Host, codigo)
 }

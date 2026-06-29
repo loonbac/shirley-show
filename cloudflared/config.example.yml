@@ -1,0 +1,29 @@
+# Cloudflare Tunnel — configuración manual (con archivo de credenciales).
+#
+# Requisitos: cloudflared instalado y la cuenta autenticada:
+#   cloudflared tunnel login
+#
+# Pasos:
+#   1. Crea el túnel (genera un UUID y ~/.cloudflared/<UUID>.json):
+#        cloudflared tunnel create shirley-show
+#   2. Apunta el DNS del dominio al túnel:
+#        cloudflared tunnel route dns shirley-show shirleyshow.site
+#   3. Copia este archivo a ~/.cloudflared/config.yml y completa los valores.
+#   4. Levanta la app (escuchando en 127.0.0.1 para no exponerla):
+#        BIND_ADDR=127.0.0.1 PORT=3001 JWT_SECRET=... ./server
+#      (o con Docker:  docker run -p 127.0.0.1:3001:3001 ... shirley-show)
+#   5. Corre el túnel:
+#        cloudflared tunnel run shirley-show
+#
+# Cloudflare termina el HTTPS en su borde; el túnel hasta la app va cifrado.
+# En el panel de Cloudflare activa "Always Use HTTPS" (SSL/TLS > Edge Certificates).
+
+tunnel: REEMPLAZA-CON-EL-UUID-DEL-TUNEL
+credentials-file: /home/USUARIO/.cloudflared/REEMPLAZA-CON-EL-UUID.json
+
+ingress:
+  # Todo el tráfico del dominio va a la app local.
+  - hostname: shirleyshow.site
+    service: http://localhost:3001
+  # Regla final obligatoria.
+  - service: http_status:404
