@@ -105,6 +105,39 @@ func (s *Server) actualizarEvento(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
+func (s *Server) finalizarEvento(w http.ResponseWriter, r *http.Request) error {
+	return s.cambiarFinalizado(w, r, true)
+}
+
+func (s *Server) reabrirEvento(w http.ResponseWriter, r *http.Request) error {
+	return s.cambiarFinalizado(w, r, false)
+}
+
+func (s *Server) cambiarFinalizado(w http.ResponseWriter, r *http.Request, finalizado bool) error {
+	id, err := idDeRuta(r, "id")
+	if err != nil {
+		return err
+	}
+	ev, err := s.st.MarcarFinalizado(id, finalizado)
+	if err != nil {
+		return err
+	}
+	escribirJSON(w, http.StatusOK, ev)
+	return nil
+}
+
+func (s *Server) eliminarEvento(w http.ResponseWriter, r *http.Request) error {
+	id, err := idDeRuta(r, "id")
+	if err != nil {
+		return err
+	}
+	if err := s.st.EliminarEvento(id); err != nil {
+		return err
+	}
+	escribirJSON(w, http.StatusOK, map[string]bool{"eliminado": true})
+	return nil
+}
+
 func (s *Server) resumen(w http.ResponseWriter, r *http.Request) error {
 	id, err := idDeRuta(r, "id")
 	if err != nil {

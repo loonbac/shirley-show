@@ -19,8 +19,11 @@ type EventoData struct {
 	Tipos     []TipoEntrada
 }
 
-// deriveEstado calcula Próximo/Finalizado según la fecha del evento.
-func deriveEstado(fechaHora string) string {
+// deriveEstado calcula Próximo/Finalizado: finalizado manual O fecha ya pasada.
+func deriveEstado(fechaHora string, finalizado bool) string {
+	if finalizado {
+		return "Finalizado"
+	}
 	t, err := time.Parse(time.RFC3339, fechaHora)
 	if err == nil && t.Before(time.Now()) {
 		return "Finalizado"
@@ -32,7 +35,8 @@ func escanearEvento(row interface{ Scan(...any) error }) (*Evento, error) {
 	var e Evento
 	var aforo sql.NullInt64
 	var tiposJSON string
-	if err := row.Scan(&e.ID, &e.Nombre, &e.FechaHora, &e.Lugar, &aforo, &tiposJSON, &e.Vendidas); err != nil {
+	var finalizado int
+	if err := row.Scan(&e.ID, &e.Nombre, &e.FechaHora, &e.Lugar, &aforo, &tiposJSON, &finalizado, &e.Vendidas); err != nil {
 		return nil, err
 	}
 	if aforo.Valid {
@@ -43,11 +47,12 @@ func escanearEvento(row interface{ Scan(...any) error }) (*Evento, error) {
 	if e.TiposDeEntrada == nil {
 		e.TiposDeEntrada = []TipoEntrada{}
 	}
-	e.Estado = deriveEstado(e.FechaHora)
+	e.Finalizado = finalizado == 1
+	e.Estado = deriveEstado(e.FechaHora, e.Finalizado)
 	return &e, nil
 }
 
-const selEvento = `SELECT e.id, e.nombre, e.fecha_hora, e.lugar, e.aforo, e.tipos_de_entrada,
+const selEvento = `SELECT e.id, e.nombre, e.fecha_hora, e.lugar, e.aforo, e.tipos_de_entrada, e.finalizado,
 	(SELECT COUNT(*) FROM entradas WHERE evento_id = e.id) AS vendidas FROM eventos e`
 
 func (s *Store) ListarEventos() ([]Evento, error) {
@@ -101,6 +106,30 @@ func (s *Store) ActualizarEvento(id int64, d EventoData) (*Evento, error) {
 		return nil, err
 	}
 	return s.ObtenerEvento(id)
+}
+
+// MarcarFinalizado archiva (o reabre) un evento sin borrarlo, conservando el historial.
+func (s *Store) MarcarFinalizado(id int64, finalizado bool) (*Evento, error) {
+	if _, err := s.ObtenerEvento(id); err != nil {
+		return nil, err
+	}
+	v := 0
+	if finalizado {
+		v = 1
+	}
+	if _, err := s.db.Exec("UPDATE eventos SET finalizado = ? WHERE id = ?", v, id); err != nil {
+		return nil, err
+	}
+	return s.ObtenerEvento(id)
+}
+
+// EliminarEvento borra el evento y sus entradas (cascada por la clave foránea).
+func (s *Store) EliminarEvento(id int64) error {
+	if _, err := s.ObtenerEvento(id); err != nil {
+		return err
+	}
+	_, err := s.db.Exec("DELETE FROM eventos WHERE id = ?", id)
+	return err
 }
 
 func aforoSQL(a *int) any {

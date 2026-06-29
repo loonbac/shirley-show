@@ -15,7 +15,8 @@ type Evento struct {
 	Lugar          string        `json:"lugar"`
 	Aforo          *int          `json:"aforo"`
 	TiposDeEntrada []TipoEntrada `json:"tipos_de_entrada"`
-	Estado         string        `json:"estado"` // derivado: Próximo | Finalizado
+	Finalizado     bool          `json:"finalizado"` // archivado manualmente
+	Estado         string        `json:"estado"`     // derivado: Próximo | Finalizado
 	Vendidas       int           `json:"vendidas"`
 }
 

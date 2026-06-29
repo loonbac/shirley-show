@@ -34,7 +34,14 @@ func Abrir(ruta string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("aplicar esquema: %w", err)
 	}
+	migrar(db)
 	return &Store{db: db}, nil
+}
+
+// migrar agrega columnas nuevas a bases ya existentes (idempotente: ignora si ya están).
+func migrar(db *sql.DB) {
+	// ALTER ... ADD COLUMN falla si la columna ya existe; ese error se ignora a propósito.
+	_, _ = db.Exec("ALTER TABLE eventos ADD COLUMN finalizado INTEGER NOT NULL DEFAULT 0")
 }
 
 // DB expone la conexión cruda (la usa el seed y whatsmeow).

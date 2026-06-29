@@ -80,6 +80,9 @@ func (s *Server) Handler() http.Handler {
 	prot("POST", "/api/eventos", s.crearEvento)
 	prot("GET", "/api/eventos/{id}", s.obtenerEvento)
 	prot("PUT", "/api/eventos/{id}", s.actualizarEvento)
+	prot("DELETE", "/api/eventos/{id}", s.eliminarEvento)
+	prot("POST", "/api/eventos/{id}/finalizar", s.finalizarEvento)
+	prot("POST", "/api/eventos/{id}/reabrir", s.reabrirEvento)
 	prot("GET", "/api/eventos/{id}/resumen", s.resumen)
 	prot("GET", "/api/eventos/{id}/entradas", s.listarEntradas)
 	prot("POST", "/api/eventos/{id}/entradas", s.registrarVenta)
@@ -118,7 +121,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

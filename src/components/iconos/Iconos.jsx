@@ -101,6 +101,18 @@ export const IconoInvalida = (p) => (
   </Solido>
 )
 
+export const IconoBandera = (p) => (
+  <Linea {...p}>
+    <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
+  </Linea>
+)
+
+export const IconoBasura = (p) => (
+  <Linea {...p}>
+    <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+  </Linea>
+)
+
 export const IconoReloj = (p) => (
   <Linea {...p}>
     <circle cx="12" cy="12" r="9" />

@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useEvento } from '../hooks/useEventos.js'
+import { eventosApi } from '../services/eventosApi.js'
 import { CabeceraEvento } from '../components/CabeceraEvento.jsx'
 import { ResumenEvento } from '../../resumen/index.js'
 import { PanelEntradas, FormularioVenta, entradasApi } from '../../entradas/index.js'
@@ -11,13 +12,15 @@ import { Cargando, MensajeError } from '../../../components/Estado.jsx'
 import './DetalleEventoPage.css'
 
 // Detalle del evento: cabecera + resumen + registrar venta + lista de entradas.
-// `version` se incrementa tras cada cambio para refrescar resumen y lista a la vez.
 export default function DetalleEventoPage() {
   const { id } = useParams()
-  const { datos: evento, cargando, error } = useEvento(id)
+  const navegar = useNavigate()
+  const { datos: evento, cargando, error, recargar } = useEvento(id)
   const [version, setVersion] = useState(0)
   const [ventaAbierta, setVentaAbierta] = useState(false)
   const [guardando, setGuardando] = useState(false)
+  const [accionando, setAccionando] = useState(false)
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false)
 
   const refrescar = () => setVersion((v) => v + 1)
 
@@ -32,13 +35,39 @@ export default function DetalleEventoPage() {
     }
   }
 
+  async function cambiarFinalizado(finalizar) {
+    setAccionando(true)
+    try {
+      await (finalizar ? eventosApi.finalizar(id) : eventosApi.reabrir(id))
+      await recargar()
+    } finally {
+      setAccionando(false)
+    }
+  }
+
+  async function eliminar() {
+    setAccionando(true)
+    try {
+      await eventosApi.eliminar(id)
+      navegar('/eventos')
+    } finally {
+      setAccionando(false)
+    }
+  }
+
   if (cargando) return <Cargando />
   if (error) return <MensajeError>{error}</MensajeError>
   if (!evento) return null
 
   return (
     <div className="pila">
-      <CabeceraEvento evento={evento} />
+      <CabeceraEvento
+        evento={evento}
+        accionando={accionando}
+        onFinalizar={() => cambiarFinalizado(true)}
+        onReabrir={() => cambiarFinalizado(false)}
+        onEliminar={() => setConfirmarEliminar(true)}
+      />
 
       <div className="detalle-cols">
         <aside className="detalle-cols__lado pila">
@@ -54,6 +83,21 @@ export default function DetalleEventoPage() {
 
       <Modal abierto={ventaAbierta} titulo="Registrar venta" onCerrar={() => setVentaAbierta(false)}>
         <FormularioVenta evento={evento} guardando={guardando} onRegistrar={registrarVenta} />
+      </Modal>
+
+      <Modal abierto={confirmarEliminar} titulo="Eliminar evento" onCerrar={() => setConfirmarEliminar(false)}>
+        <div className="pila">
+          <p>
+            ¿Seguro que quieres eliminar <strong>{evento.nombre}</strong> y todas sus entradas?
+            Esta acción no se puede deshacer. Si solo quieres archivarlo, usa <strong>Finalizar</strong>.
+          </p>
+          <Boton variante="peligro" ancho onClick={eliminar} disabled={accionando}>
+            Sí, eliminar definitivamente
+          </Boton>
+          <Boton variante="secundario" ancho onClick={() => setConfirmarEliminar(false)} disabled={accionando}>
+            Cancelar
+          </Boton>
+        </div>
       </Modal>
     </div>
   )

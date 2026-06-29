@@ -28,4 +28,5 @@ export const api = {
   get: (ruta, opts) => pedir('GET', ruta, opts),
   post: (ruta, body, opts) => pedir('POST', ruta, { ...opts, body }),
   put: (ruta, body, opts) => pedir('PUT', ruta, { ...opts, body }),
+  del: (ruta, opts) => pedir('DELETE', ruta, opts),
 }

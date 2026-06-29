@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS eventos (
   lugar            TEXT NOT NULL,
   aforo            INTEGER,
   tipos_de_entrada TEXT NOT NULL DEFAULT '[]',
+  finalizado       INTEGER NOT NULL DEFAULT 0,  -- 1 = finalizado manualmente (archivado)
   fecha_creacion   TEXT NOT NULL
 );
 
