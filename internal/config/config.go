@@ -2,6 +2,8 @@ package config
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"strconv"
 	"strings"
@@ -14,24 +16,42 @@ type Config struct {
 	RutaDB        string
 	AdminUsuario  string
 	AdminPassword string
-	WebDir        string // carpeta del frontend compilado (dist)
-	WhatsAppOn    bool   // activa la integración con WhatsApp (whatsmeow)
-	RutaStoreWA   string // sesión de WhatsApp (SQLite)
+	WebDir          string // carpeta del frontend compilado (dist)
+	WhatsAppOn      bool   // activa la integración con WhatsApp (whatsmeow)
+	RutaStoreWA     string // sesión de WhatsApp (SQLite)
+	SecretoGenerado bool   // true si el JWT_SECRET se generó al vuelo (no definido o muy corto)
 }
 
 // Cargar lee un archivo .env opcional y las variables de entorno.
 func Cargar() Config {
 	cargarDotEnv(".env")
+	secreto, generado := resolverSecreto()
 	return Config{
 		Puerto:        env("PORT", "3001"),
-		JWTSecret:     env("JWT_SECRET", "secreto-local-de-desarrollo"),
+		JWTSecret:     secreto,
 		RutaDB:        env("DB_PATH", "data/eventos.db"),
 		AdminUsuario:  env("ADMIN_USUARIO", "shirleyshow"),
 		AdminPassword: env("ADMIN_PASSWORD", "manuelitope123"),
 		WebDir:        env("WEB_DIR", "dist"),
-		WhatsAppOn:    env("WHATSAPP_ON", "false") == "true",
-		RutaStoreWA:   env("WA_STORE_PATH", "data/whatsapp.db"),
+		WhatsAppOn:      env("WHATSAPP_ON", "false") == "true",
+		RutaStoreWA:     env("WA_STORE_PATH", "data/whatsapp.db"),
+		SecretoGenerado: generado,
 	}
+}
+
+// resolverSecreto usa JWT_SECRET si tiene suficiente entropía (>=32 caracteres).
+// Si no está definido o es muy corto/débil, genera uno aleatorio de 256 bits.
+// Así nunca se firma con un secreto conocido del repositorio (evita falsificar tokens).
+func resolverSecreto() (string, bool) {
+	s := os.Getenv("JWT_SECRET")
+	if len(s) >= 32 {
+		return s, false
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return s, false // improbable; en el peor caso usa lo que haya
+	}
+	return hex.EncodeToString(b), true
 }
 
 func env(clave, porDefecto string) string {

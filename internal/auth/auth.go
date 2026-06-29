@@ -21,6 +21,15 @@ func Verificar(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
+// hashFicticio es un hash bcrypt válido contra el que comparar cuando el usuario no existe,
+// para que el login tarde lo mismo exista o no (evita enumerar usuarios por tiempo de respuesta).
+var hashFicticio, _ = bcrypt.GenerateFromPassword([]byte("usuario-inexistente-tiempo-constante"), 10)
+
+// CompararFicticio quema el mismo tiempo que una verificación real. Siempre devuelve false.
+func CompararFicticio(password string) bool {
+	return bcrypt.CompareHashAndPassword(hashFicticio, []byte(password)) == nil
+}
+
 // Claims del token: identifica a la administradora.
 type Claims struct {
 	Usuario string `json:"usuario"`

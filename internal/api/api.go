@@ -16,13 +16,14 @@ import (
 )
 
 type Server struct {
-	st  *store.Store
-	cfg config.Config
-	wa  *whatsapp.Cliente // puede ser nil si WhatsApp está desactivado
+	st      *store.Store
+	cfg     config.Config
+	wa      *whatsapp.Cliente // puede ser nil si WhatsApp está desactivado
+	limiter *limitadorLogin
 }
 
 func New(st *store.Store, cfg config.Config, wa *whatsapp.Cliente) *Server {
-	return &Server{st: st, cfg: cfg, wa: wa}
+	return &Server{st: st, cfg: cfg, wa: wa, limiter: nuevoLimitador()}
 }
 
 type handlerErr func(http.ResponseWriter, *http.Request) error
@@ -96,7 +97,17 @@ func (s *Server) Handler() http.Handler {
 	// Frontend compilado (SPA)
 	mux.HandleFunc("/", s.servirSPA)
 
-	return cors(mux)
+	return cabecerasSeguridad(cors(mux))
+}
+
+// cabecerasSeguridad agrega cabeceras defensivas a todas las respuestas.
+func cabecerasSeguridad(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")       // no adivinar tipos MIME
+		w.Header().Set("X-Frame-Options", "DENY")                 // anti clickjacking
+		w.Header().Set("Referrer-Policy", "no-referrer")          // no filtrar URLs
+		next.ServeHTTP(w, r)
+	})
 }
 
 // health responde 200 para indicar que el servidor está listo para recibir tráfico.

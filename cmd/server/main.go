@@ -16,6 +16,11 @@ import (
 func main() {
 	cfg := config.Cargar()
 
+	if cfg.SecretoGenerado {
+		log.Println("ADVERTENCIA: JWT_SECRET no definido o muy corto. Se generó uno aleatorio temporal:")
+		log.Println("  -> las sesiones se cerrarán al reiniciar. Define un JWT_SECRET de 32+ caracteres en producción.")
+	}
+
 	st, err := store.Abrir(cfg.RutaDB)
 	if err != nil {
 		log.Fatalf("no se pudo abrir la base de datos: %v", err)

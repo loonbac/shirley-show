@@ -14,8 +14,9 @@ type apiError struct {
 
 func (e apiError) Error() string { return e.msg }
 
-func errDatos(msg string) error     { return apiError{http.StatusBadRequest, msg} }
+func errDatos(msg string) error        { return apiError{http.StatusBadRequest, msg} }
 func errNoAutorizado(msg string) error { return apiError{http.StatusUnauthorized, msg} }
+func errDemasiados(msg string) error   { return apiError{http.StatusTooManyRequests, msg} }
 
 func escribirJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
