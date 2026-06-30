@@ -69,7 +69,7 @@ export default function DetalleEventoPage() {
     setAccionando(true)
     try {
       await eventosApi.eliminar(id)
-      navegar('/eventos')
+      navegar('/panel/eventos')
     } finally {
       setAccionando(false)
     }

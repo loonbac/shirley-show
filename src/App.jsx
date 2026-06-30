@@ -6,16 +6,17 @@ import { RutaProtegida } from './routes/RutaProtegida.jsx'
 import { Cargando } from './components/Estado.jsx'
 
 // Cada feature se carga de forma diferida (code splitting): solo se descarga al visitarla.
+const PresentacionPage = lazy(() => import('./features/presentacion/pages/PresentacionPage.jsx'))
 const EventosPage = lazy(() => import('./features/eventos/pages/EventosPage.jsx'))
 const FormularioEventoPage = lazy(() => import('./features/eventos/pages/FormularioEventoPage.jsx'))
 const DetalleEventoPage = lazy(() => import('./features/eventos/pages/DetalleEventoPage.jsx'))
 const CheckinPage = lazy(() => import('./features/checkin/pages/CheckinPage.jsx'))
 const EntradaPublicaPage = lazy(() => import('./features/entradas/pages/EntradaPublicaPage.jsx'))
 
-// Si ya hay sesión, el login redirige directo al panel.
-function Inicio() {
+// Entrada al panel (/panel): si ya hay sesión, salta directo a la lista de eventos.
+function Panel() {
   const { autenticado } = useSesion()
-  return autenticado ? <Navigate to="/eventos" replace /> : <LoginPage />
+  return autenticado ? <Navigate to="/panel/eventos" replace /> : <LoginPage />
 }
 
 export default function App() {
@@ -24,11 +25,15 @@ export default function App() {
       <BrowserRouter>
         <Suspense fallback={<Cargando />}>
           <Routes>
-            <Route path="/" element={<Inicio />} />
+            {/* Portada pública: presentación de la artista (sin login) */}
+            <Route path="/" element={<PresentacionPage />} />
             {/* Vista pública de entrada (compartible por WhatsApp, sin login) */}
             <Route path="/entrada/:codigo" element={<EntradaPublicaPage />} />
 
-            {/* Panel protegido */}
+            {/* Login del panel */}
+            <Route path="/panel" element={<Panel />} />
+
+            {/* Panel protegido (todo bajo /panel) */}
             <Route
               element={
                 <RutaProtegida>
@@ -36,11 +41,11 @@ export default function App() {
                 </RutaProtegida>
               }
             >
-              <Route path="/eventos" element={<EventosPage />} />
-              <Route path="/eventos/nuevo" element={<FormularioEventoPage />} />
-              <Route path="/eventos/:id" element={<DetalleEventoPage />} />
-              <Route path="/eventos/:id/editar" element={<FormularioEventoPage />} />
-              <Route path="/eventos/:id/checkin" element={<CheckinPage />} />
+              <Route path="/panel/eventos" element={<EventosPage />} />
+              <Route path="/panel/eventos/nuevo" element={<FormularioEventoPage />} />
+              <Route path="/panel/eventos/:id" element={<DetalleEventoPage />} />
+              <Route path="/panel/eventos/:id/editar" element={<FormularioEventoPage />} />
+              <Route path="/panel/eventos/:id/checkin" element={<CheckinPage />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

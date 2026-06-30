@@ -39,7 +39,7 @@ export default function CheckinPage() {
         <Boton variante="secundario" onClick={() => setEscaneando((s) => !s)}>
           {escaneando ? 'Pausar cámara' : 'Reanudar cámara'}
         </Boton>
-        <Boton variante="texto" onClick={() => navegar(`/eventos/${id}`)}>
+        <Boton variante="texto" onClick={() => navegar(`/panel/eventos/${id}`)}>
           <IconoAtras size={20} /> Volver al evento
         </Boton>
       </div>
@@ -76,7 +76,7 @@ function SoloTelefono({ id, navegar }) {
         <IconoEnlace size={20} /> {copiado ? '¡Enlace copiado!' : 'Copiar enlace para el teléfono'}
       </Boton>
 
-      <Boton variante="texto" onClick={() => navegar(`/eventos/${id}`)}>
+      <Boton variante="texto" onClick={() => navegar(`/panel/eventos/${id}`)}>
         <IconoAtras size={20} /> Volver al evento
       </Boton>
     </div>

@@ -10,13 +10,13 @@ export function AppShell() {
   const navegar = useNavigate()
   const { pathname } = useLocation()
   const { cerrarSesion } = useSesion()
-  const enRaiz = pathname === '/' || pathname === '/eventos'
+  const enRaiz = pathname === '/panel/eventos'
 
   return (
     <div className="shell">
       <header className="shell__cabecera">
         <div className="shell__inner">
-          <Link to="/eventos" className="shell__marca" aria-label="Shirley Show — inicio">
+          <Link to="/panel/eventos" className="shell__marca" aria-label="Shirley Show — inicio">
             <img className="shell__logo" src="/logo.png?v=2" alt="Shirley Show" />
           </Link>
           {enRaiz ? (

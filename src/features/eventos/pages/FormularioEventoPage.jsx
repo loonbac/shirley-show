@@ -19,7 +19,7 @@ export default function FormularioEventoPage() {
     try {
       const res = editando ? await eventosApi.actualizar(id, datos) : await eventosApi.crear(datos)
       if (imagenFile) await eventosApi.subirImagen(res.id, imagenFile)
-      navegar(`/eventos/${res.id}`)
+      navegar(`/panel/eventos/${res.id}`)
     } finally {
       setGuardando(false)
     }

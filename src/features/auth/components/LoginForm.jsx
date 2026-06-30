@@ -21,7 +21,7 @@ export function LoginForm() {
     setCargando(true)
     try {
       await iniciarSesion(usuario, password)
-      navegar('/eventos')
+      navegar('/panel/eventos')
     } catch (err) {
       setError(err.message)
     } finally {

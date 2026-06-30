@@ -4,6 +4,6 @@ import { useSesion } from '../features/auth/index.js'
 // Solo deja pasar a usuarios autenticados; el resto va al login.
 export function RutaProtegida({ children }) {
   const { autenticado } = useSesion()
-  if (!autenticado) return <Navigate to="/" replace />
+  if (!autenticado) return <Navigate to="/panel" replace />
   return children
 }

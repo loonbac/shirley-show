@@ -18,7 +18,7 @@ export function TarjetaEvento({ evento }) {
   return (
     <Tarjeta
       className={`tev ${finalizado ? 'tev--fin' : ''} ${evento.imagen ? 'tev--img' : ''}`}
-      onClick={() => navegar(`/eventos/${evento.id}`)}
+      onClick={() => navegar(`/panel/eventos/${evento.id}`)}
     >
       {evento.imagen && (
         <div className="tev__poster">

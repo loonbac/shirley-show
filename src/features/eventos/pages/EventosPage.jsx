@@ -18,7 +18,7 @@ export default function EventosPage() {
           <h1>Eventos</h1>
           <p className="eventos-head__sub">Tus shows y la venta de entradas, en un solo lugar.</p>
         </div>
-        <Boton ancho onClick={() => navegar('/eventos/nuevo')}>
+        <Boton ancho onClick={() => navegar('/panel/eventos/nuevo')}>
           <IconoMas size={22} /> Crear evento
         </Boton>
       </header>

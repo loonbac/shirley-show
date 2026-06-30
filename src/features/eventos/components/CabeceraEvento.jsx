@@ -26,10 +26,10 @@ export function CabeceraEvento({ evento, accionando, onFinalizar, onReabrir, onE
         <LineaDato icono={IconoUbicacion}>{evento.lugar}</LineaDato>
 
         <div className="cab__acciones">
-          <Boton variante="primario" onClick={() => navegar(`/eventos/${evento.id}/checkin`)}>
+          <Boton variante="primario" onClick={() => navegar(`/panel/eventos/${evento.id}/checkin`)}>
             <IconoCamara size={20} /> Modo puerta
           </Boton>
-          <Boton variante="secundario" onClick={() => navegar(`/eventos/${evento.id}/editar`)}>
+          <Boton variante="secundario" onClick={() => navegar(`/panel/eventos/${evento.id}/editar`)}>
             <IconoLapiz size={20} /> Editar
           </Boton>
           {evento.finalizado ? (
