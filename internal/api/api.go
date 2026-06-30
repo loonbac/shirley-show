@@ -100,7 +100,7 @@ func (s *Server) Handler() http.Handler {
 	// Frontend compilado (SPA)
 	mux.HandleFunc("/", s.servirSPA)
 
-	return cabecerasSeguridad(cors(mux))
+	return cabecerasSeguridad(s.cors(mux))
 }
 
 // cabecerasSeguridad agrega cabeceras defensivas a todas las respuestas.
@@ -151,12 +151,17 @@ func (s *Server) servirSPA(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(s.cfg.WebDir, "index.html"))
 }
 
-// cors agrega cabeceras CORS y responde los preflight OPTIONS.
-func cors(next http.Handler) http.Handler {
+// cors agrega cabeceras CORS y responde los preflight OPTIONS. Solo emite cabeceras
+// cross-origin si CORS_ORIGIN está configurado; por defecto ("") la API solo acepta
+// peticiones del mismo origen (la SPA se sirve desde el propio backend en producción).
+func (s *Server) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		if origen := s.cfg.CORSOrigin; origen != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origen)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

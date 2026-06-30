@@ -75,16 +75,36 @@ func (l *limitadorLogin) podar() {
 	}
 }
 
-// ipCliente obtiene la IP real del cliente (respetando Cloudflare / proxies).
-func ipCliente(r *http.Request) string {
-	if cf := r.Header.Get("CF-Connecting-IP"); cf != "" {
-		return cf
+// ipCliente obtiene la IP real del cliente. Solo cree en las cabeceras CF-Connecting-IP
+// y X-Forwarded-For si la conexión directa proviene de una red de confianza (el túnel /
+// proxy). Si el origen es directo y no confiable, usa la IP real del socket; así un
+// atacante no puede falsificar esas cabeceras para evadir el rate-limit de login.
+func ipCliente(r *http.Request, confiables []*net.IPNet) string {
+	directo := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(directo); err == nil {
+		directo = host
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
+	if ipDeConfianza(directo, confiables) {
+		if cf := r.Header.Get("CF-Connecting-IP"); cf != "" {
+			return strings.TrimSpace(cf)
+		}
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
 	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
+	return directo
+}
+
+// ipDeConfianza indica si la IP pertenece a alguna de las redes confiables.
+func ipDeConfianza(ip string, confiables []*net.IPNet) bool {
+	p := net.ParseIP(ip)
+	if p == nil {
+		return false
 	}
-	return r.RemoteAddr
+	for _, n := range confiables {
+		if n.Contains(p) {
+			return true
+		}
+	}
+	return false
 }

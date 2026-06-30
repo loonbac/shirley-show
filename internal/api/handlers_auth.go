@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
-	ip := ipCliente(r)
+	ip := ipCliente(r, s.cfg.TrustedProxies)
 	// Fuerza bruta: bloquea tras varios intentos fallidos desde la misma IP.
 	if !s.limiter.permitido(ip) {
 		return errDemasiados("Demasiados intentos. Espera unos minutos e inténtalo de nuevo.")

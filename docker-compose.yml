@@ -17,12 +17,17 @@ services:
       JWT_SECRET: "${JWT_SECRET:?define un secreto largo en .env}"
       ADMIN_USUARIO: "${ADMIN_USUARIO:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?define la clave de admin en .env}"
-      WHATSAPP_ON: "${WHATSAPP_ON:-false}"
+      WHATSAPP_ON: "${WHATSAPP_ON:-true}"
+      # Base pública para los enlaces de entrada (evita Host header injection).
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-https://shirleyshow.site}"
+      # CORS: vacío = solo mismo origen (la SPA se sirve desde el backend).
+      CORS_ORIGIN: "${CORS_ORIGIN:-}"
     volumes:
       - datos:/app/data
-    # La máquina expone el 65529 hacia el puerto interno 3001 del contenedor.
+    # Solo se expone a loopback del host: únicamente el cloudflared nativo (que conecta
+    # a 127.0.0.1:65529) puede alcanzarlo; nadie llega al puerto directo desde la red.
     ports:
-      - "65529:3001"
+      - "127.0.0.1:65529:3001"
 
 volumes:
   datos:

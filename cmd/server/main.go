@@ -18,8 +18,13 @@ func main() {
 	cfg := config.Cargar()
 
 	if cfg.SecretoGenerado {
-		log.Println("ADVERTENCIA: JWT_SECRET no definido o muy corto. Se generó uno aleatorio temporal:")
-		log.Println("  -> las sesiones se cerrarán al reiniciar. Define un JWT_SECRET de 32+ caracteres en producción.")
+		log.Println("ADVERTENCIA: JWT_SECRET no definido, muy corto o con el valor por defecto del repo. Se generó uno aleatorio temporal:")
+		log.Println("  -> las sesiones se cerrarán al reiniciar. Define un JWT_SECRET de 32+ caracteres (no el placeholder) en producción.")
+	}
+
+	if cfg.PasswordPorDefecto {
+		log.Println("ADVERTENCIA: ADMIN_PASSWORD usa el valor por defecto del repositorio.")
+		log.Println("  -> define una contraseña propia en ADMIN_PASSWORD antes del primer arranque en producción.")
 	}
 
 	st, err := store.Abrir(cfg.RutaDB)
