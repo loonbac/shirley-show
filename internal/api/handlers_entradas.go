@@ -94,6 +94,7 @@ func (s *Server) obtenerEntrada(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	s.ponerQR(r, e)
 	escribirJSON(w, http.StatusOK, e)
 	return nil
 }
@@ -116,6 +117,7 @@ func (s *Server) entradaPublica(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	s.ponerQR(r, &e.Entrada)
 	escribirJSON(w, http.StatusOK, e)
 	return nil
 }

@@ -76,6 +76,11 @@ func (s *Server) Handler() http.Handler {
 	// (el navegador no manda Authorization en una imagen); la web vive tras el túnel.
 	mux.HandleFunc("GET /media/{archivo}", s.servirMedia)
 
+	// Redirección del QR: un escáner común que abra .../r/{token} cae al Facebook
+	// de la artista. Nuestro escáner (Modo puerta) en cambio resuelve el token al
+	// código de la entrada. Pública por diseño.
+	mux.HandleFunc("GET /r/{token}", s.redirigirQR)
+
 	// Públicas
 	mux.HandleFunc("POST /api/auth/login", s.h(s.login))
 	mux.HandleFunc("GET /api/publico/entrada/{codigo}", s.h(s.entradaPublica))
@@ -131,6 +136,36 @@ func cabecerasSeguridad(next http.Handler) http.Handler {
 // (TLS local) o terminada por un proxy/túnel (Cloudflare manda X-Forwarded-Proto).
 func esHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// baseURL devuelve el origen público (PUBLIC_BASE_URL si está, o el de la petición).
+func (s *Server) baseURL(r *http.Request) string {
+	if b := strings.TrimRight(s.cfg.PublicBaseURL, "/"); b != "" {
+		return b
+	}
+	esquema := "http"
+	if esHTTPS(r) {
+		esquema = "https"
+	}
+	return esquema + "://" + r.Host
+}
+
+// ponerQR arma la URL que codifica el QR de la entrada: baseURL/r/<token>. Un escáner
+// común la abre y cae a Facebook; el nuestro extrae el token. Si no hay token, deja vacío
+// (el frontend cae al código).
+func (s *Server) ponerQR(r *http.Request, e *store.Entrada) {
+	if e != nil && e.ScanToken != "" {
+		e.QR = s.baseURL(r) + "/r/" + e.ScanToken
+	}
+}
+
+// redirigirQR manda cualquier visita a /r/{token} al Facebook de la artista.
+func (s *Server) redirigirQR(w http.ResponseWriter, r *http.Request) {
+	destino := s.cfg.FacebookURL
+	if destino == "" {
+		destino = "/"
+	}
+	http.Redirect(w, r, destino, http.StatusFound)
 }
 
 // health responde 200 para indicar que el servidor está listo para recibir tráfico.

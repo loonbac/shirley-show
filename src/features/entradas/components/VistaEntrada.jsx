@@ -10,7 +10,7 @@ export function VistaEntrada({ entrada }) {
   const ev = entrada.evento
   return (
     <div className="ventrada">
-      <VisorQR valor={entrada.codigo_qr} />
+      <VisorQR valor={entrada.qr || entrada.codigo_qr} />
       <div className="ventrada__datos">
         <p className="ventrada__comprador">{entrada.nombre_comprador}</p>
         {ev && <p className="ventrada__evento">{ev.nombre}</p>}

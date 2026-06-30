@@ -41,6 +41,7 @@ type Config struct {
 	TrustedProxies     []*net.IPNet // redes cuyo CF-Connecting-IP / X-Forwarded-For se respeta
 	CORSOrigin         string       // origen permitido para CORS ("" = solo mismo origen)
 	PublicBaseURL      string       // base pública para enlaces (evita Host header injection)
+	FacebookURL        string       // destino al que se redirige un escáner común del QR
 	PasswordPorDefecto bool         // true si ADMIN_PASSWORD es el valor por defecto del repo
 }
 
@@ -65,6 +66,7 @@ func Cargar() Config {
 		TrustedProxies:     parsearCIDRs(env("TRUSTED_PROXY_CIDRS", cidrsPorDefecto)),
 		CORSOrigin:         env("CORS_ORIGIN", ""),
 		PublicBaseURL:      env("PUBLIC_BASE_URL", ""),
+		FacebookURL:        env("FACEBOOK_URL", "https://www.facebook.com/share/18zfyq6Q7n/?mibextid=wwXIfr"),
 		PasswordPorDefecto: adminPass == passwordPorDefecto,
 	}
 }

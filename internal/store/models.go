@@ -31,6 +31,8 @@ type Entrada struct {
 	MedioPago       string  `json:"medio_pago"`
 	EstadoPago      string  `json:"estado_pago"`
 	CodigoQR        string  `json:"codigo_qr"`
+	ScanToken       string  `json:"-"`            // token corto del QR (no se expone al cliente)
+	QR              string  `json:"qr,omitempty"` // URL que codifica el QR (la arma la capa API)
 	EstadoCheckin   string  `json:"estado_checkin"`
 	HoraIngreso     *string `json:"hora_ingreso"`
 	FechaRegistro   string  `json:"fecha_registro"`

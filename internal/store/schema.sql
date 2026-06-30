@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS entradas (
   medio_pago       TEXT NOT NULL,
   estado_pago      TEXT NOT NULL DEFAULT 'Pendiente',
   codigo_qr        TEXT NOT NULL UNIQUE,
+  scan_token       TEXT,  -- token corto que lleva el QR (se resuelve solo en el servidor)
   estado_checkin   TEXT NOT NULL DEFAULT 'Pendiente',
   hora_ingreso     TEXT,
   fecha_registro   TEXT NOT NULL
@@ -35,3 +36,4 @@ CREATE TABLE IF NOT EXISTS entradas (
 
 CREATE INDEX IF NOT EXISTS idx_entradas_evento ON entradas(evento_id);
 CREATE INDEX IF NOT EXISTS idx_entradas_codigo ON entradas(codigo_qr);
+-- El índice de scan_token se crea en migrar() (tras añadir la columna en bases existentes).

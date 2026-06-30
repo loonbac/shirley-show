@@ -43,6 +43,29 @@ func migrar(db *sql.DB) {
 	// ALTER ... ADD COLUMN falla si la columna ya existe; ese error se ignora a propósito.
 	_, _ = db.Exec("ALTER TABLE eventos ADD COLUMN finalizado INTEGER NOT NULL DEFAULT 0")
 	_, _ = db.Exec("ALTER TABLE eventos ADD COLUMN imagen TEXT")
+	_, _ = db.Exec("ALTER TABLE entradas ADD COLUMN scan_token TEXT")
+	backfillScanTokens(db)
+	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_entradas_scantoken ON entradas(scan_token)")
+}
+
+// backfillScanTokens asigna un token corto a las entradas que aún no lo tienen
+// (filas creadas antes de existir la columna).
+func backfillScanTokens(db *sql.DB) {
+	rows, err := db.Query("SELECT id FROM entradas WHERE scan_token IS NULL OR scan_token = ''")
+	if err != nil {
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		_, _ = db.Exec("UPDATE entradas SET scan_token = ? WHERE id = ?", generarToken(), id)
+	}
 }
 
 // DB expone la conexión cruda (la usa el seed y whatsmeow).

@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -14,6 +15,14 @@ func generarCodigoQR() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// generarToken crea el token corto que lleva el QR (10 bytes -> ~14 chars, no adivinable).
+// Es corto a propósito: así el QR queda pequeño y el logo grande del centro sigue escaneando.
+func generarToken() string {
+	b := make([]byte, 10)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // GenerarCodigoQR expone el generador de códigos (lo usa el seed).
@@ -32,13 +41,13 @@ type VentaData struct {
 }
 
 const colsEntrada = `id, evento_id, nombre_comprador, contacto, tipo_entrada, precio,
-	medio_pago, estado_pago, codigo_qr, estado_checkin, hora_ingreso, fecha_registro`
+	medio_pago, estado_pago, codigo_qr, scan_token, estado_checkin, hora_ingreso, fecha_registro`
 
 func escanearEntrada(row interface{ Scan(...any) error }) (*Entrada, error) {
 	var e Entrada
-	var contacto, horaIngreso sql.NullString
+	var contacto, horaIngreso, scanToken sql.NullString
 	err := row.Scan(&e.ID, &e.EventoID, &e.NombreComprador, &contacto, &e.TipoEntrada, &e.Precio,
-		&e.MedioPago, &e.EstadoPago, &e.CodigoQR, &e.EstadoCheckin, &horaIngreso, &e.FechaRegistro)
+		&e.MedioPago, &e.EstadoPago, &e.CodigoQR, &scanToken, &e.EstadoCheckin, &horaIngreso, &e.FechaRegistro)
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +57,7 @@ func escanearEntrada(row interface{ Scan(...any) error }) (*Entrada, error) {
 	if horaIngreso.Valid {
 		e.HoraIngreso = &horaIngreso.String
 	}
+	e.ScanToken = scanToken.String
 	return &e, nil
 }
 
@@ -101,12 +111,27 @@ func (s *Store) ObtenerEntradaPorCodigo(codigo string) (*EntradaPublica, error) 
 	return &EntradaPublica{Entrada: *e, Evento: ev}, nil
 }
 
+// CodigoPorToken devuelve el codigo_qr de la entrada cuyo token corto coincide.
+// Lo usa el check-in para resolver el QR nuevo (URL con token) al código real.
+func (s *Store) CodigoPorToken(token string) (string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", ErrNoEncontrado
+	}
+	var codigo string
+	err := s.db.QueryRow("SELECT codigo_qr FROM entradas WHERE scan_token = ?", token).Scan(&codigo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNoEncontrado
+	}
+	return codigo, err
+}
+
 // CrearEntradas genera `Cantidad` entradas individuales, cada una con su QR único.
 func (s *Store) CrearEntradas(d VentaData) ([]Entrada, error) {
 	ahora := time.Now().Format(time.RFC3339)
 	stmt, err := s.db.Prepare(`INSERT INTO entradas
-		(evento_id, nombre_comprador, contacto, tipo_entrada, precio, medio_pago, estado_pago, codigo_qr, estado_checkin, fecha_registro)
-		VALUES (?,?,?,?,?,?,?,?, 'Pendiente', ?)`)
+		(evento_id, nombre_comprador, contacto, tipo_entrada, precio, medio_pago, estado_pago, codigo_qr, scan_token, estado_checkin, fecha_registro)
+		VALUES (?,?,?,?,?,?,?,?,?, 'Pendiente', ?)`)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +140,7 @@ func (s *Store) CrearEntradas(d VentaData) ([]Entrada, error) {
 	creadas := make([]Entrada, 0, d.Cantidad)
 	for i := 0; i < d.Cantidad; i++ {
 		res, err := stmt.Exec(d.EventoID, d.NombreComprador, contactoSQL(d.Contacto), d.TipoEntrada,
-			d.Precio, d.MedioPago, d.EstadoPago, generarCodigoQR(), ahora)
+			d.Precio, d.MedioPago, d.EstadoPago, generarCodigoQR(), generarToken(), ahora)
 		if err != nil {
 			return nil, err
 		}
