@@ -6,11 +6,19 @@
   border-radius: var(--radio);
   background: var(--color-superficie);
   border: 1px solid var(--color-borde);
+  min-width: 0; /* permite que la tarjeta se encoja en el grid sin desbordar */
+  container-type: inline-size; /* base para escalar el importe a su ancho (cqi) */
 }
 .metrica__valor {
-  font-size: var(--texto-2xl);
+  font-size: var(--texto-xl);
   font-weight: var(--peso-fuerte);
   line-height: 1.1;
+}
+/* Importes ("S/ 1,250.00") escalan con el ancho de su propia tarjeta y nunca
+   rompen el número: caben en una línea sea cual sea el tamaño del contenedor. */
+.metrica--dinero .metrica__valor {
+  font-size: clamp(14px, 13cqi, 26px);
+  white-space: nowrap;
 }
 .metrica__etiqueta {
   font-size: var(--texto-sm);

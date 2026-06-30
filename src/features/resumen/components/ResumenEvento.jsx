@@ -19,8 +19,8 @@ export function ResumenEvento({ eventoId, version }) {
         <TarjetaMetrica etiqueta="Vendidas" valor={r.vendidas} tono="primario" />
         <TarjetaMetrica etiqueta="Disponibles" valor={r.disponibles ?? '∞'} />
         <TarjetaMetrica etiqueta="Ingresaron" valor={r.usadas} />
-        <TarjetaMetrica etiqueta="Cobrado" valor={soles(r.cobrado)} tono="exito" />
-        <TarjetaMetrica etiqueta="Pendiente" valor={soles(r.pendiente)} tono="alerta" />
+        <TarjetaMetrica etiqueta="Cobrado" valor={soles(r.cobrado)} tono="exito" dinero />
+        <TarjetaMetrica etiqueta="Pendiente" valor={soles(r.pendiente)} tono="alerta" dinero />
       </div>
       <DesglosePagos porMedio={r.recaudado_por_medio} />
     </section>
