@@ -108,6 +108,11 @@ func (s *Server) Handler() http.Handler {
 	prot("PUT", "/api/interesados/{id}", s.actualizarInteresado)
 	prot("POST", "/api/interesados/{id}/confirmar", s.confirmarInteresado)
 	prot("DELETE", "/api/interesados/{id}", s.eliminarInteresado)
+	// Gastos del evento
+	prot("GET", "/api/eventos/{id}/gastos", s.listarGastos)
+	prot("POST", "/api/eventos/{id}/gastos", s.crearGasto)
+	prot("PUT", "/api/gastos/{id}", s.actualizarGasto)
+	prot("DELETE", "/api/gastos/{id}", s.eliminarGasto)
 	prot("GET", "/api/entradas/{id}", s.obtenerEntrada)
 	prot("POST", "/api/entradas/{id}/confirmar-pago", s.confirmarPago)
 	prot("POST", "/api/entradas/{id}/enviar-whatsapp", s.enviarWhatsApp)

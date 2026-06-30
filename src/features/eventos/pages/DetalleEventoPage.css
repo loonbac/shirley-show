@@ -1,24 +1,29 @@
-/* Pestañas de las 2 fases: dos botones grandes, fáciles de tocar. */
+/* Pestañas del evento: botones grandes, fáciles de tocar. Icono/número arriba y
+   la etiqueta debajo para que entren bien las tres incluso en celular. */
 .pestanas {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
   background: var(--color-primario-suave);
   padding: 6px;
   border-radius: var(--radio);
 }
 .pestanas__btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 4px;
   min-height: var(--toque);
+  padding: 8px 4px;
   border: none;
   border-radius: var(--radio-sm);
   background: transparent;
   color: var(--color-primario-oscuro);
-  font-size: var(--texto-base);
+  font-size: var(--texto-sm);
   font-weight: var(--peso-fuerte);
+  line-height: 1.1;
+  text-align: center;
   cursor: pointer;
 }
 .pestanas__btn--activa {

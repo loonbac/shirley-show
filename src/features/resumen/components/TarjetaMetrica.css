@@ -30,3 +30,5 @@
 .metrica--alerta .metrica__valor { color: var(--color-alerta); }
 .metrica--primario { background: var(--color-primario-suave); }
 .metrica--primario .metrica__valor { color: var(--color-primario-oscuro); }
+.metrica--error { background: var(--color-error-suave); }
+.metrica--error .metrica__valor { color: var(--color-error); }

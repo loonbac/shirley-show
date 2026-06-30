@@ -6,8 +6,9 @@ import { CabeceraEvento } from '../components/CabeceraEvento.jsx'
 import { ResumenEvento } from '../../resumen/index.js'
 import { PanelEntradas, FormularioVenta, entradasApi } from '../../entradas/index.js'
 import { PanelInteresados, interesadosApi } from '../../interesados/index.js'
+import { PanelGastos } from '../../gastos/index.js'
 import { Boton } from '../../../components/Boton.jsx'
-import { IconoMas } from '../../../components/iconos/Iconos.jsx'
+import { IconoMas, IconoDinero } from '../../../components/iconos/Iconos.jsx'
 import { Modal } from '../../../components/Modal.jsx'
 import { Cargando, MensajeError } from '../../../components/Estado.jsx'
 import './DetalleEventoPage.css'
@@ -101,11 +102,18 @@ export default function DetalleEventoPage() {
         >
           <span className="pestanas__num">2</span> Confirmados
         </button>
+        <button
+          className={`pestanas__btn${pestana === 'gastos' ? ' pestanas__btn--activa' : ''}`}
+          onClick={() => setPestana('gastos')}
+        >
+          <IconoDinero size={22} /> Gastos
+        </button>
       </div>
 
-      {pestana === 'interesados' ? (
+      {pestana === 'interesados' && (
         <PanelInteresados eventoId={id} version={version} onConfirmar={confirmarAsistencia} onCambio={refrescar} />
-      ) : (
+      )}
+      {pestana === 'confirmados' && (
         <div className="detalle-cols">
           <aside className="detalle-cols__lado pila">
             <Boton ancho onClick={() => { setPrefill(null); setVentaAbierta(true) }}>
@@ -118,6 +126,7 @@ export default function DetalleEventoPage() {
           </div>
         </div>
       )}
+      {pestana === 'gastos' && <PanelGastos eventoId={id} version={version} onCambio={refrescar} />}
 
       <Modal abierto={ventaAbierta} titulo={prefill ? `Confirmar a ${prefill.nombre}` : 'Registrar venta'} onCerrar={cerrarVenta}>
         <FormularioVenta evento={evento} guardando={guardando} onRegistrar={registrarVenta} prefill={prefill} />

@@ -53,3 +53,16 @@ CREATE TABLE IF NOT EXISTS interesados (
 );
 
 CREATE INDEX IF NOT EXISTS idx_interesados_evento ON interesados(evento_id);
+
+-- Gastos del evento: lo que costó organizarlo (bolo de artistas, pasajes, comida,
+-- alquiler de local, etc.). Sirve para saber la ganancia real (cobrado - gastos).
+CREATE TABLE IF NOT EXISTS gastos (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  evento_id       INTEGER NOT NULL REFERENCES eventos(id) ON DELETE CASCADE,
+  categoria       TEXT NOT NULL,   -- Bolo de artistas | Pasajes | Comida | Alquiler de local | Otro
+  descripcion     TEXT,            -- detalle opcional
+  monto           REAL NOT NULL,
+  fecha_creacion  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_gastos_evento ON gastos(evento_id);

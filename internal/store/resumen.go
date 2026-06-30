@@ -47,5 +47,11 @@ func (s *Store) Resumen(eventoID int64) (*Resumen, error) {
 		}
 		r.Disponibles = &disp
 	}
+
+	gastos, err := s.TotalGastos(eventoID)
+	if err != nil {
+		return nil, err
+	}
+	r.Gastos = gastos
 	return r, nil
 }

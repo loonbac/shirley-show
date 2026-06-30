@@ -28,6 +28,13 @@ export function ResumenEvento({ eventoId, version }) {
         <TarjetaMetrica etiqueta="Ingresaron" valor={r.usadas} />
         <TarjetaMetrica etiqueta="Cobrado" valor={soles(r.cobrado)} tono="exito" dinero />
         <TarjetaMetrica etiqueta="Pendiente" valor={soles(r.pendiente)} tono="alerta" dinero />
+        <TarjetaMetrica etiqueta="Gastos" valor={soles(r.gastos)} tono="alerta" dinero />
+        <TarjetaMetrica
+          etiqueta="Ganancia"
+          valor={soles(r.cobrado - r.gastos)}
+          tono={r.cobrado - r.gastos >= 0 ? 'exito' : 'error'}
+          dinero
+        />
       </div>
       <DesglosePagos porMedio={r.recaudado_por_medio} />
     </section>

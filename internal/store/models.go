@@ -51,6 +51,16 @@ type Interesado struct {
 	FechaCreacion string  `json:"fecha_creacion"`
 }
 
+// Gasto es un costo del evento (bolo de artistas, pasajes, comida, alquiler, etc.).
+type Gasto struct {
+	ID            int64   `json:"id"`
+	EventoID      int64   `json:"evento_id"`
+	Categoria     string  `json:"categoria"`
+	Descripcion   *string `json:"descripcion"`
+	Monto         float64 `json:"monto"`
+	FechaCreacion string  `json:"fecha_creacion"`
+}
+
 // EventoMini son los datos del evento que acompañan a la vista pública de una entrada.
 type EventoMini struct {
 	Nombre    string `json:"nombre"`
@@ -73,6 +83,7 @@ type Resumen struct {
 	Usadas            int                `json:"usadas"`
 	Cobrado           float64            `json:"cobrado"`
 	Pendiente         float64            `json:"pendiente"`
+	Gastos            float64            `json:"gastos"` // total gastado en el evento
 	RecaudadoPorMedio map[string]float64 `json:"recaudado_por_medio"`
 }
 
