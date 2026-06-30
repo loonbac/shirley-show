@@ -23,7 +23,6 @@ export function FormularioEvento({ inicial, guardando, onGuardar }) {
   const [fecha, setFecha] = useState(ini.fecha)
   const [hora, setHora] = useState(ini.hora)
   const [lugar, setLugar] = useState(inicial?.lugar || '')
-  const [aforo, setAforo] = useState(inicial?.aforo ?? '')
   const [tipos, setTipos] = useState(inicial?.tipos_de_entrada || [{ nombre: 'General', precio: '' }])
   const [imagenFile, setImagenFile] = useState(null)
   const [preview, setPreview] = useState(urlImagen(inicial?.imagen))
@@ -55,7 +54,6 @@ export function FormularioEvento({ inicial, guardando, onGuardar }) {
         nombre,
         fecha_hora: fechaHora.toISOString(),
         lugar,
-        aforo: aforo === '' ? null : Number(aforo),
         tipos_de_entrada: tipos.map((t) => ({ nombre: t.nombre.trim(), precio: Number(t.precio) })),
       },
       imagenFile,
@@ -98,9 +96,6 @@ export function FormularioEvento({ inicial, guardando, onGuardar }) {
       </div>
       <Campo etiqueta="Lugar" htmlFor="lugar">
         <Input id="lugar" value={lugar} onChange={(e) => setLugar(e.target.value)} />
-      </Campo>
-      <Campo etiqueta="Aforo (opcional)" htmlFor="aforo" ayuda="Capacidad máxima. Déjalo vacío si no hay límite.">
-        <Input id="aforo" type="number" min="0" value={aforo} onChange={(e) => setAforo(e.target.value)} />
       </Campo>
       <EditorTiposEntrada tipos={tipos} onCambiar={setTipos} />
       {error && <MensajeError>{error}</MensajeError>}

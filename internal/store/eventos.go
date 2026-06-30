@@ -57,7 +57,11 @@ func escanearEvento(row interface{ Scan(...any) error }) (*Evento, error) {
 	return &e, nil
 }
 
-const selEvento = `SELECT e.id, e.nombre, e.fecha_hora, e.lugar, e.aforo, e.tipos_de_entrada, e.finalizado, e.imagen,
+// El "aforo" (meta) ya no se escribe a mano: es la asistencia estimada, o sea la suma
+// de "personas" de los interesados (fase 1). NULL si aún no hay nadie anotado → sin meta.
+const selEvento = `SELECT e.id, e.nombre, e.fecha_hora, e.lugar,
+	(SELECT SUM(personas) FROM interesados WHERE evento_id = e.id) AS aforo,
+	e.tipos_de_entrada, e.finalizado, e.imagen,
 	(SELECT COUNT(*) FROM entradas WHERE evento_id = e.id) AS vendidas FROM eventos e`
 
 func (s *Store) ListarEventos() ([]Evento, error) {
