@@ -11,16 +11,12 @@
 .login__marca {
   text-align: center;
 }
-.login__notas {
-  display: inline-flex;
-  gap: 8px;
-  color: #c026d3;
-}
-.login__titulo {
-  font-family: 'Brush Script MT', 'Segoe Script', cursive;
-  font-size: 52px;
-  color: var(--color-primario-oscuro);
-  margin: 4px 0;
+.login__logo {
+  display: block;
+  width: 280px;
+  max-width: 80%;
+  height: auto;
+  margin: 0 auto 6px;
 }
 .login__sub {
   font-size: var(--texto-lg);

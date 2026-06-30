@@ -9,9 +9,10 @@
     grid-template-columns: 360px 1fr;
     align-items: start;
   }
-  /* El panel lateral acompaña al hacer scroll de la lista de entradas. */
+  /* El panel lateral acompaña al hacer scroll de la lista de entradas.
+     top mayor que la altura del header (logo grande) para que no lo tape. */
   .detalle-cols__lado {
     position: sticky;
-    top: 84px;
+    top: 116px;
   }
 }

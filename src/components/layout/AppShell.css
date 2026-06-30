@@ -17,13 +17,10 @@
 .shell__marca {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-family: 'Brush Script MT', 'Segoe Script', cursive;
-  font-size: 30px;
-  font-weight: 700;
-  color: var(--color-primario-oscuro);
   text-decoration: none;
 }
-.shell__nota {
-  color: #c026d3;
+.shell__logo {
+  display: block;
+  height: 84px;
+  width: auto;
 }

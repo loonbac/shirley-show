@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom'
 import { useSesion } from '../../features/auth/index.js'
 import { Boton } from '../Boton.jsx'
-import { IconoNota, IconoAtras } from '../iconos/Iconos.jsx'
+import { IconoAtras } from '../iconos/Iconos.jsx'
 import './AppShell.css'
 
 // Armazón del panel: cabecera con marca + acción contextual y contenido de la ruta.
@@ -16,8 +16,8 @@ export function AppShell() {
     <div className="shell">
       <header className="shell__cabecera">
         <div className="shell__inner">
-          <Link to="/eventos" className="shell__marca">
-            <IconoNota size={24} className="shell__nota" /> Shirley Show
+          <Link to="/eventos" className="shell__marca" aria-label="Shirley Show — inicio">
+            <img className="shell__logo" src="/logo.png" alt="Shirley Show" />
           </Link>
           {enRaiz ? (
             <Boton variante="texto" onClick={cerrarSesion}>
