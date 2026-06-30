@@ -1,5 +1,6 @@
 import { IconoNota, OndaSonido } from './Adornos.jsx'
 import { ImagenMedio } from './ImagenMedio.jsx'
+import { ProximoEvento } from './ProximoEvento.jsx'
 import { FACEBOOK_URL, ETIQUETAS } from '../config.js'
 
 // Sección principal: foto con halo, logo/nombre, etiquetas y llamadas a la acción.
@@ -45,6 +46,8 @@ export function HeroPresentacion() {
             <a href="#galeria" className="pres__btn pres__btn--ghost">Ver galería</a>
           </div>
         </div>
+
+        <ProximoEvento />
       </div>
     </section>
   )

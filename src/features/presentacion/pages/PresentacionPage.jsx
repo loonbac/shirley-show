@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { HeroPresentacion } from '../components/HeroPresentacion.jsx'
 import { CintaMarquee } from '../components/CintaMarquee.jsx'
 import { SobreElla } from '../components/SobreElla.jsx'
-import { ProximoEvento } from '../components/ProximoEvento.jsx'
 import { TarjetasEventos } from '../components/TarjetasEventos.jsx'
 import { GaleriaPresentacion } from '../components/GaleriaPresentacion.jsx'
 import { LightboxGaleria } from '../components/LightboxGaleria.jsx'
@@ -31,7 +30,6 @@ export default function PresentacionPage() {
           <HeroPresentacion />
           <CintaMarquee />
         </div>
-        <ProximoEvento />
         <SobreElla />
         <TarjetasEventos />
         <GaleriaPresentacion items={items} onAbrir={abrir} />
