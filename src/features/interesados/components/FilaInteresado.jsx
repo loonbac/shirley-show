@@ -1,12 +1,15 @@
 import { Tarjeta } from '../../../components/Tarjeta.jsx'
 import { Boton } from '../../../components/Boton.jsx'
 import { Badge } from '../../../components/Badge.jsx'
-import { IconoCheck, IconoLapiz, IconoBasura } from '../../../components/iconos/Iconos.jsx'
+import { IconoCheck, IconoLapiz, IconoBasura, IconoWhatsApp, IconoMessenger } from '../../../components/iconos/Iconos.jsx'
+
+const ICONO_CANAL = { WhatsApp: IconoWhatsApp, Messenger: IconoMessenger }
 
 // Una persona en la lista de interesados (fase 1), con sus acciones.
 // Reutiliza las clases de tarjeta de las entradas (fila__*, entradas-grid).
 export function FilaInteresado({ interesado, onConfirmar, onEditar, onEliminar, ocupado }) {
   const confirmado = interesado.estado === 'Confirmado'
+  const IconoDelCanal = ICONO_CANAL[interesado.canal]
   return (
     <Tarjeta>
       <div className="fila__top">
@@ -17,7 +20,11 @@ export function FilaInteresado({ interesado, onConfirmar, onEditar, onEliminar, 
       </div>
       <div className="fila__badges">
         <Badge tono={confirmado ? 'exito' : 'primario'}>{confirmado ? 'Ya confirmó' : 'Interesado'}</Badge>
-        {interesado.contacto && <span className="fila__medio">{interesado.contacto}</span>}
+        {interesado.canal && (
+          <span className="fila__medio fila__canal">
+            {IconoDelCanal && <IconoDelCanal size={16} />} {interesado.canal}
+          </span>
+        )}
       </div>
       <div className="fila__acciones">
         {!confirmado && (

@@ -12,19 +12,23 @@ type InteresadoData struct {
 	EventoID int64
 	Nombre   string
 	Contacto *string
+	Canal    *string
 	Personas int
 }
 
-const colsInteresado = `id, evento_id, nombre, contacto, personas, estado, fecha_creacion`
+const colsInteresado = `id, evento_id, nombre, contacto, canal, personas, estado, fecha_creacion`
 
 func escanearInteresado(row interface{ Scan(...any) error }) (*Interesado, error) {
 	var it Interesado
-	var contacto sql.NullString
-	if err := row.Scan(&it.ID, &it.EventoID, &it.Nombre, &contacto, &it.Personas, &it.Estado, &it.FechaCreacion); err != nil {
+	var contacto, canal sql.NullString
+	if err := row.Scan(&it.ID, &it.EventoID, &it.Nombre, &contacto, &canal, &it.Personas, &it.Estado, &it.FechaCreacion); err != nil {
 		return nil, err
 	}
 	if contacto.Valid {
 		it.Contacto = &contacto.String
+	}
+	if canal.Valid {
+		it.Canal = &canal.String
 	}
 	return &it, nil
 }
@@ -60,8 +64,8 @@ func (s *Store) ObtenerInteresado(id int64) (*Interesado, error) {
 func (s *Store) CrearInteresado(d InteresadoData) (*Interesado, error) {
 	ahora := time.Now().Format(time.RFC3339)
 	res, err := s.db.Exec(
-		"INSERT INTO interesados (evento_id, nombre, contacto, personas, estado, fecha_creacion) VALUES (?,?,?,?, 'Interesado', ?)",
-		d.EventoID, strings.TrimSpace(d.Nombre), contactoSQL(d.Contacto), d.Personas, ahora)
+		"INSERT INTO interesados (evento_id, nombre, contacto, canal, personas, estado, fecha_creacion) VALUES (?,?,?,?,?, 'Interesado', ?)",
+		d.EventoID, strings.TrimSpace(d.Nombre), contactoSQL(d.Contacto), contactoSQL(d.Canal), d.Personas, ahora)
 	if err != nil {
 		return nil, err
 	}
@@ -73,8 +77,8 @@ func (s *Store) ActualizarInteresado(id int64, d InteresadoData) (*Interesado, e
 	if _, err := s.ObtenerInteresado(id); err != nil {
 		return nil, err
 	}
-	_, err := s.db.Exec("UPDATE interesados SET nombre = ?, contacto = ?, personas = ? WHERE id = ?",
-		strings.TrimSpace(d.Nombre), contactoSQL(d.Contacto), d.Personas, id)
+	_, err := s.db.Exec("UPDATE interesados SET nombre = ?, contacto = ?, canal = ?, personas = ? WHERE id = ?",
+		strings.TrimSpace(d.Nombre), contactoSQL(d.Contacto), contactoSQL(d.Canal), d.Personas, id)
 	if err != nil {
 		return nil, err
 	}

@@ -32,3 +32,26 @@
   font-size: var(--texto-sm);
   color: var(--color-texto-suave);
 }
+
+/* Selector de canal de contacto: dos botones grandes y cuadrados que llenan
+   todo el ancho del modal (icono arriba, nombre abajo). */
+.canal-opciones {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+.canal-opciones .boton {
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radio);
+  font-size: var(--texto-lg);
+}
+
+/* Canal mostrado en la tarjeta del interesado, con su icono. */
+.fila__canal {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

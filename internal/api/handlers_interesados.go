@@ -10,6 +10,7 @@ import (
 type interesadoInput struct {
 	Nombre   string  `json:"nombre"`
 	Contacto *string `json:"contacto"`
+	Canal    *string `json:"canal"`
 	Personas int     `json:"personas"`
 }
 
@@ -19,6 +20,10 @@ func (in interesadoInput) aData(eventoID int64) (store.InteresadoData, error) {
 	if nombre == "" {
 		return store.InteresadoData{}, errDatos("Escribe el nombre de la persona")
 	}
+	canal, err := canalValido(in.Canal)
+	if err != nil {
+		return store.InteresadoData{}, err
+	}
 	personas := in.Personas
 	if personas < 1 {
 		personas = 1 // por defecto viene una sola persona
@@ -26,7 +31,23 @@ func (in interesadoInput) aData(eventoID int64) (store.InteresadoData, error) {
 	if personas > 100 {
 		return store.InteresadoData{}, errDatos("El número de personas es demasiado alto")
 	}
-	return store.InteresadoData{EventoID: eventoID, Nombre: nombre, Contacto: in.Contacto, Personas: personas}, nil
+	return store.InteresadoData{EventoID: eventoID, Nombre: nombre, Contacto: in.Contacto, Canal: canal, Personas: personas}, nil
+}
+
+// canalValido acepta solo los canales de contacto conocidos (o ninguno).
+func canalValido(c *string) (*string, error) {
+	if c == nil {
+		return nil, nil
+	}
+	v := strings.TrimSpace(*c)
+	switch v {
+	case "":
+		return nil, nil
+	case "WhatsApp", "Messenger":
+		return &v, nil
+	default:
+		return nil, errDatos("Canal de contacto inválido")
+	}
 }
 
 func (s *Server) listarInteresados(w http.ResponseWriter, r *http.Request) error {

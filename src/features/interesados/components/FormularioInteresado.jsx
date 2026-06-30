@@ -3,13 +3,17 @@ import { Campo } from '../../../components/Campo.jsx'
 import { Input } from '../../../components/Input.jsx'
 import { Boton } from '../../../components/Boton.jsx'
 import { MensajeError } from '../../../components/Estado.jsx'
+import { IconoWhatsApp, IconoMessenger } from '../../../components/iconos/Iconos.jsx'
 
 // Formulario para anotar (o editar) una persona interesada en la fase 1.
 export function FormularioInteresado({ inicial, guardando, onGuardar, onCancelar }) {
   const [nombre, setNombre] = useState(inicial?.nombre || '')
-  const [contacto, setContacto] = useState(inicial?.contacto || '')
+  const [canal, setCanal] = useState(inicial?.canal || '') // '' | 'WhatsApp' | 'Messenger'
   const [personas, setPersonas] = useState(inicial?.personas || 1)
   const [error, setError] = useState('')
+
+  // Toca un canal para elegirlo; toca el mismo de nuevo para dejarlo sin marcar.
+  const alternarCanal = (valor) => setCanal((actual) => (actual === valor ? '' : valor))
 
   function enviar(e) {
     e.preventDefault()
@@ -17,7 +21,7 @@ export function FormularioInteresado({ inicial, guardando, onGuardar, onCancelar
     if (!nombre.trim()) return setError('Escribe el nombre de la persona')
     onGuardar({
       nombre: nombre.trim(),
-      contacto: contacto.trim() || null,
+      canal: canal || null,
       personas: Number(personas) || 1,
     }).catch((err) => setError(err.message))
   }
@@ -27,8 +31,23 @@ export function FormularioInteresado({ inicial, guardando, onGuardar, onCancelar
       <Campo etiqueta="Nombre de la persona" htmlFor="int-nombre">
         <Input id="int-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus />
       </Campo>
-      <Campo etiqueta="WhatsApp / contacto (opcional)" htmlFor="int-contacto">
-        <Input id="int-contacto" value={contacto} onChange={(e) => setContacto(e.target.value)} inputMode="tel" />
+      <Campo etiqueta="¿Por dónde lo contactaste? (opcional)">
+        <div className="canal-opciones">
+          <Boton
+            type="button"
+            variante={canal === 'WhatsApp' ? 'primario' : 'secundario'}
+            onClick={() => alternarCanal('WhatsApp')}
+          >
+            <IconoWhatsApp size={34} /> WhatsApp
+          </Boton>
+          <Boton
+            type="button"
+            variante={canal === 'Messenger' ? 'primario' : 'secundario'}
+            onClick={() => alternarCanal('Messenger')}
+          >
+            <IconoMessenger size={34} /> Messenger
+          </Boton>
+        </div>
       </Campo>
       <Campo
         etiqueta="¿Cuántas personas vendrían?"

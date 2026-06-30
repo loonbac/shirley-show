@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS interesados (
   evento_id       INTEGER NOT NULL REFERENCES eventos(id) ON DELETE CASCADE,
   nombre          TEXT NOT NULL,
   contacto        TEXT,
+  canal           TEXT,                              -- por dónde se contactó: 'WhatsApp' | 'Messenger'
   personas        INTEGER NOT NULL DEFAULT 1,        -- cuántos vendrían (titular + familia)
   estado          TEXT NOT NULL DEFAULT 'Interesado', -- 'Interesado' | 'Confirmado'
   fecha_creacion  TEXT NOT NULL
