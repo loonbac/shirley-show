@@ -7,8 +7,9 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY index.html vite.config.js ./
+COPY public ./public
 COPY src ./src
-RUN pnpm build   # genera /app/dist
+RUN pnpm build   # genera /app/dist (incluye los assets de public/, p.ej. logo.png)
 
 # ---------- 2) Compila el backend Go (binario estático, sin CGO) ----------
 FROM golang:1.25-alpine AS api
