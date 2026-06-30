@@ -1,11 +1,17 @@
-import { Outlet, Link, useNavigate } from 'react-router-dom'
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom'
+import { useSesion } from '../../features/auth/index.js'
 import { Boton } from '../Boton.jsx'
 import { IconoNota, IconoAtras } from '../iconos/Iconos.jsx'
 import './AppShell.css'
 
-// Armazón del panel: cabecera con marca y botón "Atrás" + contenido de la ruta.
+// Armazón del panel: cabecera con marca + acción contextual y contenido de la ruta.
+// En la página principal de eventos se muestra "Salir"; en las internas, "Atrás".
 export function AppShell() {
   const navegar = useNavigate()
+  const { pathname } = useLocation()
+  const { cerrarSesion } = useSesion()
+  const enRaiz = pathname === '/' || pathname === '/eventos'
+
   return (
     <div className="shell">
       <header className="shell__cabecera">
@@ -13,9 +19,15 @@ export function AppShell() {
           <Link to="/eventos" className="shell__marca">
             <IconoNota size={24} className="shell__nota" /> Shirley Show
           </Link>
-          <Boton variante="texto" onClick={() => navegar(-1)}>
-            <IconoAtras size={20} /> Atrás
-          </Boton>
+          {enRaiz ? (
+            <Boton variante="texto" onClick={cerrarSesion}>
+              Salir
+            </Boton>
+          ) : (
+            <Boton variante="texto" onClick={() => navegar(-1)}>
+              <IconoAtras size={20} /> Atrás
+            </Boton>
+          )}
         </div>
       </header>
       <main className="contenedor">
