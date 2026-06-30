@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	// Públicas
 	mux.HandleFunc("POST /api/auth/login", s.h(s.login))
 	mux.HandleFunc("GET /api/publico/entrada/{codigo}", s.h(s.entradaPublica))
+	mux.HandleFunc("GET /api/publico/proximo-evento", s.h(s.proximoEvento))
 
 	// Protegidas
 	prot := func(method, pat string, fn handlerErr) {

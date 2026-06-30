@@ -120,6 +120,16 @@
 }
 .pres__about-texto { max-width: 540px; }
 
+/* ---------- Próximo evento ---------- */
+.pres__proximo { display: flex; flex-direction: column; gap: 28px; align-items: center; }
+.pres__proximo-foto {
+  width: 100%; max-width: 360px; aspect-ratio: 3 / 4; border-radius: 24px; overflow: hidden;
+  box-shadow: 0 18px 40px rgba(154,113,16,.18); flex-shrink: 0;
+}
+.pres__proximo-foto img, .pres__proximo-foto .pres__ph { width: 100%; height: 100%; object-fit: cover; }
+.pres__proximo-texto { text-align: center; max-width: 480px; }
+.pres__proximo-fecha { font-weight: 600; color: var(--g-dark); margin-bottom: 2px; }
+
 /* ---------- Tarjetas de eventos ---------- */
 .pres__cards { display: flex; flex-direction: column; gap: 20px; margin-top: 44px; }
 .pres__card {
@@ -194,6 +204,8 @@
   .pres__buttons, .pres__chips, .pres__hero-texto .pres__onda { justify-content: flex-start; }
   .pres__about { flex-direction: row; text-align: left; }
   .pres__about-texto { text-align: left; }
+  .pres__proximo { flex-direction: row; text-align: left; gap: 48px; }
+  .pres__proximo-texto { text-align: left; }
   .pres__cards { flex-direction: row; }
   .pres__sec { padding: 64px 56px; }
   .pres__galeria { column-count: 3; }

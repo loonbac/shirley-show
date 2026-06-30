@@ -140,6 +140,26 @@ func (s *Server) eliminarEvento(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// proximoEvento expone, sin autenticación, el siguiente evento programado para la
+// landing pública. Solo lo imprescindible para promocionarlo (sin aforo ni ventas).
+func (s *Server) proximoEvento(w http.ResponseWriter, r *http.Request) error {
+	ev, err := s.st.ProximoEvento()
+	if err != nil {
+		return err
+	}
+	if ev == nil {
+		escribirJSON(w, http.StatusOK, nil)
+		return nil
+	}
+	escribirJSON(w, http.StatusOK, store.EventoPublico{
+		Nombre:    ev.Nombre,
+		FechaHora: ev.FechaHora,
+		Lugar:     ev.Lugar,
+		Imagen:    ev.Imagen,
+	})
+	return nil
+}
+
 func (s *Server) resumen(w http.ResponseWriter, r *http.Request) error {
 	id, err := idDeRuta(r, "id")
 	if err != nil {

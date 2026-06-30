@@ -81,6 +81,26 @@ func (s *Store) ListarEventos() ([]Evento, error) {
 	return lista, rows.Err()
 }
 
+// ProximoEvento devuelve el evento no finalizado con la fecha más cercana que aún no
+// pasó (nil si no hay ninguno). Lo usa la landing pública.
+func (s *Store) ProximoEvento() (*Evento, error) {
+	rows, err := s.db.Query(selEvento + " WHERE e.finalizado = 0 ORDER BY e.fecha_hora ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		e, err := escanearEvento(rows)
+		if err != nil {
+			return nil, err
+		}
+		if e.Estado == "Próximo" {
+			return e, nil
+		}
+	}
+	return nil, rows.Err()
+}
+
 func (s *Store) ObtenerEvento(id int64) (*Evento, error) {
 	e, err := escanearEvento(s.db.QueryRow(selEvento+" WHERE e.id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {

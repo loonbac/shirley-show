@@ -68,6 +68,15 @@ type EventoMini struct {
 	Lugar     string `json:"lugar"`
 }
 
+// EventoPublico es lo que se muestra en la landing pública: solo lo necesario para
+// promocionar el próximo evento, sin aforo, ventas ni tipos de entrada.
+type EventoPublico struct {
+	Nombre    string  `json:"nombre"`
+	FechaHora string  `json:"fecha_hora"`
+	Lugar     string  `json:"lugar"`
+	Imagen    *string `json:"imagen"`
+}
+
 // EntradaPublica es una entrada con los datos de su evento (para compartir por WhatsApp).
 type EntradaPublica struct {
 	Entrada
