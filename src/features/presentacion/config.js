@@ -2,8 +2,7 @@
 // Fase C: esto pasará a ser editable desde el panel. Por ahora, fuente única aquí.
 
 // Único canal de contacto: el Facebook de la artista (ella aprueba a sus seguidores).
-// TODO: reemplazar por el enlace real del perfil/página de Facebook.
-export const FACEBOOK_URL = 'https://www.facebook.com/'
+export const FACEBOOK_URL = 'https://www.facebook.com/share/1Cq5QQcQan'
 
 // Etiquetas que aparecen como "chips" bajo el nombre y en la cinta.
 export const ETIQUETAS = ['Matrimonios', 'Mariachis', 'Aniversarios', 'Esparcimientos']
