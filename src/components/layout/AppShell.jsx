@@ -1,12 +1,11 @@
-import { Outlet, Link } from 'react-router-dom'
-import { useSesion } from '../../features/auth/index.js'
+import { Outlet, Link, useNavigate } from 'react-router-dom'
 import { Boton } from '../Boton.jsx'
-import { IconoNota } from '../iconos/Iconos.jsx'
+import { IconoNota, IconoAtras } from '../iconos/Iconos.jsx'
 import './AppShell.css'
 
-// Armazón del panel: cabecera con marca y cierre de sesión + contenido de la ruta.
+// Armazón del panel: cabecera con marca y botón "Atrás" + contenido de la ruta.
 export function AppShell() {
-  const { cerrarSesion } = useSesion()
+  const navegar = useNavigate()
   return (
     <div className="shell">
       <header className="shell__cabecera">
@@ -14,8 +13,8 @@ export function AppShell() {
           <Link to="/eventos" className="shell__marca">
             <IconoNota size={24} className="shell__nota" /> Shirley Show
           </Link>
-          <Boton variante="texto" onClick={cerrarSesion}>
-            Salir
+          <Boton variante="texto" onClick={() => navegar(-1)}>
+            <IconoAtras size={20} /> Atrás
           </Boton>
         </div>
       </header>
