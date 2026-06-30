@@ -29,14 +29,22 @@
   font-weight: var(--peso-fuerte);
 }
 
-/* Tarjetas de evento: una columna en celular, varias columnas en pantallas anchas. */
+/* Masonry tipo Pinterest: columnas CSS para que los afiches verticales encajen
+   sin huecos según su altura. Una columna en celular, más en pantallas anchas. */
 .eventos-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--gap);
+  column-count: 1;
+  column-gap: var(--gap);
 }
 @media (min-width: 640px) {
-  .eventos-grid {
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  }
+  .eventos-grid { column-count: 2; }
+}
+@media (min-width: 1000px) {
+  .eventos-grid { column-count: 3; }
+}
+/* Cada tarjeta no se parte entre columnas y mantiene la separación vertical. */
+.eventos-grid > * {
+  width: 100%;
+  margin-bottom: var(--gap);
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
 }

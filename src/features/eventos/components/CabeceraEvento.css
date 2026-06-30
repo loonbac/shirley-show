@@ -1,3 +1,13 @@
+/* Afiche del evento en el detalle: vertical, acotado para no dominar la pantalla. */
+.cab__poster {
+  display: block;
+  max-width: 260px;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radio);
+  border: 1px solid var(--color-borde);
+  margin-bottom: 14px;
+}
 .cab__titulo {
   display: flex;
   align-items: center;

@@ -14,3 +14,6 @@ data/*.db-*
 
 # Herramientas locales
 .claude
+
+# Imágenes subidas (afiches) — datos de runtime, en el volumen
+data/media/

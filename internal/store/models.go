@@ -16,6 +16,7 @@ type Evento struct {
 	Aforo          *int          `json:"aforo"`
 	TiposDeEntrada []TipoEntrada `json:"tipos_de_entrada"`
 	Finalizado     bool          `json:"finalizado"` // archivado manualmente
+	Imagen         *string       `json:"imagen"`     // nombre de archivo del afiche (en MEDIA_DIR); nil si no tiene
 	Estado         string        `json:"estado"`     // derivado: Próximo | Finalizado
 	Vendidas       int           `json:"vendidas"`
 }

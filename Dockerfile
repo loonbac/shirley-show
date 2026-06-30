@@ -32,7 +32,8 @@ USER app
 ENV PORT=3001 \
     WEB_DIR=dist \
     DB_PATH=/app/data/eventos.db \
-    WA_STORE_PATH=/app/data/whatsapp.db
+    WA_STORE_PATH=/app/data/whatsapp.db \
+    MEDIA_DIR=/app/data/media
 
 EXPOSE 3001
 # Monta /app/data como volumen para conservar la base de datos entre despliegues.

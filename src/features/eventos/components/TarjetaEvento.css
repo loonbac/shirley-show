@@ -17,6 +17,18 @@
   border-color: var(--color-primario);
 }
 
+/* Afiche (publicidad vertical): sangra hasta los bordes de la tarjeta */
+.tev__poster {
+  margin: calc(-1 * var(--gap)) calc(-1 * var(--gap)) var(--gap);
+}
+.tev__poster img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* Con afiche, ocultamos la barra de acento superior para no taparlo */
+.tev--img::before { display: none; }
+
 .tev__fila {
   display: flex;
   gap: 14px;

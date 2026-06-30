@@ -14,10 +14,11 @@ export default function FormularioEventoPage() {
   const editando = Boolean(id)
   const { datos: evento, cargando, error } = useEvento(id)
 
-  async function guardar(datos) {
+  async function guardar(datos, imagenFile) {
     setGuardando(true)
     try {
       const res = editando ? await eventosApi.actualizar(id, datos) : await eventosApi.crear(datos)
+      if (imagenFile) await eventosApi.subirImagen(res.id, imagenFile)
       navegar(`/eventos/${res.id}`)
     } finally {
       setGuardando(false)

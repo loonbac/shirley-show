@@ -1,0 +1,35 @@
+.afiche {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.afiche__zona {
+  display: block;
+  width: 100%;
+  max-width: 240px;
+  cursor: pointer;
+  border: 2px dashed var(--color-borde);
+  border-radius: var(--radio);
+  overflow: hidden;
+  background: var(--color-primario-suave);
+  transition: border-color 0.15s;
+}
+.afiche__zona:hover {
+  border-color: var(--color-primario);
+}
+.afiche__preview {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.afiche__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 200px;
+  padding: 20px;
+  color: var(--color-texto-suave);
+  font-size: var(--texto-sm);
+}

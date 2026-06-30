@@ -72,6 +72,10 @@ func (s *Server) Handler() http.Handler {
 	// robots.txt: la página es privada; pedimos a los buscadores que no la rastreen.
 	mux.HandleFunc("GET /robots.txt", s.robots)
 
+	// Afiches subidos. Pública para que las etiquetas <img> carguen sin token
+	// (el navegador no manda Authorization en una imagen); la web vive tras el túnel.
+	mux.HandleFunc("GET /media/{archivo}", s.servirMedia)
+
 	// Públicas
 	mux.HandleFunc("POST /api/auth/login", s.h(s.login))
 	mux.HandleFunc("GET /api/publico/entrada/{codigo}", s.h(s.entradaPublica))
@@ -87,6 +91,8 @@ func (s *Server) Handler() http.Handler {
 	prot("DELETE", "/api/eventos/{id}", s.eliminarEvento)
 	prot("POST", "/api/eventos/{id}/finalizar", s.finalizarEvento)
 	prot("POST", "/api/eventos/{id}/reabrir", s.reabrirEvento)
+	prot("POST", "/api/eventos/{id}/imagen", s.subirImagen)
+	prot("DELETE", "/api/eventos/{id}/imagen", s.quitarImagen)
 	prot("GET", "/api/eventos/{id}/resumen", s.resumen)
 	prot("GET", "/api/eventos/{id}/entradas", s.listarEntradas)
 	prot("POST", "/api/eventos/{id}/entradas", s.registrarVenta)

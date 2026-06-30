@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS eventos (
   aforo            INTEGER,
   tipos_de_entrada TEXT NOT NULL DEFAULT '[]',
   finalizado       INTEGER NOT NULL DEFAULT 0,  -- 1 = finalizado manualmente (archivado)
+  imagen           TEXT,                        -- nombre del archivo del afiche (en MEDIA_DIR)
   fecha_creacion   TEXT NOT NULL
 );
 

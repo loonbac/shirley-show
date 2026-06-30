@@ -42,6 +42,7 @@ func Abrir(ruta string) (*Store, error) {
 func migrar(db *sql.DB) {
 	// ALTER ... ADD COLUMN falla si la columna ya existe; ese error se ignora a propósito.
 	_, _ = db.Exec("ALTER TABLE eventos ADD COLUMN finalizado INTEGER NOT NULL DEFAULT 0")
+	_, _ = db.Exec("ALTER TABLE eventos ADD COLUMN imagen TEXT")
 }
 
 // DB expone la conexión cruda (la usa el seed y whatsmeow).

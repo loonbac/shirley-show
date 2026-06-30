@@ -36,12 +36,17 @@ func escanearEvento(row interface{ Scan(...any) error }) (*Evento, error) {
 	var aforo sql.NullInt64
 	var tiposJSON string
 	var finalizado int
-	if err := row.Scan(&e.ID, &e.Nombre, &e.FechaHora, &e.Lugar, &aforo, &tiposJSON, &finalizado, &e.Vendidas); err != nil {
+	var imagen sql.NullString
+	if err := row.Scan(&e.ID, &e.Nombre, &e.FechaHora, &e.Lugar, &aforo, &tiposJSON, &finalizado, &imagen, &e.Vendidas); err != nil {
 		return nil, err
 	}
 	if aforo.Valid {
 		v := int(aforo.Int64)
 		e.Aforo = &v
+	}
+	if imagen.Valid && imagen.String != "" {
+		s := imagen.String
+		e.Imagen = &s
 	}
 	_ = json.Unmarshal([]byte(tiposJSON), &e.TiposDeEntrada)
 	if e.TiposDeEntrada == nil {
@@ -52,7 +57,7 @@ func escanearEvento(row interface{ Scan(...any) error }) (*Evento, error) {
 	return &e, nil
 }
 
-const selEvento = `SELECT e.id, e.nombre, e.fecha_hora, e.lugar, e.aforo, e.tipos_de_entrada, e.finalizado,
+const selEvento = `SELECT e.id, e.nombre, e.fecha_hora, e.lugar, e.aforo, e.tipos_de_entrada, e.finalizado, e.imagen,
 	(SELECT COUNT(*) FROM entradas WHERE evento_id = e.id) AS vendidas FROM eventos e`
 
 func (s *Store) ListarEventos() ([]Evento, error) {
@@ -129,6 +134,19 @@ func (s *Store) EliminarEvento(id int64) error {
 		return err
 	}
 	_, err := s.db.Exec("DELETE FROM eventos WHERE id = ?", id)
+	return err
+}
+
+// ActualizarImagen guarda (o limpia con "") el nombre del archivo de afiche del evento.
+func (s *Store) ActualizarImagen(id int64, archivo string) error {
+	if _, err := s.ObtenerEvento(id); err != nil {
+		return err
+	}
+	var val any
+	if archivo != "" {
+		val = archivo
+	}
+	_, err := s.db.Exec("UPDATE eventos SET imagen = ? WHERE id = ?", val, id)
 	return err
 }
 

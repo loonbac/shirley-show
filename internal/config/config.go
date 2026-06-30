@@ -30,6 +30,7 @@ type Config struct {
 	BindAddr        string // interfaz donde escuchar ("" = todas; "127.0.0.1" = solo local/túnel)
 	JWTSecret       string
 	RutaDB          string
+	MediaDir        string // carpeta donde se guardan las imágenes subidas (afiches)
 	AdminUsuario    string
 	AdminPassword   string
 	WebDir          string // carpeta del frontend compilado (dist)
@@ -53,6 +54,7 @@ func Cargar() Config {
 		BindAddr:        env("BIND_ADDR", ""),
 		JWTSecret:       secreto,
 		RutaDB:          env("DB_PATH", "data/eventos.db"),
+		MediaDir:        env("MEDIA_DIR", "data/media"),
 		AdminUsuario:    env("ADMIN_USUARIO", "shirleyshow"),
 		AdminPassword:   adminPass,
 		WebDir:          env("WEB_DIR", "dist"),

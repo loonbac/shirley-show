@@ -131,9 +131,11 @@ func (s *Server) eliminarEvento(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	ev, _ := s.st.ObtenerEvento(id) // para borrar su afiche tras eliminar
 	if err := s.st.EliminarEvento(id); err != nil {
 		return err
 	}
+	s.borrarImagenDeEvento(ev)
 	escribirJSON(w, http.StatusOK, map[string]bool{"eliminado": true})
 	return nil
 }

@@ -6,6 +6,7 @@ import {
   IconoCalendario, IconoUbicacion, IconoCamara, IconoLapiz, IconoBandera, IconoReloj, IconoBasura,
 } from '../../../components/iconos/Iconos.jsx'
 import { fechaLarga } from '../../../lib/format.js'
+import { urlImagen } from '../services/eventosApi.js'
 import './CabeceraEvento.css'
 
 // Cabecera del detalle: datos del evento + acciones (puerta, editar, finalizar/reabrir, eliminar).
@@ -13,6 +14,9 @@ export function CabeceraEvento({ evento, accionando, onFinalizar, onReabrir, onE
   const navegar = useNavigate()
   return (
     <header className="cab">
+      {evento.imagen && (
+        <img className="cab__poster" src={urlImagen(evento.imagen)} alt={`Afiche de ${evento.nombre}`} />
+      )}
       <div className="cab__titulo">
         <h1>{evento.nombre}</h1>
         <Badge tono={tonoEvento(evento.estado)}>{evento.estado}</Badge>
