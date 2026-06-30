@@ -31,7 +31,7 @@ export function FormularioEvento({ inicial, guardando, onGuardar }) {
       fecha_hora: new Date(fecha).toISOString(),
       lugar,
       aforo: aforo === '' ? null : Number(aforo),
-      tipos_de_entrada: tipos,
+      tipos_de_entrada: tipos.map((t) => ({ nombre: t.nombre.trim(), precio: Number(t.precio) })),
     }).catch((err) => setError(err.message))
   }
 
