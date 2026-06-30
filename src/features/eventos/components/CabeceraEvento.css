@@ -1,12 +1,31 @@
-/* Afiche del evento en el detalle: vertical, acotado para no dominar la pantalla. */
+/* Con afiche, la cabecera es un hero de dos columnas: poster a la izquierda,
+   info (título, fecha, lugar, acciones) a la derecha llenando el espacio. */
+.cab--hero {
+  display: flex;
+  gap: 22px;
+  align-items: flex-start;
+}
+.cab--hero .cab__info {
+  flex: 1;
+  min-width: 0;
+}
 .cab__poster {
   display: block;
-  max-width: 260px;
-  width: 100%;
+  flex: none;
+  width: 220px;
   height: auto;
   border-radius: var(--radio);
   border: 1px solid var(--color-borde);
-  margin-bottom: 14px;
+  box-shadow: var(--sombra);
+}
+@media (max-width: 640px) {
+  .cab--hero {
+    flex-direction: column;
+  }
+  .cab__poster {
+    width: 100%;
+    max-width: 280px;
+  }
 }
 .cab__titulo {
   display: flex;
