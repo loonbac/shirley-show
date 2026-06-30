@@ -17,7 +17,7 @@ export function AppShell() {
       <header className="shell__cabecera">
         <div className="shell__inner">
           <Link to="/eventos" className="shell__marca" aria-label="Shirley Show — inicio">
-            <img className="shell__logo" src="/logo.png" alt="Shirley Show" />
+            <img className="shell__logo" src="/logo.png?v=2" alt="Shirley Show" />
           </Link>
           {enRaiz ? (
             <Boton variante="texto" onClick={cerrarSesion}>
