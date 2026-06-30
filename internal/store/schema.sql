@@ -37,3 +37,18 @@ CREATE TABLE IF NOT EXISTS entradas (
 CREATE INDEX IF NOT EXISTS idx_entradas_evento ON entradas(evento_id);
 CREATE INDEX IF NOT EXISTS idx_entradas_codigo ON entradas(codigo_qr);
 -- El índice de scan_token se crea en migrar() (tras añadir la columna en bases existentes).
+
+-- Fase 1 (invitación): personas contactadas que dijeron que sí de palabra. Sirve para
+-- estimar la asistencia (sumar "personas") y planear sillas/aforo antes de cobrar nada.
+-- Al cobrarle a una se vuelve una entrada normal (fase 2) y aquí queda como 'Confirmado'.
+CREATE TABLE IF NOT EXISTS interesados (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  evento_id       INTEGER NOT NULL REFERENCES eventos(id) ON DELETE CASCADE,
+  nombre          TEXT NOT NULL,
+  contacto        TEXT,
+  personas        INTEGER NOT NULL DEFAULT 1,        -- cuántos vendrían (titular + familia)
+  estado          TEXT NOT NULL DEFAULT 'Interesado', -- 'Interesado' | 'Confirmado'
+  fecha_creacion  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_interesados_evento ON interesados(evento_id);

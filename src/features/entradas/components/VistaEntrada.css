@@ -39,3 +39,20 @@
   color: var(--color-texto-suave);
   letter-spacing: 1px;
 }
+
+/* Aviso cuando la entrada aún no está pagada: ocupa el lugar del QR. */
+.ventrada__sinqr {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 300px;
+  padding: 32px 20px;
+  background: var(--color-alerta-suave);
+  border-radius: var(--radio);
+  color: var(--color-alerta);
+}
+.ventrada__sinqr-titulo {
+  font-size: var(--texto-lg);
+  font-weight: var(--peso-fuerte);
+}

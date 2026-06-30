@@ -17,3 +17,5 @@ data/*.db-*
 
 # Imágenes subidas (afiches) — datos de runtime, en el volumen
 data/media/
+tmp/
+.air.toml

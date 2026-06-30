@@ -1,3 +1,43 @@
+/* Pestañas de las 2 fases: dos botones grandes, fáciles de tocar. */
+.pestanas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: var(--color-primario-suave);
+  padding: 6px;
+  border-radius: var(--radio);
+}
+.pestanas__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--toque);
+  border: none;
+  border-radius: var(--radio-sm);
+  background: transparent;
+  color: var(--color-primario-oscuro);
+  font-size: var(--texto-base);
+  font-weight: var(--peso-fuerte);
+  cursor: pointer;
+}
+.pestanas__btn--activa {
+  background: var(--color-superficie);
+  box-shadow: var(--sombra);
+  color: var(--color-texto);
+}
+.pestanas__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-primario);
+  color: #fff;
+  font-size: var(--texto-sm);
+}
+
 /* En celular se apila; en PC: acciones/resumen a un lado y entradas al otro. */
 .detalle-cols {
   display: grid;

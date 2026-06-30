@@ -38,6 +38,18 @@ type Entrada struct {
 	FechaRegistro   string  `json:"fecha_registro"`
 }
 
+// Interesado es una persona de la fase 1 (invitación): dijo que sí de palabra y se
+// anota para estimar la asistencia. Al cobrarle pasa a 'Confirmado' y se le crea su entrada.
+type Interesado struct {
+	ID            int64   `json:"id"`
+	EventoID      int64   `json:"evento_id"`
+	Nombre        string  `json:"nombre"`
+	Contacto      *string `json:"contacto"`
+	Personas      int     `json:"personas"` // estimación: cuántos vendrían con esta persona
+	Estado        string  `json:"estado"`   // Interesado | Confirmado
+	FechaCreacion string  `json:"fecha_creacion"`
+}
+
 // EventoMini son los datos del evento que acompañan a la vista pública de una entrada.
 type EventoMini struct {
 	Nombre    string `json:"nombre"`

@@ -8,10 +8,11 @@ import { MEDIOS_PAGO, ESTADOS_PAGO, opciones } from '../constantes.js'
 import { soles } from '../../../lib/format.js'
 
 // Formulario para registrar una venta. Genera `cantidad` entradas (cada una con su QR).
-export function FormularioVenta({ evento, guardando, onRegistrar }) {
+// `prefill` (opcional) trae nombre/contacto cuando se confirma a un interesado de la fase 1.
+export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
   const tipos = evento.tipos_de_entrada
-  const [nombre, setNombre] = useState('')
-  const [contacto, setContacto] = useState('')
+  const [nombre, setNombre] = useState(prefill?.nombre || '')
+  const [contacto, setContacto] = useState(prefill?.contacto || '')
   const [tipo, setTipo] = useState(tipos[0]?.nombre || '')
   const [cantidad, setCantidad] = useState(1)
   const [medio, setMedio] = useState(MEDIOS_PAGO[0])
@@ -51,7 +52,11 @@ export function FormularioVenta({ evento, guardando, onRegistrar }) {
           opciones={tipos.map((t) => ({ valor: t.nombre, etiqueta: `${t.nombre} — ${soles(t.precio)}` }))}
         />
       </Campo>
-      <Campo etiqueta="Cantidad" htmlFor="cantidad" ayuda="Se crea una entrada con QR por cada una.">
+      <Campo
+        etiqueta="¿Cuántas entradas?"
+        htmlFor="cantidad"
+        ayuda="Una por persona (titular + familiares o invitados). Cada una recibe su propio QR."
+      >
         <Input id="cantidad" type="number" min="1" max="50" value={cantidad} onChange={(e) => setCantidad(e.target.value)} />
       </Campo>
       <Campo etiqueta="Medio de pago" htmlFor="medio">

@@ -1,0 +1,34 @@
+/* Tarjeta del estimado de asistencia (fase 1): el número grande es lo más importante. */
+.interesados__estimado {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  padding: 24px 16px;
+  background: var(--color-primario-suave);
+  border-radius: var(--radio);
+}
+
+.interesados__numero {
+  font-size: var(--texto-2xl);
+  font-weight: var(--peso-fuerte);
+  color: var(--color-primario-oscuro);
+  line-height: 1;
+}
+
+.interesados__texto {
+  font-size: var(--texto-lg);
+  color: var(--color-primario-oscuro);
+}
+
+.interesados__detalle {
+  margin-top: 6px;
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+}
+
+.interesados__ayuda {
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+}

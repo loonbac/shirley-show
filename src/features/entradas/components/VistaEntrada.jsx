@@ -8,9 +8,17 @@ import './VistaEntrada.css'
 // `entrada` incluye datos del evento (nombre, fecha, lugar) cuando viene de la vista pública.
 export function VistaEntrada({ entrada }) {
   const ev = entrada.evento
+  const pagado = entrada.estado_pago === 'Pagado'
   return (
     <div className="ventrada">
-      <VisorQR valor={entrada.qr || entrada.codigo_qr} />
+      {pagado ? (
+        <VisorQR valor={entrada.qr || entrada.codigo_qr} />
+      ) : (
+        <div className="ventrada__sinqr">
+          <p className="ventrada__sinqr-titulo">Falta cancelar el pago</p>
+          <p>El QR de invitación aparece apenas se confirme el pago de esta entrada.</p>
+        </div>
+      )}
       <div className="ventrada__datos">
         <p className="ventrada__comprador">{entrada.nombre_comprador}</p>
         {ev && <p className="ventrada__evento">{ev.nombre}</p>}

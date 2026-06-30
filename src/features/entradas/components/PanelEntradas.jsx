@@ -49,7 +49,7 @@ export function PanelEntradas({ eventoId, version, onCambio }) {
         {verEntrada && (
           <div className="pila">
             <VistaEntrada entrada={verEntrada} />
-            <CompartirEntrada entrada={verEntrada} />
+            {verEntrada.estado_pago === 'Pagado' && <CompartirEntrada entrada={verEntrada} />}
           </div>
         )}
       </Modal>
