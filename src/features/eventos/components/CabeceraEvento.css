@@ -22,9 +22,11 @@
   .cab--hero {
     flex-direction: column;
   }
+  /* En móvil el afiche es un banner a todo el ancho de la columna, alineado
+     con el bloque de texto (en vez de quedar angosto y pegado a la izquierda). */
   .cab__poster {
     width: 100%;
-    max-width: 280px;
+    max-width: 100%;
   }
 }
 .cab__titulo {
