@@ -39,8 +39,9 @@ EXPOSE 3001
 VOLUME ["/app/data"]
 
 # Health check: Coolify/Docker esperan a que /api/health responda antes de enviar tráfico.
+# Usa ${PORT} (no un puerto fijo) porque Coolify puede inyectar otro puerto en runtime.
 # wget viene incluido en Alpine (busybox).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:3001/api/health || exit 1
+  CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/api/health" || exit 1
 
 CMD ["server"]
