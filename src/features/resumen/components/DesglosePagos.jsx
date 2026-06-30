@@ -1,9 +1,9 @@
 import { soles } from '../../../lib/format.js'
 import './DesglosePagos.css'
 
-// Recaudado desglosado por medio de pago (Yape / Efectivo / Otra billetera).
+// Recaudado desglosado por medio de pago (Yape / Efectivo).
 export function DesglosePagos({ porMedio }) {
-  const medios = ['Yape', 'Efectivo', 'Otra billetera']
+  const medios = ['Yape', 'Efectivo']
   return (
     <div className="desglose">
       <h3>Recaudado por medio de pago</h3>

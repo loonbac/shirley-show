@@ -7,7 +7,7 @@ import (
 	"shirleyshow/internal/store"
 )
 
-var mediosPago = map[string]bool{"Yape": true, "Efectivo": true, "Otra billetera": true}
+var mediosPago = map[string]bool{"Yape": true, "Efectivo": true}
 
 func (s *Server) listarEntradas(w http.ResponseWriter, r *http.Request) error {
 	id, err := idDeRuta(r, "id")

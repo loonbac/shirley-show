@@ -17,7 +17,7 @@ func (s *Store) Resumen(eventoID int64) (*Resumen, error) {
 	r := &Resumen{
 		EventoID:          ev.ID,
 		Aforo:             ev.Aforo,
-		RecaudadoPorMedio: map[string]float64{"Yape": 0, "Efectivo": 0, "Otra billetera": 0},
+		RecaudadoPorMedio: map[string]float64{"Yape": 0, "Efectivo": 0},
 	}
 	for rows.Next() {
 		var precio float64
