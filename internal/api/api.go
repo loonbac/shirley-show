@@ -69,6 +69,9 @@ func (s *Server) Handler() http.Handler {
 	// Salud (para el health check de Coolify/Docker; pública y sin estado)
 	mux.HandleFunc("GET /api/health", s.health)
 
+	// robots.txt: la página es privada; pedimos a los buscadores que no la rastreen.
+	mux.HandleFunc("GET /robots.txt", s.robots)
+
 	// Públicas
 	mux.HandleFunc("POST /api/auth/login", s.h(s.login))
 	mux.HandleFunc("GET /api/publico/entrada/{codigo}", s.h(s.entradaPublica))
@@ -106,6 +109,9 @@ func cabecerasSeguridad(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff") // no adivinar tipos MIME
 		w.Header().Set("X-Frame-Options", "DENY")           // anti clickjacking
 		w.Header().Set("Referrer-Policy", "no-referrer")    // no filtrar URLs
+		// Página privada: que los buscadores no la indexen ni sigan enlaces ni
+		// cacheen una copia. Es lo más fiable (los bots serios respetan este header).
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 		// HSTS solo cuando la conexión llega por HTTPS (terminado en Cloudflare):
 		// obliga al navegador a usar siempre HTTPS para el dominio.
 		if esHTTPS(r) {
@@ -124,6 +130,13 @@ func esHTTPS(r *http.Request) bool {
 // health responde 200 para indicar que el servidor está listo para recibir tráfico.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	escribirJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// robots sirve un robots.txt que prohíbe el rastreo de todo el sitio (página privada).
+func (s *Server) robots(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("User-agent: *\nDisallow: /\n"))
 }
 
 // servirSPA entrega archivos de dist/ y, si no existe el archivo, devuelve index.html
