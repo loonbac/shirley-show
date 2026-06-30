@@ -10,7 +10,10 @@ import './TarjetaEvento.css'
 export function TarjetaEvento({ evento }) {
   const navegar = useNavigate()
   const finalizado = evento.estado === 'Finalizado'
-  const pct = evento.aforo ? Math.min(Math.round((evento.vendidas / evento.aforo) * 100), 100) : null
+  const tieneAforo = evento.aforo != null
+  const pct = tieneAforo ? Math.min(Math.round((evento.vendidas / evento.aforo) * 100), 100) : null
+  // El aforo es una meta, no un límite: vender de más es un éxito, así que lo celebramos.
+  const extra = tieneAforo ? Math.max(evento.vendidas - evento.aforo, 0) : 0
 
   return (
     <Tarjeta
@@ -40,12 +43,16 @@ export function TarjetaEvento({ evento }) {
       <div className="tev__aforo">
         {pct !== null && (
           <div className="tev__barra">
-            <span className="tev__barra-fill" style={{ width: `${pct}%` }} />
+            <span
+              className={`tev__barra-fill ${extra > 0 ? 'tev__barra-fill--extra' : ''}`}
+              style={{ width: `${pct}%` }}
+            />
           </div>
         )}
         <span className="tev__aforo-txt">
           <strong>{evento.vendidas}</strong>
-          {evento.aforo != null ? ` / ${evento.aforo}` : ''} entradas vendidas
+          {tieneAforo ? ` / ${evento.aforo}` : ''} entradas vendidas
+          {extra > 0 && <span className="tev__extra"> · 🎉 ¡+{extra} sobre la meta!</span>}
         </span>
       </div>
     </Tarjeta>
