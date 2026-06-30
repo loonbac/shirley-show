@@ -7,18 +7,21 @@ import { EditorTiposEntrada } from './EditorTiposEntrada.jsx'
 import { urlImagen } from '../services/eventosApi.js'
 import './FormularioEvento.css'
 
-// Convierte ISO <-> valor del input datetime-local (hora local del dispositivo).
-const aLocal = (iso) => {
-  if (!iso) return ''
+// Separa un ISO en sus partes locales de fecha (YYYY-MM-DD) y hora (HH:MM), para
+// usar dos inputs distintos (calendario + reloj), más claros que datetime-local.
+const aPartes = (iso) => {
+  if (!iso) return { fecha: '', hora: '' }
   const d = new Date(iso)
-  const off = d.getTimezoneOffset() * 60000
-  return new Date(d - off).toISOString().slice(0, 16)
+  const local = new Date(d - d.getTimezoneOffset() * 60000).toISOString()
+  return { fecha: local.slice(0, 10), hora: local.slice(11, 16) }
 }
 
 // Formulario reutilizable para crear y editar un evento.
 export function FormularioEvento({ inicial, guardando, onGuardar }) {
+  const ini = aPartes(inicial?.fecha_hora)
   const [nombre, setNombre] = useState(inicial?.nombre || '')
-  const [fecha, setFecha] = useState(aLocal(inicial?.fecha_hora))
+  const [fecha, setFecha] = useState(ini.fecha)
+  const [hora, setHora] = useState(ini.hora)
   const [lugar, setLugar] = useState(inicial?.lugar || '')
   const [aforo, setAforo] = useState(inicial?.aforo ?? '')
   const [tipos, setTipos] = useState(inicial?.tipos_de_entrada || [{ nombre: 'General', precio: '' }])
@@ -43,11 +46,14 @@ export function FormularioEvento({ inicial, guardando, onGuardar }) {
   function enviar(e) {
     e.preventDefault()
     setError('')
-    if (!fecha) return setError('Indica la fecha y hora del evento')
+    if (!fecha) return setError('Elige la fecha del evento')
+    if (!hora) return setError('Elige la hora del evento')
+    const fechaHora = new Date(`${fecha}T${hora}`)
+    if (isNaN(fechaHora.getTime())) return setError('La fecha u hora no es válida')
     onGuardar(
       {
         nombre,
-        fecha_hora: new Date(fecha).toISOString(),
+        fecha_hora: fechaHora.toISOString(),
         lugar,
         aforo: aforo === '' ? null : Number(aforo),
         tipos_de_entrada: tipos.map((t) => ({ nombre: t.nombre.trim(), precio: Number(t.precio) })),
@@ -82,9 +88,14 @@ export function FormularioEvento({ inicial, guardando, onGuardar }) {
         <span className="campo__ayuda">Imagen vertical de la publicidad. JPG, PNG o WebP, hasta 10 MB.</span>
       </div>
 
-      <Campo etiqueta="Fecha y hora" htmlFor="fecha">
-        <Input id="fecha" type="datetime-local" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-      </Campo>
+      <div className="campo-fila">
+        <Campo etiqueta="Fecha" htmlFor="fecha">
+          <Input id="fecha" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+        </Campo>
+        <Campo etiqueta="Hora" htmlFor="hora">
+          <Input id="hora" type="time" value={hora} onChange={(e) => setHora(e.target.value)} />
+        </Campo>
+      </div>
       <Campo etiqueta="Lugar" htmlFor="lugar">
         <Input id="lugar" value={lugar} onChange={(e) => setLugar(e.target.value)} />
       </Campo>

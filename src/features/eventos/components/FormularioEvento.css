@@ -1,3 +1,13 @@
+/* Fecha y hora, lado a lado; se apilan en pantallas angostas. */
+.campo-fila {
+  display: flex;
+  gap: var(--gap);
+}
+.campo-fila > .campo {
+  flex: 1;
+  min-width: 0;
+}
+
 .afiche {
   display: flex;
   flex-direction: column;
