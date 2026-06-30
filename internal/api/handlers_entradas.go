@@ -18,6 +18,9 @@ func (s *Server) listarEntradas(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	for i := range lista {
+		s.ponerQR(r, &lista[i])
+	}
 	escribirJSON(w, http.StatusOK, lista)
 	return nil
 }
