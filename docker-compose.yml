@@ -1,13 +1,12 @@
-# Producción con Docker. Dos formas de publicar en shirleyshow.site:
+# Producción con Docker. El contenedor solo sirve la página (API + frontend).
 #
-#  A) Coolify: NO uses este compose; apunta Coolify al repo, construye el Dockerfile,
-#     define las variables de entorno y deja que Coolify maneje el dominio.
+# El Cloudflare Tunnel corre de forma NATIVA en la máquina anfitriona (no en este
+# compose). En el panel del túnel, publica el hostname:
+#     shirleyshow.site  ->  http://127.0.0.1:65529
 #
-#  B) Self-host con Cloudflare Tunnel: usa este compose tal cual.
-#     1. Crea un túnel en el panel de Cloudflare (Zero Trust > Tunnels) y copia su TOKEN.
-#     2. En el panel del túnel, publica el hostname  shirleyshow.site -> http://app:3001
-#     3. Pon CLOUDFLARE_TUNNEL_TOKEN en un archivo .env junto a este compose.
-#     4. docker compose up -d --build
+# Despliegue:
+#   1. Define las variables en un archivo .env junto a este compose.
+#   2. docker compose up -d --build
 
 services:
   app:
@@ -21,16 +20,9 @@ services:
       WHATSAPP_ON: "${WHATSAPP_ON:-false}"
     volumes:
       - datos:/app/data
-    # Sin Cloudflare puedes exponer el puerto directamente (opcional):
-    # ports:
-    #   - "3001:3001"
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      - app
+    # La máquina expone el 65529 hacia el puerto interno 3001 del contenedor.
+    ports:
+      - "65529:3001"
 
 volumes:
   datos:
