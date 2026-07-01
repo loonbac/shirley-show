@@ -44,7 +44,7 @@ export function ProximoEvento() {
       </div>
 
       <LightboxGaleria
-        item={abierto ? { src: urlImagen, titulo: evento.nombre, grande: true } : null}
+        item={abierto ? { src: urlImagen, titulo: evento.nombre } : null}
         onCerrar={() => setAbierto(false)}
       />
     </>

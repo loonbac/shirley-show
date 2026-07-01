@@ -4,6 +4,12 @@
 // Único canal de contacto: el Facebook de la artista (ella aprueba a sus seguidores).
 export const FACEBOOK_URL = 'https://www.facebook.com/share/1Cq5QQcQan'
 
+// Los videos (pesados) se sirven desde un server casero aparte, no desde este servidor
+// (así no van al repo ni al volumen de producción). Si ese server pierde conexión, solo
+// falla la reproducción del video: la miniatura (`poster`) va empaquetada en la propia web
+// (public/), así que siempre se ve.
+export const VIDEOS_BASE_URL = 'https://media.shirleyshow.site'
+
 // Etiquetas que aparecen como "chips" bajo el nombre y en la cinta.
 export const ETIQUETAS = ['Matrimonios', 'Mariachis', 'Aniversarios', 'Esparcimientos']
 export const CINTA = ['Música en vivo', 'Mariachis', 'Esparcimientos', 'Repertorio en vivo']
@@ -14,7 +20,10 @@ export const CINTA = ['Música en vivo', 'Mariachis', 'Esparcimientos', 'Reperto
 // para que el mosaico se vea bien. Pon `src` con una ruta /media/... cuando tengas las fotos.
 export const GALERIA = [
   { id: 'g1', tipo: 'foto', titulo: 'Shirley en escena', aspecto: '4 / 5', src: null },
-  { id: 'g2', tipo: 'video', titulo: 'Presentación junto a la banda', aspecto: '1 / 1', src: null, poster: null },
+  {
+    id: 'g2', tipo: 'video', titulo: 'Presentación junto a la banda', aspecto: '16 / 9',
+    src: `${VIDEOS_BASE_URL}/shirley-show-1.mp4`, poster: '/presentacion/videos/shirley-show-1.jpg',
+  },
   { id: 'g3', tipo: 'foto', titulo: 'Con sus amigos músicos', aspecto: '3 / 4', src: null },
   { id: 'g4', tipo: 'foto', titulo: 'Detalle del escenario', aspecto: '1 / 1', src: null },
   { id: 'g5', tipo: 'video', titulo: 'Un momento especial', aspecto: '4 / 3', src: null, poster: null },

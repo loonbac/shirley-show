@@ -190,13 +190,12 @@ button.pres__hero-evento-img:hover { opacity: 0.88; }
 .pres__footer-copy { font-size: 13px; color: var(--muted); }
 
 /* ---------- Lightbox ---------- */
+/* Todo el visor (fotos y videos) usa un tamaño grande y responsivo: ocupa la
+   mayor parte de la pantalla disponible, sin dos variantes de tamaño. */
 .pres__lb { position: fixed; inset: 0; background: rgba(28,19,10,.92); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; }
-.pres__lb-caja { position: relative; max-width: 640px; width: 100%; }
-/* Afiches (verticales): la caja crece bastante más que la del resto de la galería,
-   para que se lean bien en pantallas grandes en vez de quedar chicos. */
-.pres__lb-caja--grande { max-width: 860px; }
+.pres__lb-caja { position: relative; max-width: min(94vw, 1100px); width: 100%; }
 /* Fijo a la esquina del viewport (no a la caja): así nunca queda fuera de la
-   pantalla, sin importar cuán grande sea la foto/afiche que se está mostrando. */
+   pantalla, sin importar cuán grande sea la foto/video que se está mostrando. */
 .pres__lb-cerrar {
   position: fixed; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
   width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35);
@@ -207,9 +206,17 @@ button.pres__hero-evento-img:hover { opacity: 0.88; }
   display: flex; align-items: center; justify-content: center;
   width: fit-content; max-width: 100%; margin: 0 auto;
 }
-.pres__lb-medio img, .pres__lb-medio video { display: block; max-width: 100%; max-height: min(70vh, 540px); width: auto; height: auto; }
-.pres__lb-caja--grande .pres__lb-medio img { max-height: min(80vh, 820px); max-width: 860px; }
+.pres__lb-medio img, .pres__lb-medio video {
+  display: block; width: auto; height: auto;
+  max-width: min(94vw, 1100px); max-height: min(86vh, 900px);
+}
 .pres__lb-pie { color: var(--cream); text-align: center; font-size: 14px; margin: 14px 0 0; }
+.pres__lb-video-error { position: relative; }
+.pres__lb-video-error-msg {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  background: rgba(28,19,10,.75); color: #fff; font-size: 13px; padding: 8px 16px;
+  border-radius: 999px; white-space: nowrap; max-width: 90%; text-align: center; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* ---------- Animaciones ---------- */
 @keyframes pres-halo { 0%, 100% { transform: scale(1); opacity: .6 } 50% { transform: scale(1.08); opacity: .88 } }
