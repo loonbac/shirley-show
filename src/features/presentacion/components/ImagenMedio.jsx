@@ -4,7 +4,7 @@ import { IconoNota } from './Adornos.jsx'
 // Imagen con respaldo: si no hay `src` o falla la carga, muestra un placeholder
 // elegante (degradado + nota + título) en lugar de una imagen rota.
 // Útil mientras no haya fotos reales (Fase A) y para fallos de red.
-export function ImagenMedio({ src, alt, titulo, fit = 'cover' }) {
+export function ImagenMedio({ src, alt, titulo, fit = 'cover', posicion }) {
   const [falló, setFalló] = useState(false)
 
   if (!src || falló) {
@@ -22,7 +22,7 @@ export function ImagenMedio({ src, alt, titulo, fit = 'cover' }) {
       alt={alt || titulo || ''}
       loading="lazy"
       onError={() => setFalló(true)}
-      style={{ objectFit: fit }}
+      style={{ objectFit: fit, objectPosition: posicion }}
     />
   )
 }

@@ -24,7 +24,7 @@ export function GaleriaPresentacion({ items, onAbrir }) {
               aria-label={`Abrir: ${item.titulo}`}
             >
               <div className="pres__item-medio" style={{ aspectRatio: item.aspecto }}>
-                <ImagenMedio src={item.poster || item.src} titulo={item.titulo} alt={item.titulo} />
+                <ImagenMedio src={item.poster || item.src} titulo={item.titulo} alt={item.titulo} posicion={item.posicion} />
                 {item.esVideo && (
                   <>
                     <div className="pres__video-badge">VIDEO</div>

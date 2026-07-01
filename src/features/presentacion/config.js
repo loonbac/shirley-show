@@ -18,19 +18,30 @@ export const CINTA = ['Música en vivo', 'Mariachis', 'Esparcimientos', 'Reperto
 // Fase B: esto se reemplaza por una llamada a GET /api/publico/galeria.
 // Por ahora son marcadores (src: null => placeholder elegante) con variedad de formatos
 // para que el mosaico se vea bien. Pon `src` con una ruta /media/... cuando tengas las fotos.
+// Orden pensado a mano para que los videos (VIDEO badge, más "pesados" visualmente)
+// no queden pegados entre sí en el mosaico — se intercalan con fotos.
 export const GALERIA = [
-  { id: 'g1', tipo: 'foto', titulo: 'Shirley en escena', aspecto: '4 / 5', src: null },
   {
-    id: 'g2', tipo: 'video', titulo: 'Presentación junto a la banda', aspecto: '16 / 9',
+    id: 'g2', tipo: 'video', titulo: 'Disfrutando del Show', aspecto: '16 / 9',
     src: `${VIDEOS_BASE_URL}/shirley-show-1.mp4`, poster: '/presentacion/videos/shirley-show-1.jpg',
   },
-  { id: 'g3', tipo: 'foto', titulo: 'Con sus amigos músicos', aspecto: '3 / 4', src: null },
-  { id: 'g4', tipo: 'foto', titulo: 'Detalle del escenario', aspecto: '1 / 1', src: null },
-  { id: 'g5', tipo: 'video', titulo: 'Un momento especial', aspecto: '4 / 3', src: null, poster: null },
-  { id: 'g6', tipo: 'foto', titulo: 'Cerca del público', aspecto: '4 / 5', src: null },
-  { id: 'g7', tipo: 'foto', titulo: 'Ensayo previo al show', aspecto: '1 / 1', src: null },
-  { id: 'g8', tipo: 'video', titulo: 'Show completo', aspecto: '3 / 4', src: null, poster: null },
-  { id: 'g9', tipo: 'foto', titulo: 'Backstage con el equipo', aspecto: '4 / 5', src: null },
+  {
+    id: 'g1', tipo: 'foto', titulo: 'Shirley en escena', aspecto: '4 / 5',
+    src: '/presentacion/galeria/shirley-en-escena.jpg', posicion: '100% 30%',
+  },
+  {
+    id: 'g5', tipo: 'video', titulo: 'Un momento especial', aspecto: '16 / 9',
+    src: `${VIDEOS_BASE_URL}/momento-especial.mp4`, poster: '/presentacion/videos/momento-especial.jpg',
+  },
+  { id: 'g3', tipo: 'foto', titulo: 'Baile de Marinera En Vivo', aspecto: '3 / 4', src: '/presentacion/galeria/con-amigos-musicos.jpg' },
+  {
+    id: 'g6', tipo: 'video', titulo: 'Extracto de Baile', aspecto: '16 / 9',
+    src: `${VIDEOS_BASE_URL}/img_1789.mp4`, poster: '/presentacion/videos/cerca-del-publico.jpg',
+  },
+  {
+    id: 'g8', tipo: 'video', titulo: 'Show completo', aspecto: '16 / 9',
+    src: `${VIDEOS_BASE_URL}/show-completo.mp4`, poster: '/presentacion/videos/show-completo.jpg',
+  },
 ]
 
 // Pequeñas rotaciones para el efecto "mosaico" de la galería.
