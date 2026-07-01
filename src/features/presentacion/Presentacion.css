@@ -129,7 +129,12 @@
 }
 /* El afiche siempre es vertical (publicidad tipo flyer): se respeta esa proporción
    en vez de recortarlo a un recuadro horizontal. */
-.pres__hero-evento-img { width: 100%; aspect-ratio: 3 / 4; border-radius: 16px; overflow: hidden; }
+.pres__hero-evento-img {
+  width: 100%; aspect-ratio: 3 / 4; border-radius: 16px; overflow: hidden;
+  border: 0; padding: 0; display: block; font: inherit;
+}
+button.pres__hero-evento-img { cursor: pointer; transition: opacity .2s ease; }
+button.pres__hero-evento-img:hover { opacity: 0.88; }
 .pres__hero-evento-img img, .pres__hero-evento-img .pres__ph { width: 100%; height: 100%; object-fit: cover; }
 .pres__hero-evento-nombre { font-family: 'Playfair Display', serif; font-weight: 600; font-size: 20px; margin: 0; color: var(--ink); line-height: 1.3; }
 .pres__hero-evento-fecha { display: flex; align-items: baseline; gap: 6px; font-size: 14px; font-weight: 600; color: var(--g-dark); margin: 0; }
@@ -187,9 +192,23 @@
 /* ---------- Lightbox ---------- */
 .pres__lb { position: fixed; inset: 0; background: rgba(28,19,10,.92); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .pres__lb-caja { position: relative; max-width: 640px; width: 100%; }
-.pres__lb-cerrar { position: absolute; top: -44px; right: 0; width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: transparent; color: #fff; font-size: 18px; cursor: pointer; line-height: 1; }
-.pres__lb-medio { position: relative; border-radius: 24px; overflow: hidden; background: #000; }
-.pres__lb-medio img, .pres__lb-medio video { width: 100%; max-height: min(70vh, 540px); display: block; }
+/* Afiches (verticales): la caja crece bastante más que la del resto de la galería,
+   para que se lean bien en pantallas grandes en vez de quedar chicos. */
+.pres__lb-caja--grande { max-width: 860px; }
+/* Fijo a la esquina del viewport (no a la caja): así nunca queda fuera de la
+   pantalla, sin importar cuán grande sea la foto/afiche que se está mostrando. */
+.pres__lb-cerrar {
+  position: fixed; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right));
+  width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35);
+  background: rgba(28,19,10,.55); color: #fff; font-size: 20px; cursor: pointer; line-height: 1; z-index: 1;
+}
+.pres__lb-medio {
+  position: relative; border-radius: 24px; overflow: hidden; background: #000;
+  display: flex; align-items: center; justify-content: center;
+  width: fit-content; max-width: 100%; margin: 0 auto;
+}
+.pres__lb-medio img, .pres__lb-medio video { display: block; max-width: 100%; max-height: min(70vh, 540px); width: auto; height: auto; }
+.pres__lb-caja--grande .pres__lb-medio img { max-height: min(80vh, 820px); max-width: 860px; }
 .pres__lb-pie { color: var(--cream); text-align: center; font-size: 14px; margin: 14px 0 0; }
 
 /* ---------- Animaciones ---------- */
