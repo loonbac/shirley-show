@@ -20,6 +20,7 @@ export function FilaInteresado({ interesado, onConfirmar, onEditar, onEliminar, 
       </div>
       <div className="fila__badges">
         <Badge tono={confirmado ? 'exito' : 'primario'}>{confirmado ? 'Ya confirmó' : 'Interesado'}</Badge>
+        {interesado.promotora && <Badge tono="alerta">Promotor/a</Badge>}
         {interesado.canal && (
           <span className="fila__medio fila__canal">
             {IconoDelCanal && <IconoDelCanal size={16} />} {interesado.canal}

@@ -37,6 +37,7 @@ func (s *Server) registrarVenta(w http.ResponseWriter, r *http.Request) error {
 		Cantidad        int     `json:"cantidad"`
 		MedioPago       string  `json:"medio_pago"`
 		EstadoPago      string  `json:"estado_pago"`
+		Cortesia        bool    `json:"cortesia"` // entrada gratis (promotora que cumplió): S/ 0 y QR normal
 	}
 	if err := leerJSON(r, &in); err != nil {
 		return err
@@ -63,12 +64,16 @@ func (s *Server) registrarVenta(w http.ResponseWriter, r *http.Request) error {
 	if in.Cantidad < 1 || in.Cantidad > 50 {
 		return errDatos("Cantidad inválida (1 a 50)")
 	}
-	if !mediosPago[in.MedioPago] {
-		return errDatos("Medio de pago inválido")
-	}
+	medioPago := in.MedioPago
 	estadoPago := "Pendiente"
 	if in.EstadoPago == "Pagado" {
 		estadoPago = "Pagado"
+	}
+	if in.Cortesia {
+		// La cortesía no se cobra: queda "Pagado" para no figurar como deuda pendiente.
+		precio, medioPago, estadoPago = 0, "Cortesía", "Pagado"
+	} else if !mediosPago[in.MedioPago] {
+		return errDatos("Medio de pago inválido")
 	}
 
 	creadas, err := s.st.CrearEntradas(store.VentaData{
@@ -77,7 +82,7 @@ func (s *Server) registrarVenta(w http.ResponseWriter, r *http.Request) error {
 		Contacto:        in.Contacto,
 		TipoEntrada:     in.TipoEntrada,
 		Precio:          precio,
-		MedioPago:       in.MedioPago,
+		MedioPago:       medioPago,
 		EstadoPago:      estadoPago,
 		Cantidad:        in.Cantidad,
 	})

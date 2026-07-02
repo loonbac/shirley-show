@@ -45,9 +45,10 @@ type Interesado struct {
 	EventoID      int64   `json:"evento_id"`
 	Nombre        string  `json:"nombre"`
 	Contacto      *string `json:"contacto"`
-	Canal         *string `json:"canal"`    // por dónde se contactó: WhatsApp | Messenger | nil
-	Personas      int     `json:"personas"` // estimación: cuántos vendrían con esta persona
-	Estado        string  `json:"estado"`   // Interesado | Confirmado
+	Canal         *string `json:"canal"`     // por dónde se contactó: WhatsApp | Messenger | nil
+	Personas      int     `json:"personas"`  // estimación: cuántos vendrían con esta persona
+	Promotora     bool    `json:"promotora"` // promueve el evento; si cumple, entra gratis (cortesía con QR)
+	Estado        string  `json:"estado"`    // Interesado | Confirmado
 	FechaCreacion string  `json:"fecha_creacion"`
 }
 

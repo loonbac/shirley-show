@@ -8,10 +8,11 @@ import (
 )
 
 type interesadoInput struct {
-	Nombre   string  `json:"nombre"`
-	Contacto *string `json:"contacto"`
-	Canal    *string `json:"canal"`
-	Personas int     `json:"personas"`
+	Nombre    string  `json:"nombre"`
+	Contacto  *string `json:"contacto"`
+	Canal     *string `json:"canal"`
+	Personas  int     `json:"personas"`
+	Promotora bool    `json:"promotora"`
 }
 
 // aData valida y normaliza la entrada del formulario de interesado.
@@ -31,7 +32,7 @@ func (in interesadoInput) aData(eventoID int64) (store.InteresadoData, error) {
 	if personas > 100 {
 		return store.InteresadoData{}, errDatos("El número de personas es demasiado alto")
 	}
-	return store.InteresadoData{EventoID: eventoID, Nombre: nombre, Contacto: in.Contacto, Canal: canal, Personas: personas}, nil
+	return store.InteresadoData{EventoID: eventoID, Nombre: nombre, Contacto: in.Contacto, Canal: canal, Personas: personas, Promotora: in.Promotora}, nil
 }
 
 // canalValido acepta solo los canales de contacto conocidos (o ninguno).

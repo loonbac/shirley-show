@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS interesados (
   contacto        TEXT,
   canal           TEXT,                              -- por dónde se contactó: 'WhatsApp' | 'Messenger'
   personas        INTEGER NOT NULL DEFAULT 1,        -- cuántos vendrían (titular + familia)
+  promotora       INTEGER NOT NULL DEFAULT 0,        -- 1 = promueve el evento; si cumple, entra gratis (cortesía con QR)
   estado          TEXT NOT NULL DEFAULT 'Interesado', -- 'Interesado' | 'Confirmado'
   fecha_creacion  TEXT NOT NULL
 );

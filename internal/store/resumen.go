@@ -28,7 +28,9 @@ func (s *Store) Resumen(eventoID int64) (*Resumen, error) {
 		r.Vendidas++
 		if estadoPago == "Pagado" {
 			r.Cobrado += precio
-			r.RecaudadoPorMedio[medio] += precio
+			if precio > 0 { // las cortesías (S/ 0) no suman a ningún medio de pago
+				r.RecaudadoPorMedio[medio] += precio
+			}
 		} else {
 			r.Pendiente += precio
 		}

@@ -48,6 +48,7 @@ func migrar(db *sql.DB) {
 	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_entradas_scantoken ON entradas(scan_token)")
 	// La tabla interesados pudo crearse antes de existir 'canal' (bases ya creadas).
 	_, _ = db.Exec("ALTER TABLE interesados ADD COLUMN canal TEXT")
+	_, _ = db.Exec("ALTER TABLE interesados ADD COLUMN promotora INTEGER NOT NULL DEFAULT 0")
 }
 
 // backfillScanTokens asigna un token corto a las entradas que aún no lo tienen

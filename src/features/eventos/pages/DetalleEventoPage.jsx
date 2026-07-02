@@ -37,7 +37,12 @@ export default function DetalleEventoPage() {
 
   // Desde la fase 1: abre la venta en la pestaña Confirmados con el nombre ya puesto.
   function confirmarAsistencia(interesado) {
-    setPrefill({ nombre: interesado.nombre, contacto: interesado.contacto || '', interesadoId: interesado.id })
+    setPrefill({
+      nombre: interesado.nombre,
+      contacto: interesado.contacto || '',
+      interesadoId: interesado.id,
+      promotora: Boolean(interesado.promotora),
+    })
     setPestana('confirmados')
     setVentaAbierta(true)
   }

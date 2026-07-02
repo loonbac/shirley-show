@@ -8,7 +8,8 @@ import { MEDIOS_PAGO, ESTADOS_PAGO, opciones } from '../constantes.js'
 import { soles } from '../../../lib/format.js'
 
 // Formulario para registrar una venta. Genera `cantidad` entradas (cada una con su QR).
-// `prefill` (opcional) trae nombre/contacto cuando se confirma a un interesado de la fase 1.
+// `prefill` (opcional) trae nombre/contacto cuando se confirma a un interesado de la fase 1;
+// si viene de un promotor/a, ofrece darle su entrada de cortesía (S/ 0, con QR normal).
 export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
   const tipos = evento.tipos_de_entrada
   const [nombre, setNombre] = useState(prefill?.nombre || '')
@@ -17,10 +18,11 @@ export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
   const [cantidad, setCantidad] = useState(1)
   const [medio, setMedio] = useState(MEDIOS_PAGO[0])
   const [pago, setPago] = useState('Pagado')
+  const [cortesia, setCortesia] = useState(Boolean(prefill?.promotora))
   const [error, setError] = useState('')
 
   const precio = tipos.find((t) => t.nombre === tipo)?.precio || 0
-  const total = precio * Number(cantidad || 0)
+  const total = cortesia ? 0 : precio * Number(cantidad || 0)
 
   function enviar(e) {
     e.preventDefault()
@@ -33,6 +35,7 @@ export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
       cantidad: Number(cantidad),
       medio_pago: medio,
       estado_pago: pago,
+      cortesia,
     }).catch((err) => setError(err.message))
   }
 
@@ -59,15 +62,31 @@ export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
       >
         <Input id="cantidad" type="number" min="1" max="50" value={cantidad} onChange={(e) => setCantidad(e.target.value)} />
       </Campo>
-      <Campo etiqueta="Medio de pago" htmlFor="medio">
-        <Select id="medio" value={medio} onChange={(e) => setMedio(e.target.value)} opciones={opciones(MEDIOS_PAGO)} />
-      </Campo>
-      <Campo etiqueta="Estado del pago" htmlFor="pago">
-        <Select id="pago" value={pago} onChange={(e) => setPago(e.target.value)} opciones={opciones(ESTADOS_PAGO)} />
-      </Campo>
+      {prefill?.promotora && (
+        <Campo
+          etiqueta="Entrada de cortesía (promotor/a)"
+          ayuda="Cumplió invitando gente: no paga, pero recibe su QR normal. Desactívalo si esta vez sí paga."
+        >
+          <div className="alternador">
+            <Boton type="button" variante={cortesia ? 'primario' : 'secundario'} onClick={() => setCortesia((v) => !v)}>
+              {cortesia ? 'Sí, entra gratis' : 'No, paga su entrada'}
+            </Boton>
+          </div>
+        </Campo>
+      )}
+      {!cortesia && (
+        <Campo etiqueta="Medio de pago" htmlFor="medio">
+          <Select id="medio" value={medio} onChange={(e) => setMedio(e.target.value)} opciones={opciones(MEDIOS_PAGO)} />
+        </Campo>
+      )}
+      {!cortesia && (
+        <Campo etiqueta="Estado del pago" htmlFor="pago">
+          <Select id="pago" value={pago} onChange={(e) => setPago(e.target.value)} opciones={opciones(ESTADOS_PAGO)} />
+        </Campo>
+      )}
       {error && <MensajeError>{error}</MensajeError>}
       <Boton type="submit" ancho disabled={guardando}>
-        {guardando ? 'Registrando…' : `Registrar venta · ${soles(total)}`}
+        {guardando ? 'Registrando…' : cortesia ? 'Dar entrada de cortesía · S/ 0.00' : `Registrar venta · ${soles(total)}`}
       </Boton>
     </form>
   )

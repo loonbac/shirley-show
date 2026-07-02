@@ -10,6 +10,7 @@ export function FormularioInteresado({ inicial, guardando, onGuardar, onCancelar
   const [nombre, setNombre] = useState(inicial?.nombre || '')
   const [canal, setCanal] = useState(inicial?.canal || '') // '' | 'WhatsApp' | 'Messenger'
   const [personas, setPersonas] = useState(inicial?.personas || 1)
+  const [promotora, setPromotora] = useState(Boolean(inicial?.promotora))
   const [error, setError] = useState('')
 
   // Toca un canal para elegirlo; toca el mismo de nuevo para dejarlo sin marcar.
@@ -23,6 +24,7 @@ export function FormularioInteresado({ inicial, guardando, onGuardar, onCancelar
       nombre: nombre.trim(),
       canal: canal || null,
       personas: Number(personas) || 1,
+      promotora,
     }).catch((err) => setError(err.message))
   }
 
@@ -62,6 +64,16 @@ export function FormularioInteresado({ inicial, guardando, onGuardar, onCancelar
           value={personas}
           onChange={(e) => setPersonas(e.target.value)}
         />
+      </Campo>
+      <Campo
+        etiqueta="¿Es promotor/a?"
+        ayuda="Promete invitar a más gente. Si cumple, no paga entrada pero igual recibe su QR para pasar."
+      >
+        <div className="alternador">
+          <Boton type="button" variante={promotora ? 'primario' : 'secundario'} onClick={() => setPromotora((v) => !v)}>
+            {promotora ? 'Sí, es promotor/a' : 'No'}
+          </Boton>
+        </div>
       </Campo>
       {error && <MensajeError>{error}</MensajeError>}
       <Boton type="submit" ancho disabled={guardando}>

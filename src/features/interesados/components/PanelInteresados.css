@@ -49,6 +49,17 @@
   font-size: var(--texto-lg);
 }
 
+/* Alternador sí/no (¿es promotor/a?, cortesía): un solo botón ancho que se prende y apaga.
+   También lo usa el formulario de venta (el CSS se carga junto con este módulo). */
+.alternador {
+  display: flex;
+  width: 100%;
+}
+.alternador .boton {
+  flex: 1;
+  border-radius: var(--radio);
+}
+
 /* Canal mostrado en la tarjeta del interesado, con su icono. */
 .fila__canal {
   display: inline-flex;
