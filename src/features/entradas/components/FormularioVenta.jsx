@@ -6,33 +6,51 @@ import { Boton } from '../../../components/Boton.jsx'
 import { MensajeError } from '../../../components/Estado.jsx'
 import { MEDIOS_PAGO, ESTADOS_PAGO, opciones } from '../constantes.js'
 import { soles } from '../../../lib/format.js'
+import './FormularioVenta.css'
 
-// Formulario para registrar una venta. Genera `cantidad` entradas (cada una con su QR).
+const MAX_POR_VENTA = 50
+
+// Formulario para registrar una venta. Se elige cuántas entradas de cada tipo
+// (ej. 2 General + 1 VIP) y cada una recibe su propio QR.
 // `prefill` (opcional) trae nombre/contacto cuando se confirma a un interesado de la fase 1;
 // si viene de un promotor/a, ofrece darle su entrada de cortesía (S/ 0, con QR normal).
 export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
   const tipos = evento.tipos_de_entrada
   const [nombre, setNombre] = useState(prefill?.nombre || '')
   const [contacto, setContacto] = useState(prefill?.contacto || '')
-  const [tipo, setTipo] = useState(tipos[0]?.nombre || '')
-  const [cantidad, setCantidad] = useState(1)
+  // Cuántas de cada tipo. Si viene de la fase 1, arranca con las personas que
+  // dijo que traería (en el primer tipo); se puede repartir entre tipos a mano.
+  const [cantidades, setCantidades] = useState(() =>
+    tipos.map((_, i) => (i === 0 ? Math.min(prefill?.personas || 1, MAX_POR_VENTA) : 0))
+  )
   const [medio, setMedio] = useState(MEDIOS_PAGO[0])
   const [pago, setPago] = useState('Pagado')
   const [cortesia, setCortesia] = useState(Boolean(prefill?.promotora))
   const [error, setError] = useState('')
 
-  const precio = tipos.find((t) => t.nombre === tipo)?.precio || 0
-  const total = cortesia ? 0 : precio * Number(cantidad || 0)
+  const totalEntradas = cantidades.reduce((s, c) => s + (Number(c) || 0), 0)
+  const total = cortesia
+    ? 0
+    : tipos.reduce((s, t, i) => s + t.precio * (Number(cantidades[i]) || 0), 0)
+
+  function cambiarCantidad(i, valor) {
+    const n = Math.max(0, Math.min(MAX_POR_VENTA, Math.floor(Number(valor) || 0)))
+    setCantidades((prev) => prev.map((c, j) => (j === i ? n : c)))
+  }
 
   function enviar(e) {
     e.preventDefault()
     setError('')
     if (!nombre.trim()) return setError('Escribe el nombre del comprador')
+    const lineas = tipos
+      .map((t, i) => ({ tipo_entrada: t.nombre, cantidad: Number(cantidades[i]) || 0 }))
+      .filter((l) => l.cantidad > 0)
+    if (lineas.length === 0) return setError('Agrega al menos una entrada')
+    if (totalEntradas > MAX_POR_VENTA) return setError(`Máximo ${MAX_POR_VENTA} entradas por venta`)
     onRegistrar({
       nombre_comprador: nombre,
       contacto,
-      tipo_entrada: tipo,
-      cantidad: Number(cantidad),
+      lineas,
       medio_pago: medio,
       estado_pago: pago,
       cortesia,
@@ -47,20 +65,45 @@ export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
       <Campo etiqueta="Contacto (WhatsApp)" htmlFor="contacto">
         <Input id="contacto" value={contacto} onChange={(e) => setContacto(e.target.value)} inputMode="tel" />
       </Campo>
-      <Campo etiqueta="Tipo de entrada" htmlFor="tipo">
-        <Select
-          id="tipo"
-          value={tipo}
-          onChange={(e) => setTipo(e.target.value)}
-          opciones={tipos.map((t) => ({ valor: t.nombre, etiqueta: `${t.nombre} — ${soles(t.precio)}` }))}
-        />
-      </Campo>
       <Campo
-        etiqueta="¿Cuántas entradas?"
-        htmlFor="cantidad"
+        etiqueta="¿Cuántas entradas de cada tipo?"
         ayuda="Una por persona (titular + familiares o invitados). Cada una recibe su propio QR."
       >
-        <Input id="cantidad" type="number" min="1" max="50" value={cantidad} onChange={(e) => setCantidad(e.target.value)} />
+        <div className="venta-tipos">
+          {tipos.map((t, i) => (
+            <div key={t.nombre} className="venta-tipo">
+              <span className="venta-tipo__nombre">
+                {t.nombre} <span className="venta-tipo__precio">{soles(t.precio)}</span>
+              </span>
+              <div className="venta-tipo__stepper">
+                <Boton
+                  type="button"
+                  variante="secundario"
+                  aria-label={`Una entrada ${t.nombre} menos`}
+                  onClick={() => cambiarCantidad(i, (Number(cantidades[i]) || 0) - 1)}
+                >
+                  −
+                </Boton>
+                <Input
+                  type="number"
+                  min="0"
+                  max={MAX_POR_VENTA}
+                  aria-label={`Entradas ${t.nombre}`}
+                  value={cantidades[i]}
+                  onChange={(e) => cambiarCantidad(i, e.target.value)}
+                />
+                <Boton
+                  type="button"
+                  variante="secundario"
+                  aria-label={`Una entrada ${t.nombre} más`}
+                  onClick={() => cambiarCantidad(i, (Number(cantidades[i]) || 0) + 1)}
+                >
+                  +
+                </Boton>
+              </div>
+            </div>
+          ))}
+        </div>
       </Campo>
       {prefill?.promotora && (
         <Campo
@@ -86,7 +129,11 @@ export function FormularioVenta({ evento, guardando, onRegistrar, prefill }) {
       )}
       {error && <MensajeError>{error}</MensajeError>}
       <Boton type="submit" ancho disabled={guardando}>
-        {guardando ? 'Registrando…' : cortesia ? 'Dar entrada de cortesía · S/ 0.00' : `Registrar venta · ${soles(total)}`}
+        {guardando
+          ? 'Registrando…'
+          : cortesia
+            ? `Dar ${totalEntradas === 1 ? 'entrada' : `${totalEntradas} entradas`} de cortesía · S/ 0.00`
+            : `Registrar ${totalEntradas === 1 ? '1 entrada' : `${totalEntradas} entradas`} · ${soles(total)}`}
       </Boton>
     </form>
   )

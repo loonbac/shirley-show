@@ -1,11 +1,11 @@
 import { Tarjeta } from '../../../components/Tarjeta.jsx'
 import { Boton } from '../../../components/Boton.jsx'
 import { Badge, tonoPago, tonoCheckin } from '../../../components/Badge.jsx'
-import { IconoCheck, IconoTicket } from '../../../components/iconos/Iconos.jsx'
+import { IconoCheck, IconoTicket, IconoBasura } from '../../../components/iconos/Iconos.jsx'
 import './FilaEntrada.css'
 
-// Una entrada en la lista, con sus estados y acciones (confirmar pago / ver entrada).
-export function FilaEntrada({ entrada, confirmando, onConfirmarPago, onVer }) {
+// Una entrada en la lista, con sus estados y acciones (confirmar pago / ver entrada / borrar).
+export function FilaEntrada({ entrada, confirmando, onConfirmarPago, onVer, onEliminar }) {
   return (
     <Tarjeta>
       <div className="fila__top">
@@ -27,6 +27,9 @@ export function FilaEntrada({ entrada, confirmando, onConfirmarPago, onVer }) {
         )}
         <Boton variante="secundario" onClick={() => onVer(entrada)}>
           <IconoTicket size={20} /> Ver / compartir
+        </Boton>
+        <Boton variante="texto" onClick={() => onEliminar(entrada)}>
+          <IconoBasura size={18} /> Borrar
         </Boton>
       </div>
     </Tarjeta>

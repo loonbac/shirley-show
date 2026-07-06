@@ -1,0 +1,30 @@
+/* Selector de cantidades por tipo de entrada dentro del formulario de venta. */
+.venta-tipos {
+  display: grid;
+  gap: 10px;
+}
+.venta-tipo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.venta-tipo__nombre {
+  font-weight: var(--peso-fuerte);
+}
+.venta-tipo__precio {
+  color: var(--color-texto-suave);
+  font-weight: normal;
+  font-size: var(--texto-sm);
+  margin-left: 6px;
+}
+.venta-tipo__stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.venta-tipo__stepper input {
+  width: 72px;
+  text-align: center;
+}

@@ -6,13 +6,17 @@ import { FilaEntrada } from './FilaEntrada.jsx'
 import { VistaEntrada } from './VistaEntrada.jsx'
 import { CompartirEntrada } from './CompartirEntrada.jsx'
 import { Modal } from '../../../components/Modal.jsx'
+import { Boton } from '../../../components/Boton.jsx'
 import { Cargando, MensajeError, Vacio } from '../../../components/Estado.jsx'
+import { soles } from '../../../lib/format.js'
 
-// Sección de entradas del detalle: filtros + lista + confirmar pago + ver/compartir.
+// Sección de entradas del detalle: filtros + lista + confirmar pago + ver/compartir + borrar.
 export function PanelEntradas({ eventoId, version, onCambio }) {
   const [filtros, setFiltros] = useState({ q: '', estado_pago: '' })
   const [verEntrada, setVerEntrada] = useState(null)
+  const [aEliminar, setAEliminar] = useState(null)
   const [confirmando, setConfirmando] = useState(false)
+  const [borrando, setBorrando] = useState(false)
   const { datos: entradas, cargando, error, recargar } = useEntradas(eventoId, filtros, version)
 
   async function confirmarPago(entrada) {
@@ -23,6 +27,19 @@ export function PanelEntradas({ eventoId, version, onCambio }) {
       onCambio?.()
     } finally {
       setConfirmando(false)
+    }
+  }
+
+  async function eliminar() {
+    if (!aEliminar) return
+    setBorrando(true)
+    try {
+      await entradasApi.eliminar(aEliminar.id)
+      setAEliminar(null)
+      recargar()
+      onCambio?.()
+    } finally {
+      setBorrando(false)
     }
   }
 
@@ -41,6 +58,7 @@ export function PanelEntradas({ eventoId, version, onCambio }) {
             confirmando={confirmando}
             onConfirmarPago={confirmarPago}
             onVer={setVerEntrada}
+            onEliminar={setAEliminar}
           />
         ))}
       </div>
@@ -52,6 +70,25 @@ export function PanelEntradas({ eventoId, version, onCambio }) {
             {verEntrada.estado_pago === 'Pagado' && <CompartirEntrada entrada={verEntrada} />}
           </div>
         )}
+      </Modal>
+
+      <Modal abierto={Boolean(aEliminar)} titulo="Borrar entrada" onCerrar={() => setAEliminar(null)}>
+        <div className="pila">
+          <p>
+            ¿Borrar la entrada de <strong>{aEliminar?.nombre_comprador}</strong> (
+            {aEliminar?.tipo_entrada} · {soles(aEliminar?.precio || 0)})? Se elimina para siempre y
+            su QR deja de funcionar. Úsalo solo si la registraste por error.
+          </p>
+          {aEliminar?.estado_checkin === 'Usada' && (
+            <MensajeError>Ojo: esta persona ya ingresó al evento con esta entrada.</MensajeError>
+          )}
+          <Boton variante="peligro" ancho onClick={eliminar} disabled={borrando}>
+            Sí, borrar entrada
+          </Boton>
+          <Boton variante="secundario" ancho onClick={() => setAEliminar(null)} disabled={borrando}>
+            Cancelar
+          </Boton>
+        </div>
       </Modal>
     </section>
   )

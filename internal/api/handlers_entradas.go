@@ -25,19 +25,27 @@ func (s *Server) listarEntradas(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// lineaVenta es "cuántas entradas de cada tipo" dentro de una misma venta
+// (ej. 2 General + 1 VIP para la misma compradora).
+type lineaVenta struct {
+	TipoEntrada string `json:"tipo_entrada"`
+	Cantidad    int    `json:"cantidad"`
+}
+
 func (s *Server) registrarVenta(w http.ResponseWriter, r *http.Request) error {
 	eventoID, err := idDeRuta(r, "id")
 	if err != nil {
 		return err
 	}
 	var in struct {
-		NombreComprador string  `json:"nombre_comprador"`
-		Contacto        *string `json:"contacto"`
-		TipoEntrada     string  `json:"tipo_entrada"`
-		Cantidad        int     `json:"cantidad"`
-		MedioPago       string  `json:"medio_pago"`
-		EstadoPago      string  `json:"estado_pago"`
-		Cortesia        bool    `json:"cortesia"` // entrada gratis (promotora que cumplió): S/ 0 y QR normal
+		NombreComprador string       `json:"nombre_comprador"`
+		Contacto        *string      `json:"contacto"`
+		Lineas          []lineaVenta `json:"lineas"`
+		TipoEntrada     string       `json:"tipo_entrada"` // forma antigua: un solo tipo
+		Cantidad        int          `json:"cantidad"`
+		MedioPago       string       `json:"medio_pago"`
+		EstadoPago      string       `json:"estado_pago"`
+		Cortesia        bool         `json:"cortesia"` // entrada gratis (promotora que cumplió): S/ 0 y QR normal
 	}
 	if err := leerJSON(r, &in); err != nil {
 		return err
@@ -50,19 +58,26 @@ func (s *Server) registrarVenta(w http.ResponseWriter, r *http.Request) error {
 	if strings.TrimSpace(in.NombreComprador) == "" {
 		return errDatos("El nombre del comprador es obligatorio")
 	}
-	var precio float64
-	hallado := false
+	lineas := in.Lineas
+	if len(lineas) == 0 {
+		lineas = []lineaVenta{{TipoEntrada: in.TipoEntrada, Cantidad: in.Cantidad}}
+	}
+	precios := map[string]float64{}
 	for _, t := range evento.TiposDeEntrada {
-		if t.Nombre == in.TipoEntrada {
-			precio, hallado = t.Precio, true
-			break
+		precios[t.Nombre] = t.Precio
+	}
+	total := 0
+	for _, l := range lineas {
+		if _, ok := precios[l.TipoEntrada]; !ok {
+			return errDatos("Tipo de entrada inválido para este evento")
 		}
+		if l.Cantidad < 1 || l.Cantidad > 50 {
+			return errDatos("Cantidad inválida (1 a 50)")
+		}
+		total += l.Cantidad
 	}
-	if !hallado {
-		return errDatos("Tipo de entrada inválido para este evento")
-	}
-	if in.Cantidad < 1 || in.Cantidad > 50 {
-		return errDatos("Cantidad inválida (1 a 50)")
+	if total > 50 {
+		return errDatos("Máximo 50 entradas por venta")
 	}
 	medioPago := in.MedioPago
 	estadoPago := "Pendiente"
@@ -71,25 +86,46 @@ func (s *Server) registrarVenta(w http.ResponseWriter, r *http.Request) error {
 	}
 	if in.Cortesia {
 		// La cortesía no se cobra: queda "Pagado" para no figurar como deuda pendiente.
-		precio, medioPago, estadoPago = 0, "Cortesía", "Pagado"
+		medioPago, estadoPago = "Cortesía", "Pagado"
 	} else if !mediosPago[in.MedioPago] {
 		return errDatos("Medio de pago inválido")
 	}
 
-	creadas, err := s.st.CrearEntradas(store.VentaData{
-		EventoID:        eventoID,
-		NombreComprador: strings.TrimSpace(in.NombreComprador),
-		Contacto:        in.Contacto,
-		TipoEntrada:     in.TipoEntrada,
-		Precio:          precio,
-		MedioPago:       medioPago,
-		EstadoPago:      estadoPago,
-		Cantidad:        in.Cantidad,
-	})
+	creadas := []store.Entrada{}
+	for _, l := range lineas {
+		precio := precios[l.TipoEntrada]
+		if in.Cortesia {
+			precio = 0
+		}
+		nuevas, err := s.st.CrearEntradas(store.VentaData{
+			EventoID:        eventoID,
+			NombreComprador: strings.TrimSpace(in.NombreComprador),
+			Contacto:        in.Contacto,
+			TipoEntrada:     l.TipoEntrada,
+			Precio:          precio,
+			MedioPago:       medioPago,
+			EstadoPago:      estadoPago,
+			Cantidad:        l.Cantidad,
+		})
+		if err != nil {
+			return err
+		}
+		creadas = append(creadas, nuevas...)
+	}
+	escribirJSON(w, http.StatusCreated, creadas)
+	return nil
+}
+
+// eliminarEntrada borra una entrada registrada por error; su QR deja de valer.
+func (s *Server) eliminarEntrada(w http.ResponseWriter, r *http.Request) error {
+	id, err := idDeRuta(r, "id")
 	if err != nil {
 		return err
 	}
-	escribirJSON(w, http.StatusCreated, creadas)
+	if err := s.st.EliminarEntrada(id); err != nil {
+		return err
+	}
+	escribirJSON(w, http.StatusOK, map[string]bool{"eliminado": true})
 	return nil
 }
 

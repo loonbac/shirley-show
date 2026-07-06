@@ -164,6 +164,19 @@ func (s *Store) ConfirmarPago(id int64) (*Entrada, error) {
 	return s.ObtenerEntrada(id)
 }
 
+// EliminarEntrada borra una entrada (para corregir ventas registradas por error).
+// Su QR deja de existir, así que ya no podrá escanearse en la puerta.
+func (s *Store) EliminarEntrada(id int64) error {
+	res, err := s.db.Exec("DELETE FROM entradas WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNoEncontrado
+	}
+	return nil
+}
+
 func contactoSQL(c *string) any {
 	if c == nil || strings.TrimSpace(*c) == "" {
 		return nil

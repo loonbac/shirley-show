@@ -115,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	prot("PUT", "/api/gastos/{id}", s.actualizarGasto)
 	prot("DELETE", "/api/gastos/{id}", s.eliminarGasto)
 	prot("GET", "/api/entradas/{id}", s.obtenerEntrada)
+	prot("DELETE", "/api/entradas/{id}", s.eliminarEntrada)
 	prot("POST", "/api/entradas/{id}/confirmar-pago", s.confirmarPago)
 	prot("POST", "/api/entradas/{id}/enviar-whatsapp", s.enviarWhatsApp)
 	prot("GET", "/api/whatsapp/estado", s.whatsappEstado)

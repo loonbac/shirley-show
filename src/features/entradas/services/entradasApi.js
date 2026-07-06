@@ -11,6 +11,8 @@ export const entradasApi = {
   },
   registrarVenta: (eventoId, datos) => api.post(`/eventos/${eventoId}/entradas`, datos),
   confirmarPago: (id) => api.post(`/entradas/${id}/confirmar-pago`),
+  // Borra una entrada registrada por error (su QR deja de valer).
+  eliminar: (id) => api.del(`/entradas/${id}`),
   // Vista pública (sin login) por código único, para compartir por WhatsApp.
   porCodigo: (codigo) => api.get(`/publico/entrada/${codigo}`, { auth: false }),
 }
