@@ -45,7 +45,8 @@ export function NotasQR({ valor, tamano = 240 }) {
 }
 
 // Calcula el lienzo, las notas a dibujar (excluye esquinas y centro del logo) y el recuadro del logo.
-function construir(valor) {
+// Exportado para que la foto de la entrada (canvas) dibuje exactamente el mismo QR.
+export function construir(valor) {
   const { size, dark } = generarMatriz(valor)
   const lienzo = size + MARGEN * 2
 

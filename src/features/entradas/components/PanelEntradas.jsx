@@ -11,7 +11,8 @@ import { Cargando, MensajeError, Vacio } from '../../../components/Estado.jsx'
 import { soles } from '../../../lib/format.js'
 
 // Sección de entradas del detalle: filtros + lista + confirmar pago + ver/compartir + borrar.
-export function PanelEntradas({ eventoId, version, onCambio }) {
+// `evento` (nombre, fecha, lugar) se usa en la vista de la entrada y en la foto para WhatsApp.
+export function PanelEntradas({ eventoId, evento, version, onCambio }) {
   const [filtros, setFiltros] = useState({ q: '', estado_pago: '' })
   const [verEntrada, setVerEntrada] = useState(null)
   const [aEliminar, setAEliminar] = useState(null)
@@ -66,8 +67,8 @@ export function PanelEntradas({ eventoId, version, onCambio }) {
       <Modal abierto={Boolean(verEntrada)} titulo="Entrada" onCerrar={() => setVerEntrada(null)}>
         {verEntrada && (
           <div className="pila">
-            <VistaEntrada entrada={verEntrada} />
-            {verEntrada.estado_pago === 'Pagado' && <CompartirEntrada entrada={verEntrada} />}
+            <VistaEntrada entrada={{ ...verEntrada, evento }} />
+            {verEntrada.estado_pago === 'Pagado' && <CompartirEntrada entrada={verEntrada} evento={evento} />}
           </div>
         )}
       </Modal>

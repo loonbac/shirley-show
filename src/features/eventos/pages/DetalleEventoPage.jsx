@@ -129,7 +129,7 @@ export default function DetalleEventoPage() {
             <ResumenEvento eventoId={id} version={version} />
           </aside>
           <div className="detalle-cols__main">
-            <PanelEntradas eventoId={id} version={version} onCambio={refrescar} />
+            <PanelEntradas eventoId={id} evento={evento} version={version} onCambio={refrescar} />
           </div>
         </div>
       )}

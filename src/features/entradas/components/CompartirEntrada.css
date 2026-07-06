@@ -1,0 +1,9 @@
+/* Mensajito de estado al compartir (foto descargada, link copiado, etc.). */
+.compartir__aviso {
+  text-align: center;
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+  background: var(--color-primario-suave);
+  border-radius: var(--radio-sm);
+  padding: 10px 14px;
+}
