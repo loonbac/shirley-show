@@ -422,8 +422,10 @@ impl SshVocalSeparator {
         match tokio::time::timeout(timeout, cmd.output()).await {
             Ok(Ok(out)) => {
                 if !out.status.success() {
-                    let err = String::from_utf8_lossy(&out.stderr);
-                    eprintln!("Aviso: fallo al programar apagado remoto (+60): {err}");
+                    eprintln!(
+                        "Aviso: fallo al programar apagado remoto (+60): exit status {}",
+                        out.status
+                    );
                 }
             }
             Ok(Err(e)) => {
@@ -457,6 +459,10 @@ struct FfprobeFormatEntry {
 }
 
 impl VocalSeparator for SshVocalSeparator {
+    fn is_remote(&self) -> bool {
+        true
+    }
+
     fn probe(&self, timeout: Duration) -> Pin<Box<dyn Future<Output = bool> + Send>> {
         let this = self.clone();
         Box::pin(async move { this.check_probe(timeout).await })
@@ -535,9 +541,12 @@ impl VocalSeparator for SshVocalSeparator {
                 .checked_sub(start.elapsed())
                 .ok_or(VocalSeparationError::SeparationTimeout)?;
             let mkdir_step = remaining.min(Duration::from_secs(10));
-            guard
+            let mkdir_status = guard
                 .run_status(this.command_builder.build_mkdir(&remote_dir), mkdir_step)
                 .await?;
+            if !mkdir_status.success() {
+                return Err(VocalSeparationError::SeparationFailed);
+            }
             guard.arm_remote_dir(&remote_dir);
 
             // 7. Upload input audio
@@ -548,13 +557,17 @@ impl VocalSeparator for SshVocalSeparator {
                 .checked_sub(start.elapsed())
                 .ok_or(VocalSeparationError::SeparationTimeout)?;
             let upload_step = remaining.min(Duration::from_secs(120));
-            guard
+            let upload_status = guard
                 .run_status(
                     this.command_builder
                         .build_upload(&request.source_path, &remote_input_path),
                     upload_step,
                 )
                 .await?;
+            if !upload_status.success() {
+                guard.kill_and_cleanup().await;
+                return Err(VocalSeparationError::SeparationFailed);
+            }
 
             // 8. Run remote pipeline
             let mode_str = request.mode.as_str();
@@ -581,13 +594,17 @@ impl VocalSeparator for SshVocalSeparator {
                 .checked_sub(start.elapsed())
                 .ok_or(VocalSeparationError::SeparationTimeout)?;
             let download_step = remaining.min(Duration::from_secs(60));
-            guard
+            let download_status = guard
                 .run_status(
                     this.command_builder
                         .build_download(&remote_output_path, &request.output_path),
                     download_step,
                 )
                 .await?;
+            if !download_status.success() {
+                guard.kill_and_cleanup().await;
+                return Err(VocalSeparationError::SeparationFailed);
+            }
 
             // 10. Local ffprobe post-transfer verification
             let remaining = request

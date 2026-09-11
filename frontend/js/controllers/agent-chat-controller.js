@@ -1,8 +1,10 @@
 import { createAgentChatPanel } from '../components/organisms/agent-chat-panel.js';
-import { sendAgentChatMessage } from '../data/agent-chat-api.js';
+import { sendAgentChatMessage, getGpuStatus } from '../data/agent-chat-api.js';
 import { emitAgentRefresh } from '../core/state/agent-refresh.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
 import { containsYouTubeUrl } from '../utils/validation/contains-youtube-url.js';
+import { isVocalSeparationIntent } from '../utils/validation/is-vocal-separation-intent.js';
+import { isStagedAudioUnrelated } from '../utils/validation/is-staged-audio-unrelated.js';
 
 let activeAgentChatController = null;
 
@@ -33,7 +35,11 @@ export function getActiveAgentChatController() {
  * }}
  */
 export function createAgentChatController(deps) {
-  const { chatState } = deps;
+  const {
+    chatState,
+    getGpuStatusFn = getGpuStatus,
+    sendAgentChatMessageFn = sendAgentChatMessage,
+  } = deps;
 
   // Sync route context changes into chat state
   const unsubscribeContext = activePresentationContextSignal.subscribe((context) => {
@@ -88,10 +94,31 @@ export function createAgentChatController(deps) {
     if (priorState.pending) return;
 
     const attachment = priorState.attachment;
+
+    let isVocalIntent = isVocalSeparationIntent(userMessage);
+    if (!isVocalIntent && priorState.vocalSeparationPending) {
+      if (!isStagedAudioUnrelated(userMessage, attachment)) {
+        isVocalIntent = true;
+      }
+    }
+
     const turn = chatState.beginTurn({
       message: userMessage,
       attachment,
     });
+
+    if (isVocalIntent) {
+      try {
+        const gpuStatus = await getGpuStatusFn({ signal: turn.abortController.signal });
+        if (gpuStatus && gpuStatus.mode === 'remote' && !gpuStatus.pc_online) {
+          chatState.setPendingLabel('esperando la PC de Joshua…');
+        } else {
+          chatState.setPendingLabel('separando voces…');
+        }
+      } catch (_err) {
+        chatState.setPendingLabel('separando voces…');
+      }
+    }
 
     const stagedAudioId = chatState.get().stagedAudioId;
 
@@ -103,7 +130,7 @@ export function createAgentChatController(deps) {
     const presentationId = priorState.activeContext ? priorState.activeContext.id : null;
 
     try {
-      const response = await sendAgentChatMessage({
+      const response = await sendAgentChatMessageFn({
         message: userMessage,
         history,
         presentationId,

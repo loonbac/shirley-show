@@ -42,7 +42,7 @@ security.sudo.extraRules = [{
 }];
 ```
 
-Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n true"`.
+Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n /run/current-system/sw/bin/shutdown -c"`.
 
 ## 4. Variables en Coolify
 

@@ -1,6 +1,7 @@
 import { containsYouTubeUrl } from '../../utils/validation/contains-youtube-url.js';
 import { isStagedAudioUnrelated } from '../../utils/validation/is-staged-audio-unrelated.js';
 import { isVocalSeparationIntent } from '../../utils/validation/is-vocal-separation-intent.js';
+import { resolveVocalPendingLabel } from '../../data/agent-chat-api.js';
 
 /**
  * Creates the in-memory chat state manager for Shirley Show AI Agent.
@@ -107,7 +108,14 @@ export function createChatState(initialState = {}, options = {}) {
     notify();
   }
 
-  function beginTurn({ message, attachment = null, pendingLabel = null }) {
+  function setPendingLabel(label) {
+    if (state.pending && typeof label === 'string') {
+      state = { ...state, pendingLabel: label };
+      notify();
+    }
+  }
+
+  function beginTurn({ message, attachment = null, pendingLabel = null, gpuStatus = null }) {
     clearWakeWaitTimer();
     if (state.pending && currentAbortController) {
       currentAbortController.abort();
@@ -135,7 +143,9 @@ export function createChatState(initialState = {}, options = {}) {
 
     let turnPendingLabel = pendingLabel;
     if (!turnPendingLabel) {
-      if (isPriorRemoteWaiting) {
+      if (gpuStatus && isVocalIntent) {
+        turnPendingLabel = resolveVocalPendingLabel(gpuStatus);
+      } else if (isPriorRemoteWaiting) {
         turnPendingLabel = 'esperando la PC de Joshua…';
       } else if (isVocalIntent) {
         turnPendingLabel = 'separando voces…';
@@ -164,18 +174,6 @@ export function createChatState(initialState = {}, options = {}) {
       messages: [...state.messages, userMessage],
     };
     notify();
-
-    if (isVocalIntent && turnPendingLabel !== 'esperando la PC de Joshua…' && remoteWaitDelayMs >= 0) {
-      wakeWaitTimer = setTimeout(() => {
-        if (currentGenerationId === generationId && state.pending && state.vocalSeparationPending) {
-          state = {
-            ...state,
-            pendingLabel: 'esperando la PC de Joshua…',
-          };
-          notify();
-        }
-      }, remoteWaitDelayMs);
-    }
 
     return {
       generationId,
@@ -297,6 +295,7 @@ export function createChatState(initialState = {}, options = {}) {
     setStagedAudioId,
     clearStagedAudioId,
     setRouteContext,
+    setPendingLabel,
     beginTurn,
     resolveTurn,
     failTurn,

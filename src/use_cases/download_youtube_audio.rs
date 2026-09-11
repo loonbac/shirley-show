@@ -136,10 +136,10 @@ impl DownloadYouTubeAudio {
         metadata_title: &str,
         video_id: &str,
     ) -> String {
-        if let Some(req) = requested_title {
-            if let Some(clean) = sanitize_title(req) {
-                return clean;
-            }
+        if let Some(req) = requested_title
+            && let Some(clean) = sanitize_title(req)
+        {
+            return clean;
         }
 
         if let Some(clean_meta) = sanitize_title(metadata_title) {

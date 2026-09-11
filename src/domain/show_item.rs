@@ -156,6 +156,7 @@ impl ShowItem {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_db(
         id: String,
         presentation_id: String,

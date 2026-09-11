@@ -161,10 +161,10 @@ impl VocalProcessGuard {
             let _ = tokio::fs::remove_dir_all(&self.work_dir).await;
         }
 
-        if let Some(ref part) = self.output_part {
-            if part.exists() {
-                let _ = tokio::fs::remove_file(part).await;
-            }
+        if let Some(ref part) = self.output_part
+            && part.exists()
+        {
+            let _ = tokio::fs::remove_file(part).await;
         }
 
         // Permit is dropped here, AFTER all children have terminated and artifacts are purged.
@@ -208,10 +208,10 @@ impl Drop for VocalProcessGuard {
                     let _ = tokio::fs::remove_dir_all(&work_dir).await;
                 }
 
-                if let Some(ref part) = output_part {
-                    if part.exists() {
-                        let _ = tokio::fs::remove_file(part).await;
-                    }
+                if let Some(ref part) = output_part
+                    && part.exists()
+                {
+                    let _ = tokio::fs::remove_file(part).await;
                 }
                 // _permit drops here AFTER wait() and purges finish!
             });
@@ -223,10 +223,10 @@ impl Drop for VocalProcessGuard {
             if work_dir.exists() {
                 let _ = std::fs::remove_dir_all(&work_dir);
             }
-            if let Some(ref part) = output_part {
-                if part.exists() {
-                    let _ = std::fs::remove_file(part);
-                }
+            if let Some(ref part) = output_part
+                && part.exists()
+            {
+                let _ = std::fs::remove_file(part);
             }
         }
     }

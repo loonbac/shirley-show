@@ -47,5 +47,6 @@ pub fn create_router(state: AppState) -> Router {
             "/api/agent/chat",
             post(agent::chat).layer(DefaultBodyLimit::max(101 * 1024 * 1024)),
         )
+        .route("/api/agent/gpu-status", get(agent::gpu_status))
         .with_state(state)
 }

@@ -367,8 +367,16 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
 {
   const state = createChatState();
   let resolveFetch;
-  globalThis.fetch = () =>
-    new Promise((res) => {
+  globalThis.fetch = (url) => {
+    if (typeof url === 'string' && url.includes('/api/agent/gpu-status')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ mode: 'local', pc_online: true }),
+      });
+    }
+    return new Promise((res) => {
       resolveFetch = () =>
         res({
           ok: true,
@@ -381,6 +389,7 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
           }),
         });
     });
+  };
 
   const ctrl = createAgentChatController({ chatState: state });
   const pendingPromise = ctrl.sendAndOpen('Separa los coros de esta pista');
@@ -398,6 +407,7 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   );
 
   // After resolution: typing indicator removed, composer enabled
+  await new Promise((r) => setTimeout(r, 10));
   resolveFetch();
   await pendingPromise;
 
@@ -408,6 +418,114 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
 
   ctrl.destroy();
   console.log('✓ 9. Vocal separation intent displays specialized typing indicator and restores composer');
+}
+
+// 10. Vocal separation intent probes GPU status (offline -> espera; online -> genérico; local -> genérico)
+{
+  // 10a. Remote offline: displays 'esperando la PC de Joshua…'
+  {
+    const state = createChatState();
+    let resolveTurnFetch;
+    const sendPromise = new Promise((resolve) => {
+      resolveTurnFetch = () =>
+        resolve({
+          message: 'Completado',
+          actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+          staged_audio_id: 'staged-sep-1',
+        });
+    });
+
+    const ctrl = createAgentChatController({
+      chatState: state,
+      getGpuStatusFn: async () => ({ mode: 'remote', pc_online: false }),
+      sendAgentChatMessageFn: () => sendPromise,
+    });
+
+    const pendingPromise = ctrl.sendAndOpen('Separa la voz de esta pista');
+    await new Promise((r) => setTimeout(r, 10)); // allow async handleSend to complete probe
+
+    const typingEl = ctrl.panelEl.querySelector('.agent-typing-indicator');
+    assert.ok(typingEl !== null, 'Typing indicator must be present');
+    assert.equal(typingEl.getAttribute('aria-live'), 'polite');
+    assert.ok(
+      typingEl.textContent.includes('esperando la PC de Joshua…'),
+      `Expected 'esperando la PC de Joshua…', got: ${typingEl.textContent}`
+    );
+
+    resolveTurnFetch();
+    await pendingPromise;
+    ctrl.destroy();
+  }
+
+  // 10b. Remote online: displays 'separando voces…'
+  {
+    const state = createChatState();
+    let resolveTurnFetch;
+    const sendPromise = new Promise((resolve) => {
+      resolveTurnFetch = () =>
+        resolve({
+          message: 'Completado',
+          actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+          staged_audio_id: 'staged-sep-2',
+        });
+    });
+
+    const ctrl = createAgentChatController({
+      chatState: state,
+      getGpuStatusFn: async () => ({ mode: 'remote', pc_online: true }),
+      sendAgentChatMessageFn: () => sendPromise,
+    });
+
+    const pendingPromise = ctrl.sendAndOpen('Separa coros');
+    await new Promise((r) => setTimeout(r, 10));
+
+    const typingEl = ctrl.panelEl.querySelector('.agent-typing-indicator');
+    assert.ok(typingEl !== null);
+    assert.ok(
+      typingEl.textContent.includes('separando voces…'),
+      `Expected 'separando voces…', got: ${typingEl.textContent}`
+    );
+
+    resolveTurnFetch();
+    await pendingPromise;
+    ctrl.destroy();
+  }
+
+  // 10c. Local mode: displays 'separando voces…'
+  {
+    const state = createChatState();
+    let resolveTurnFetch;
+    const sendPromise = new Promise((resolve) => {
+      resolveTurnFetch = () =>
+        resolve({
+          message: 'Completado',
+          actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+          staged_audio_id: 'staged-sep-3',
+        });
+    });
+
+    const ctrl = createAgentChatController({
+      chatState: state,
+      getGpuStatusFn: async () => ({ mode: 'local', pc_online: true }),
+      sendAgentChatMessageFn: () => sendPromise,
+    });
+
+    const pendingPromise = ctrl.sendAndOpen('Separa pista instrumental');
+    await new Promise((r) => setTimeout(r, 10));
+
+    const typingEl = ctrl.panelEl.querySelector('.agent-typing-indicator');
+    assert.ok(typingEl !== null);
+    assert.ok(
+      typingEl.textContent.includes('separando voces…'),
+      `Expected 'separando voces…', got: ${typingEl.textContent}`
+    );
+
+    resolveTurnFetch();
+    await pendingPromise;
+    ctrl.destroy();
+  }
+
+  console.log('✓ 10. GPU status probe integration in controller (offline -> espera; online -> genérico; local -> genérico)');
 }
 
 console.log('All Agent Chat Route and Composition integration tests passed!');

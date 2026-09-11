@@ -12,7 +12,7 @@
 - THEN the server MUST NOT cancel at 600s.
 
 ### Requirement: PC-Offline Signal and Verbatim Copy
-1. Offline probe MUST return `notice: { code: "wake_wait", retryable: true }` keeping `staged_audio_id`.
+1. GPU presence MUST be queryable via `GET /api/agent/gpu-status` returning `{ mode: "local"|"remote", pc_online: bool }` (read-only 3-second probe without side effects). Upon vocal separation intent, client probes `gpu-status`; if `remote` and `pc_online == false`, the client shows `esperando la PC de Joshua…` while holding the request in-turn up to 10 minutes without SSE. When applicable, the turn returns the result or `notice: { code: "wake_wait"|"pc_wake_timeout", retryable: true }` keeping `staged_audio_id`.
 2. Messages MUST be verbatim:
    - Wait: `Por favor, enciende la PC de Joshua; estaré esperando hasta que encienda y cuando lo haga haré el trabajo.`
    - Energy: `Cuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo.`
@@ -21,8 +21,8 @@
 
 #### Scenario: Offline PC asks to power on
 - GIVEN offline PC and active show
-- WHEN the turn runs
-- THEN response carries `wake_wait`, keeps staging, and quotes the wait text.
+- WHEN vocal separation is requested
+- THEN client probes `gpu-status` and displays `esperando la PC de Joshua…`, and if unreachable after deadline returns give-up copy with `pc_wake_timeout` notice preserving staged audio.
 
 #### Scenario: Give-up after 10 minutes
 - GIVEN 600s unreachable

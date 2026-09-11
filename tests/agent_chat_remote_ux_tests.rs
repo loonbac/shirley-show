@@ -55,6 +55,10 @@ impl MockRemoteVocalSeparator {
 }
 
 impl VocalSeparator for MockRemoteVocalSeparator {
+    fn is_remote(&self) -> bool {
+        true
+    }
+
     fn probe(&self, _timeout: Duration) -> Pin<Box<dyn Future<Output = bool> + Send>> {
         let online = self.probe_online;
         Box::pin(async move { online })
@@ -734,4 +738,75 @@ async fn test_agent_chat_remote_pc_boots_mid_wait_same_turn_completes_separation
     );
     // 4. Separator must have performed the wait and completed
     assert!(waited_and_booted.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn test_agent_gpu_status_endpoint_local_mode() {
+    let (state, _tmp) = setup_test_state();
+    let router = shirley_show::router::create_router(state);
+
+    let req = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/agent/gpu-status")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let res = tower::ServiceExt::oneshot(router, req).await.unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+
+    let body = http_body_util::BodyExt::collect(res.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["mode"], "local");
+    assert_eq!(json["pc_online"], true);
+}
+
+#[tokio::test]
+async fn test_agent_gpu_status_endpoint_remote_online() {
+    let (state, _tmp) = setup_test_state();
+    let state = state.with_vocal_separator(Arc::new(MockRemoteVocalSeparator::new(true)));
+    let router = shirley_show::router::create_router(state);
+
+    let req = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/agent/gpu-status")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let res = tower::ServiceExt::oneshot(router, req).await.unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+
+    let body = http_body_util::BodyExt::collect(res.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["mode"], "remote");
+    assert_eq!(json["pc_online"], true);
+}
+
+#[tokio::test]
+async fn test_agent_gpu_status_endpoint_remote_offline() {
+    let (state, _tmp) = setup_test_state();
+    let state = state.with_vocal_separator(Arc::new(MockRemoteVocalSeparator::new(false)));
+    let router = shirley_show::router::create_router(state);
+
+    let req = axum::http::Request::builder()
+        .method("GET")
+        .uri("/api/agent/gpu-status")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let res = tower::ServiceExt::oneshot(router, req).await.unwrap();
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+
+    let body = http_body_util::BodyExt::collect(res.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["mode"], "remote");
+    assert_eq!(json["pc_online"], false);
 }

@@ -590,6 +590,7 @@ exit 0
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_app_state_selects_vocal_separator_based_on_joshua_pc_host() {
     let _lock = ENV_MUTEX.lock().unwrap();
 

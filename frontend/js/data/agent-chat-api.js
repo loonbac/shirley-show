@@ -116,6 +116,35 @@ export async function sendAgentChatMessage(options) {
 }
 
 /**
+ * Probes the GPU processor presence state.
+ * Cheap, read-only 3-second probe without side effects.
+ *
+ * @param {{ signal?: AbortSignal }} [options={}]
+ * @returns {Promise<{ mode: 'local' | 'remote', pc_online: boolean }>}
+ */
+export async function getGpuStatus(options = {}) {
+  const { signal } = options;
+  return await requestJson('/api/agent/gpu-status', {
+    method: 'GET',
+    signal,
+  });
+}
+
+/**
+ * Resolves the appropriate pending typing indicator label for a vocal separation
+ * intent based on genuine GPU presence status.
+ *
+ * @param {{ mode?: string, pc_online?: boolean } | null} [gpuStatus=null]
+ * @returns {'esperando la PC de Joshua…' | 'separando voces…'}
+ */
+export function resolveVocalPendingLabel(gpuStatus) {
+  if (gpuStatus && gpuStatus.mode === 'remote' && !gpuStatus.pc_online) {
+    return 'esperando la PC de Joshua…';
+  }
+  return 'separando voces…';
+}
+
+/**
  * Classifies network and HTTP errors into standardized error descriptors.
  * @param {any} err
  * @returns {ApiError & { retryable?: boolean }}

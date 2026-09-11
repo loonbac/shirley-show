@@ -192,13 +192,14 @@ impl StagedAudioRegistry {
         let now = Instant::now();
 
         // Check if expired and available
-        if let Some(entry) = map.get(staged_audio_id) {
-            if entry.expires_at <= now && entry.state == StagedAudioState::Available {
-                let path = entry.file_path.clone();
-                map.remove(staged_audio_id);
-                let _ = std::fs::remove_file(path);
-                return Err(StagedAudioRegistryError::NotFound);
-            }
+        if let Some(entry) = map.get(staged_audio_id)
+            && entry.expires_at <= now
+            && entry.state == StagedAudioState::Available
+        {
+            let path = entry.file_path.clone();
+            map.remove(staged_audio_id);
+            let _ = std::fs::remove_file(path);
+            return Err(StagedAudioRegistryError::NotFound);
         }
 
         let entry = map

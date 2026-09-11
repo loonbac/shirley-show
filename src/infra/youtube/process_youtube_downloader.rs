@@ -210,18 +210,16 @@ impl YoutubeDownloader for ProcessYoutubeDownloader {
             let mut metadata: Option<YtDlpMetadata> = None;
             for line in stdout_str.lines().rev() {
                 let trimmed = line.trim();
-                if trimmed.starts_with('{') && trimmed.ends_with('}') {
-                    if let Ok(meta) = serde_json::from_str::<YtDlpMetadata>(trimmed) {
-                        metadata = Some(meta);
-                        break;
-                    }
+                if trimmed.starts_with('{')
+                    && trimmed.ends_with('}')
+                    && let Ok(meta) = serde_json::from_str::<YtDlpMetadata>(trimmed)
+                {
+                    metadata = Some(meta);
+                    break;
                 }
             }
 
-            let meta = metadata.ok_or_else(|| {
-                // If stdout didn't have valid json
-                YoutubeDownloadError::DownloadFailed
-            })?;
+            let meta = metadata.ok_or(YoutubeDownloadError::DownloadFailed)?;
 
             if meta.is_live == Some(true)
                 || matches!(
@@ -233,11 +231,11 @@ impl YoutubeDownloader for ProcessYoutubeDownloader {
                 return Err(YoutubeDownloadError::DownloadFailed);
             }
 
-            if let Some(dur) = meta.duration {
-                if dur > 1200.0 {
-                    guard.kill_and_wait().await;
-                    return Err(YoutubeDownloadError::DurationExceeded);
-                }
+            if let Some(dur) = meta.duration
+                && dur > 1200.0
+            {
+                guard.kill_and_wait().await;
+                return Err(YoutubeDownloadError::DurationExceeded);
             }
 
             // 5. Verify MP3 output file on disk

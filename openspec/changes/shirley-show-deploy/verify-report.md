@@ -1,14 +1,14 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:c1aadfc10893d87b3c4d5cd29a74239b560a57753d0cfd736fc9706bd75dc5f8
+evidence_revision: sha256:b9687e8dfd20c6c280446e291aa146f86d8e9d7bf4f3558033d3107eedf9c737
 verdict: fail
-blockers: 5
-critical_findings: 5
-requirements: 6/10
-scenarios: 8/15
-test_command: cargo test --test ssh_vocal_separator_tests --test agent_chat_remote_ux_tests --test agent_chat_ui_tests && cargo test && cargo fmt --all -- --check
+blockers: 2
+critical_findings: 2
+requirements: 9/10
+scenarios: 14/15
+test_command: cargo test --test ssh_vocal_separator_tests --test agent_chat_remote_ux_tests --test agent_chat_ui_tests && node tests/agent-chat-state.test.mjs && cargo test && cargo fmt --all -- --check
 test_exit_code: 0
-test_output_hash: sha256:d9486b92cb0d08eb3910c5ebf57db9f11e4849856785aba66dc9199f277a7e54
+test_output_hash: sha256:9204b83d83ea10f8f45bb8a299cb582a41f1ef99520611c5c2df5a19c5859f4c
 build_command: cargo build --all-targets
 build_exit_code: 0
 build_output_hash: sha256:4cf86278c1e6d659943a46a3d7e3da429ac15be90f0f17742e24ef85228e7d3e
@@ -16,93 +16,108 @@ build_output_hash: sha256:4cf86278c1e6d659943a46a3d7e3da429ac15be90f0f17742e24ef
 
 # Verify report: shirley-show-deploy
 
-**Estado:** FAIL — no está listo para sync ni archive.
+**Estado:** FAIL — la implementación y las suites están verdes, pero quedan dos blockers CRITICAL de contrato/proceso; no está lista para sync ni archive.
 
 ## Resumen ejecutivo
 
-La compilación, el formato y las suites Rust/JS herméticas están verdes: 268 pruebas pasaron y una prueba de GPU real quedó ignorada. Sin embargo, la implementación no cumple el flujo canónico de espera remota: el dispatcher devuelve `wake_wait` después de un probe de 3 segundos y termina el turno, por lo que la misma operación no espera hasta diez minutos ni continúa automáticamente. También hay dos incumplimientos estáticos de despliegue, falta la tabla obligatoria de evidencia TDD y las tres unidades excedieron ampliamente el presupuesto aprobado sin `size:exception`.
+Se re-verificó `b8aabf0569496304363ba1459bcc01002b7b89d5` con foco en los cinco blockers anteriores. El dispatcher ya deja que `SshVocalSeparator` sostenga la espera y continúe en el mismo turno; el indicador cambia en el primer intento; los manifests tienen los defaults contractuales; y el usuario confirmó explícitamente `size:exception` para la serie `stacked-to-main`.
+
+Persisten dos blockers. Primero, con transporte JSON no streaming, el adapter real nunca emite `wake_wait` durante su espera: sólo termina en éxito o `pc_wake_timeout`; por tanto, el copy contractual de “enciende la PC” y el notice tipado no llegan mientras la operación está esperando. El timer frontend sólo cambia el label y además lo hace para cualquier separación vocal de más de tres segundos, incluida la local. Segundo, la tabla TDD tiene 23 filas pero no cumple el formato/evidencia strict-TDD: 0/23 filas registran `✅ Written` y `✅ Passed`, sólo 16/23 apuntan a archivos de prueba y la afirmación de clippy limpio contradice la ejecución completa.
 
 No se tocó el servidor del usuario en `:3100`, no se ejecutó E2E real y no se escribió en `.run/`.
+
+## Resultado de los cinco ex-bloqueadores
+
+| # | Ex-bloqueador | Resultado | Evidencia |
+|---:|---|---|---|
+| 1 | Wake-wait real en el mismo turno | RESUELTO | `src/agent/tool_dispatcher.rs` ya llama directamente a `separate_vocals.execute`; el adapter mantiene probe/backoff y las pruebas herméticas de boot en espera pasan. |
+| 2 | Typing en primer intento | PARCIAL | El timer y su restauración pasan 17a–17g, pero no recibe una señal remota real y muestra “esperando la PC” también en separación local/lenta. El notice y el copy contractual de espera siguen ausentes durante la espera real. |
+| 3 | Manifests | RESUELTO | `--start-period=10s`, `JOSHUA_PC_HOST` vacío por defecto, volumen, host network y clave `:ro`; 11/11 checks estáticos pasan. |
+| 4 | Evidencia strict-TDD | NO RESUELTO | Existe tabla de 23 filas, pero 0/23 filas contienen los marcadores obligatorios RED/GREEN y 7/23 no identifican archivo de prueba. |
+| 5 | Review workload / `size:exception` | RESUELTO | El prompt de re-verificación registra aceptación humana explícita; el límite de esta unidad `verify-deploy` es 500 y este reporte permanece dentro de él. |
 
 ## Cobertura de especificación
 
 | # | Requirement | Estado | Evidencia |
 |---:|---|---|---|
-| 1 | Multi-Stage Dockerfile and Non-Root Runtime | COMPLETE | Stages fijados, runtime slim, UID/GID 1000, layout y exclusiones de secretos presentes. |
-| 2 | Persistent Storage and Volume Composition | COMPLETE | `shirley-data:/app/data`, variables y clave `:ro` presentes; recreación no ejecutada por restricción de no E2E. |
-| 3 | Healthcheck and Network Routing | INCOMPLETE | Endpoint y host networking presentes, pero `Dockerfile:35` usa `--start-period=15s`, no el contractual `10s`. |
-| 4 | Adapter Selection Local vs Remote | COMPLETE | `Config` normaliza host vacío y `AppState` selecciona `Arc<dyn VocalSeparator>`; pruebas pasan. |
-| 5 | Presence Probe and Wake-Wait | INCOMPLETE | `tool_dispatcher.rs:730-739` corta el turno tras un probe fallido de 3s; no entra al backoff de `SshVocalSeparator`. |
-| 6 | Idle Shutdown Lifecycle | COMPLETE | Cancelación antes de transferencia, programación post-validación y fallos no fatales cubiertos por stubs. |
-| 7 | Isolation, Transfer, Cleanup, Validation | COMPLETE | UUID, guard RAII, scp, ffprobe y rechazo de salida inválida cubiertos herméticamente. |
-| 8 | Composed Remote Deadline | COMPLETE | Config y wiring admiten 1500s sin clamp remoto; la calidad de la prueba límite es insuficiente, indicada abajo. |
-| 9 | PC-Offline Signal and Verbatim Copy | INCOMPLETE | `wake_wait` y copy existen, pero el camino normal offline nunca alcanza diez minutos ni produce `pc_wake_timeout` en el mismo turno. |
-| 10 | Waiting Typing Indicator | INCOMPLETE | El label aparece sólo en un turno posterior a un notice previo, no durante la espera de la operación inicial. |
+| 1 | Multi-Stage Dockerfile and Non-Root Runtime | COMPLETE | Builder/runtime, dependencias, UID/GID 1000, layout y exclusiones presentes. |
+| 2 | Persistent Storage and Volume Composition | COMPLETE | Volumen nombrado, `/app/data`, envs y clave `:ro`; recreación no se ejecutó por la prohibición de E2E. |
+| 3 | Healthcheck and Network Routing | COMPLETE | Timing/endpoint exactos y `network_mode: host`; routing tailnet no se probó en vivo. |
+| 4 | Adapter Selection Local vs Remote | COMPLETE | Config y composición local/remota pasan en suite hermética. |
+| 5 | Presence Probe and Wake-Wait | COMPLETE | Probe argv, backoff, timeout y continuación same-turn están implementados y cubiertos sin red real. |
+| 6 | Idle Shutdown Lifecycle | COMPLETE | `shutdown -c`, orden y `+60` post-validación están cubiertos por stubs. |
+| 7 | Isolation, Transfer, Cleanup, Validation | COMPLETE | UUID, RAII, transferencia y ffprobe están cubiertos; quedan warnings de semántica de status. |
+| 8 | Composed Remote Deadline | COMPLETE | Wiring permite 1500s sin clamp remoto; la prueba temporal no cruza 600s. |
+| 9 | PC-Offline Signal and Verbatim Copy | INCOMPLETE | `pc_wake_timeout` y give-up existen, pero el adapter real no produce `wake_wait` durante la espera; el copy de encendido no llega al cliente en ese intervalo. |
+| 10 | Waiting Typing Indicator | COMPLETE | Label exacto, pulse, `aria-live="polite"` y restauración están presentes; existe el warning de falso positivo local. |
 
-**Requirements completas:** 6/10.
+**Requirements completas:** 9/10.
 
 ### Escenarios
 
-- **Completos (8/15):** selección remota; preservación local; nuevo trabajo cancela apagado; éxito programa apagado; descarga corrupta rechazada; clave ausente falla antes de red; deadline remoto configurado sin clamp; notice inmediato offline conserva staging y copy.
-- **Incompletos/no demostrados (7/15):** imagen healthy con timing exacto; persistencia tras recreación; routing real por tailnet; PC que inicia durante la misma espera; timeout real de diez minutos en el turno; give-up real después de diez minutos; ciclo real del indicador durante espera.
+- **Completos (14/15):** imagen/configuración no-root; persistencia por volumen; host-network topology; selección remota y local; boot durante misma espera; timeout; cancelación de apagado; programación tras éxito; salida corrupta; clave ausente; deadline remoto; give-up; ciclo del indicador.
+- **Incompleto (1/15):** `Offline PC asks to power on`, porque el camino real espera dentro de la petición sin entregar `notice: wake_wait` ni el copy de encendido.
+- Los tres escenarios de despliegue sólo tuvieron comprobación estática por la restricción explícita de no E2E.
 
 ## Completitud de tareas
 
-- Checkboxes: **23/23 marcados**, sin líneas exactas `- [ ]` restantes.
-- La marca S3.4 está corregida en el espejo y `apply-progress.md` existe.
-- S3.7 se materializa como prueba de integración hermética multiturno con mocks, no como E2E del sistema; por instrucción del usuario no se ejecutó E2E.
-- Aunque no quedan checkboxes, los blockers funcionales y de proceso impiden archive.
+- Checkboxes: **23/23 marcados**.
+- Líneas exactas `- [ ]` restantes: **ninguna**.
+- La ausencia de checkboxes pendientes no elimina los blockers de contrato y strict-TDD.
 
 ## Estado estructurado y actionContext
 
-- Native SDD status: `ready`, `applyState: all_done`, store `openspec`, cambio inequívoco `shirley-show-deploy`.
-- `actionContext.mode: repo-local`; workspace y raíz permitida: `/home/loonbac/Proyectos/shirley-show`.
-- La implementación y los archivos objetivo están dentro de la raíz autorizada.
-- No se usó autoridad de settle; el token de attempt se trató como sólo adquisición para `verify-deploy`.
+- Native SDD status: `ready`; `applyState: all_done`; store `openspec`; cambio inequívoco `shirley-show-deploy`.
+- `actionContext.mode: repo-local`; workspace y raíz autorizada: `/home/loonbac/Proyectos/shirley-show`.
+- Implementación, pruebas y artefactos pertenecen al workspace autorizado.
+- Attempt authority consumida sólo para `verify-deploy`, request `dv-acquire-003`, max 500; no se invocó settle.
 
 ## Verificaciones ejecutadas
 
-| Comando exacto | Exit | Hash SHA-256 | Resultado |
+| Comando exacto | Exit | SHA-256 del output | Resultado |
 |---|---:|---|---|
-| `cargo test --test ssh_vocal_separator_tests --test agent_chat_remote_ux_tests --test agent_chat_ui_tests && cargo test && cargo fmt --all -- --check` | 0 | `d9486b92cb0d08eb3910c5ebf57db9f11e4849856785aba66dc9199f277a7e54` | Focal: 20 SSH + 5 UX remoto + 3 wrappers JS; full: 268 passed, 0 failed, 1 ignored; fmt limpio. |
+| `cargo test --test ssh_vocal_separator_tests --test agent_chat_remote_ux_tests --test agent_chat_ui_tests && node tests/agent-chat-state.test.mjs && cargo test && cargo fmt --all -- --check` | 0 | `9204b83d83ea10f8f45bb8a299cb582a41f1ef99520611c5c2df5a19c5859f4c` | Focal Rust 29/29; JS directo 17/17; full Cargo 269 passed, 0 failed, 1 ignored; fmt limpio. |
 | `cargo build --all-targets` | 0 | `4cf86278c1e6d659943a46a3d7e3da429ac15be90f0f17742e24ef85228e7d3e` | Build correcto. |
-| `python3 /tmp/shirley-show-deploy-static-check.py` | 1 | `30053ad25a5ac6d2070d271217f9a96098f5f6dfc55eedf0766e50ed7d972528` | 10/12: falla timing de healthcheck y fallback local de compose. |
-| `cargo clippy --all-targets -- -D warnings` | 101 | `91bb873633c069997e69e278cb9ba5978e44509c23b05595a9445e53683ec650` | 16 warnings elevadas a error; dos `collapsible_if` están en el archivo cambiado `src/agent/tool_dispatcher.rs`. |
+| `python3 /tmp/shirley-show-deploy-static-check.py` | 0 | `9487800d74e90b68a2ae2f0ce9d4c04f284490841d4c6186e44cc3e97c332d21` | 11/11 checks de manifests y runbook. |
+| `cargo clippy --all-targets -- -D warnings` | 101 | `4dd2ee43320f0f253e1cd912bbce5e1901dd971493e0222535430b5087189feb` | 14 errores clippy del árbol completo; ninguno apunta a los paths de remediación de `b8aabf0`, pero contradice “resolved all clippy warnings”. |
 | `test -z "$(git ls-files \| grep -E '(^\|/)(\\.env$\|.*id_(rsa\|ed25519).*$\|.*\\.pem$)' \|\| true)" && ! git grep -nE 'BEGIN (OPENSSH\|RSA\|EC\|DSA\|PRIVATE) PRIVATE KEY' -- . && ! git grep -nE 'gsk_[A-Za-z0-9_-]{24,}' -- ':!tests/**' ':!openspec/**'` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | Sin secretos rastreados detectados. |
 
-Docker/Compose no están instalados en el entorno; la validación de manifests fue estática y no se construyó una imagen. La cobertura se omitió porque no se detectó `cargo-tarpaulin`, `grcov` ni `cargo-llvm-cov`.
+Docker/Compose no están instalados; no se construyó imagen. Coverage se omitió porque no hay `cargo-llvm-cov`, tarpaulin ni grcov disponible.
 
-## Correctitud, seguridad y cohesión
+## Correctitud, seguridad y coherencia de diseño
 
-- La frontera `VocalSeparator` conserva al caso de uso desacoplado de SSH y la composición local/remota es explícita.
-- `SshCommandBuilder`, `RemoteDirectoryGuard` y `SshVocalSeparator` tienen responsabilidades reconocibles y no introducen dependencia SSH en dominio/caso de uso.
-- Los comandos locales usan `Command` con argv; el script remoto es constante y recibe modo/path controlados.
-- La suite usa binarios stub y la prueba GPU real quedó ignorada; no hubo contacto intencional con Tailscale ni con `nixos-pc`.
-- **WARNING:** `src/infra/vocal/ssh_vocal_separator.rs:424-430` imprime stderr/errores crudos al fallar `shutdown +60`; esto contradice la política de no filtrar detalles de infraestructura en logs visibles.
-- **WARNING:** `docs/deployment-coolify.md:45` propone verificar la regla limitada con `sudo -n true`, comando que no está autorizado por la regla NOPASSWD sólo para `shutdown` y por tanto no verifica lo documentado.
-- **WARNING:** la implementación ignora el `ExitStatus` no exitoso de mkdir/upload/download porque `run_status` devuelve cualquier status y sus callers sólo usan `?`; el fallo termina más tarde, perdiendo semántica y haciendo trabajo remoto innecesario.
+- La frontera `VocalSeparator` y la composición local/remota conservan cohesión y dirección de dependencias.
+- `SshCommandBuilder`, `RemoteDirectoryGuard` y `SshVocalSeparator` mantienen responsabilidades explícitas y pruebas herméticas.
+- El dispatcher ya no hace el probe prematuro que abortaba la operación.
+- **CRITICAL:** D6 y el requisito de notice `wake_wait` no son realizables con la implementación JSON actual: no hay canal para emitir progreso mientras el mismo request permanece abierto, y el adapter real nunca retorna `WakeWait`.
+- **WARNING:** `frontend/js/core/state/chat-state.js:168-177` infiere espera remota por tiempo e intención; una separación local o remota ya conectada que dure más de 3s muestra un estado falso.
+- **WARNING:** `RemoteDirectoryGuard::run_status` devuelve `Ok(status)` incluso si mkdir/scp termina non-zero, y sus callers no revisan `status.success()`.
+- **WARNING:** `schedule_remote_shutdown` imprime stderr remoto crudo en servidor.
+- **WARNING:** el runbook recomienda `sudo -n true`, que no valida una regla NOPASSWD limitada al binario `shutdown`.
 
-## TDD Compliance
+## Strict TDD Compliance
 
 | Check | Result | Details |
 |---|---|---|
-| TDD Evidence reported | ❌ | Hay bullets bajo `Strict TDD Cycle Evidence`, pero no la tabla obligatoria por tarea. |
-| All tasks have tests | ❌ | No existe mapeo task→test para las 23 tareas; packaging sólo declara revisión estática. |
-| RED confirmed (tests exist) | ⚠️ | Los archivos reportados de S2/S3 existen, pero no hay filas RED verificables. |
-| GREEN confirmed (tests pass) | ✅ | 268/268 pruebas ejecutadas pasaron; 1 E2E GPU permaneció ignorada. |
-| Triangulation adequate | ⚠️ | Hay 20 casos SSH y 5 UX remoto, pero los límites 600/1500s se simulan sin cruzar 600s. |
-| Safety Net for modified files | ⚠️ | Se afirma suite verde por slice, sin conteos/archivos por fila. |
+| TDD Evidence reported | ✅ | Existe `TDD Cycle Evidence` con 23 filas. |
+| All tasks have tests | ❌ | Sólo 16/23 filas apuntan a archivos `tests/...`; 7 usan manifest, documentación o `Workspace`. |
+| RED confirmed | ❌ | 0/23 filas dicen `✅ Written`; el texto narra ausencia previa, no identifica una prueba RED ejecutable. |
+| GREEN confirmed | ⚠️ | Las suites actuales pasan, pero 0/23 filas dicen `✅ Passed` y no enlazan cada GREEN a la ejecución actual. |
+| Triangulation adequate | ⚠️ | 0/23 filas usa conteo `✅ N cases` o `➖ Single`; sólo hay prosa no reconciliable mecánicamente. |
+| Safety Net for modified files | ⚠️ | No se registra `✅ N/N` por fila; S1.4 usa `✅ N/A` aunque el soporte exige justificar archivo nuevo/modificado. |
 
-**TDD Compliance:** 1/6 checks plenamente satisfechos; **0/23 tareas tienen evidencia formal completa**.
+**TDD Compliance:** 1/6 checks plenamente satisfechos; **0/23 filas tienen evidencia formal completa**.
+
+La tabla también afirma en S3.8 “resolved all clippy warnings”, pero `cargo clippy --all-targets -- -D warnings` falla con 14 findings. Bajo strict TDD, la evidencia incompleta/inconsistente es CRITICAL.
 
 ### Test Layer Distribution
 
-| Layer | Tests | Files | Tools |
+| Layer | Tests/casos | Files | Tools |
 |---|---:|---:|---|
-| Unit | 16 | 1 | Node assertions vía wrapper Cargo |
-| Integration | 46 | 3 | Rust/Cargo con SQLite in-memory y binarios stub |
-| E2E | 0 ejecutadas | 0 | Prohibido por el usuario; la prueba GPU real quedó ignored |
-| **Total relacionado en archivos cambiados** | **62** | **4** | |
+| Unit | 17 | 1 | Node `assert` |
+| Integration hermética | 26 | 2 | Cargo/Tokio + SQLite in-memory + stubs |
+| Wrappers de suites JS | 3 | 1 | Cargo ejecutando Node; solapan casos JS |
+| E2E | 0 | 0 | No ejecutado por instrucción del usuario |
 
 ### Changed File Coverage
 
@@ -112,45 +127,37 @@ Coverage analysis skipped — no coverage tool detected.
 
 | File | Línea | Assertion | Issue | Severity |
 |---|---:|---|---|---|
-| `tests/agent_chat_remote_ux_tests.rs` | 365 | `test_agent_chat_composed_deadline_1500s_not_clamped_to_600s` | Sólo duerme 50ms; pasaría aunque el deadline efectivo siguiera clamped a 600s. | WARNING |
-| `tests/agent_chat_remote_ux_tests.rs` | 220 | mock devuelve `PcWakeTimeout` directamente | No demuestra backoff ni que el flujo real alcance diez minutos. | WARNING |
-| `tests/agent_chat_remote_ux_tests.rs` | 465 | flujo offline→online en dos turnos | Valida la conducta implementada que contradice el escenario canónico de continuar la misma operación. | WARNING |
+| `tests/agent_chat_remote_ux_tests.rs` | 372 | deadline 1500s con delay de 50ms | No cruza el límite 600s que pretende proteger. | WARNING |
+| `tests/agent_chat_remote_ux_tests.rs` | 651 | mock `PcBootsMidWaitSeparator` | Prueba el dispatcher same-turn, pero el mock encapsula la espera; el backoff real se demuestra por separado, no end-to-end. | WARNING |
 
-No se detectaron tautologías, ghost loops ni assertions type-only aisladas en los cuatro archivos de prueba cambiados.
+**Assertion quality:** 0 CRITICAL, 2 WARNING. No se detectaron tautologías, ghost loops, assertions type-only aisladas, smoke-only ni assertions CSS en los tests auditados.
 
 ### Quality Metrics
 
 - **Formatter:** ✅ limpio.
-- **Build/type checking:** ✅ `cargo build --all-targets` limpio.
-- **Linter:** ❌ `cargo clippy --all-targets -- -D warnings` reportó 16 findings, incluidos 2 en `src/agent/tool_dispatcher.rs`.
+- **Build/type checking:** ✅ limpio.
+- **Linter completo:** ⚠️ 14 findings elevados a error; informativo y no introducido por los paths de remediación, pero invalida la afirmación documental de clippy limpio.
 
 ## Review Workload / límite de PR
 
-La separación temática S1/S2/S3 existe en los commits `59cc9c3`, `773d10f` y `87373ac`, y no se observó mezcla funcional entre S2 y S3. Sin embargo, el límite aprobado era 400 líneas por unidad y los tamaños reales fueron:
-
-| Slice | Líneas añadidas | Líneas eliminadas | Total |
-|---|---:|---:|---:|
-| S1 | 667 | 319 | 986 |
-| S2 | 2380 | 19 | 2399 |
-| S3 | 1546 | 33 | 1579 |
-
-No hay registro explícito de `size:exception`; `apply-progress.md` confirma que no se usó. Con `ask-on-risk`, exceder de 2.5× a 6× el presupuesto exigía volver a pedir una decisión humana. El chain `stacked-to-main` aprobado no convierte estas unidades sobredimensionadas en conformes.
+- Forecast: tres slices encadenados, estrategia `stacked-to-main`, presupuesto canónico 400.
+- Los commits S1/S2/S3 existen y mantienen fronteras temáticas.
+- La aceptación explícita `size:exception` está en el prompt humano actual y en `apply-progress.md`; no se infirió.
+- El commit de remediación `b8aabf0` contiene 438 inserciones y 34 eliminaciones en los nueve paths de remediación inspeccionados; la excepción explícita cubre el riesgo.
+- Esta unidad de verificación no modifica implementación y respeta max 500.
 
 ## Blockers exactos
 
-1. **CRITICAL — Wake-wait contractual roto:** `src/agent/tool_dispatcher.rs:730-739` devuelve `wake_wait` tras 3s y termina el turno, de modo que la PC que enciende durante la ventana no reanuda la misma operación y el timeout real de 10 minutos no ocurre en el camino normal.
-2. **CRITICAL — Indicador no representa espera real:** `frontend/js/core/state/chat-state.js:118-128` sólo selecciona `esperando la PC de Joshua…` cuando empieza otro turno después de un notice previo; durante el primer intento offline ya no existe request pendiente ni composer bloqueado.
-3. **CRITICAL — Manifests contradicen requisitos:** `Dockerfile:35` usa start period 15s en vez de 10s y `compose.yaml:19` usa `${JOSHUA_PC_HOST:-100.73.247.39}`, por lo que unset o vacío fuerza remoto y contradice el fallback local documentado.
-4. **CRITICAL — Evidencia strict-TDD inadmisible:** `apply-progress.md` no contiene la tabla `TDD Cycle Evidence` por tarea exigida; no se pueden validar RED/GREEN/TRIANGULATE/SAFETY NET para 23 tareas.
-5. **CRITICAL — Gate de carga de revisión incumplido:** cada slice excede 400 líneas y no existe `size:exception` ni evidencia de una nueva decisión `ask-on-risk` para los tamaños reales.
+1. **CRITICAL — Signal/copy offline aún no cumple el contrato:** `SshVocalSeparator::probe_or_wait_wake` espera internamente y sólo retorna éxito o `PcWakeTimeout`; `WakeWait` no tiene productor real. Con JSON no streaming, el cliente no recibe `notice: wake_wait` ni el copy de encendido durante la espera, y el timer frontend no sustituye ese contrato.
+2. **CRITICAL — Evidencia strict-TDD incompleta:** aunque hay 23 filas, 0/23 usa los marcadores obligatorios `✅ Written`/`✅ Passed`, sólo 16/23 identifica test file y la fila S3.8 contradice el clippy completo. La evidencia no permite confirmar el ciclo por tarea.
 
 ## Próximo paso recomendado
 
-Volver a apply para corregir los cinco blockers, completar evidencia strict-TDD por tarea y redividir/autorizar explícitamente la carga de revisión. Después, repetir verify antes de sync/archive.
+Volver a apply para reconciliar el contrato de progreso con el transporte elegido y corregir la evidencia TDD por tarea. Después repetir verify; no ejecutar sync/archive mientras estos blockers sigan abiertos.
 
 ## Key Learnings
 
-1. El probe previo del dispatcher anula la espera interna del adaptador SSH.
-2. Los defaults de Compose pueden contradecir la selección local definida en Rust.
-3. Una prueba de deadline debe cruzar realmente el límite que pretende proteger.
-4. La evidencia TDD estricta requiere una tabla por tarea, no un resumen narrativo.
+1. La espera same-turn necesita un canal explícito para comunicar progreso contractual.
+2. Un timer por intención puede mostrar estado remoto falso en modo local.
+3. La evidencia TDD requiere marcadores verificables y archivos de prueba por tarea.
+4. Una suite verde no convierte una tabla TDD narrativa en evidencia completa.

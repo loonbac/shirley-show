@@ -18,7 +18,7 @@ const bytesFormatModulePath = resolve(process.cwd(), 'frontend/js/utils/format/b
 const { formatBytes } = await import(pathToFileURL(bytesFormatModulePath).href);
 
 const agentApiModulePath = resolve(process.cwd(), 'frontend/js/data/agent-chat-api.js');
-const { sendAgentChatMessage, validateAudioAttachment } = await import(pathToFileURL(agentApiModulePath).href);
+const { sendAgentChatMessage, validateAudioAttachment, getGpuStatus, resolveVocalPendingLabel } = await import(pathToFileURL(agentApiModulePath).href);
 
 const ytUrlModulePath = resolve(process.cwd(), 'frontend/js/utils/validation/contains-youtube-url.js');
 const { containsYouTubeUrl } = await import(pathToFileURL(ytUrlModulePath).href);
@@ -606,28 +606,45 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   console.log('✓ 16. Remote offline notices (wake_wait / pc_offline) set typing indicator label to "esperando la PC de Joshua…" and restore cleanly');
 }
 
-// 17. Typing indicator shows "esperando la PC de Joshua…" after N seconds of pending separation even on first attempt, and restores cleanly
+// 17. GPU status probe integration (offline -> label espera; online -> genérico; local -> genérico)
 {
-  const state = createChatState({}, { remoteWaitDelayMs: 30 });
-
-  // 17a. First attempt: beginTurn with vocal intent starts with 'separando voces…'
-  const turn = state.beginTurn({ message: 'Separa la voz de esta pista' });
-  assert.equal(state.get().pending, true);
-  assert.equal(state.get().vocalSeparationPending, true);
-  assert.equal(state.get().pendingLabel, 'separando voces…');
-
-  // 17b. While request remains pending after N ms, label updates to 'esperando la PC de Joshua…'
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(state.get().pending, true);
+  // 17a. Pure helper: resolveVocalPendingLabel
   assert.equal(
-    state.get().pendingLabel,
+    resolveVocalPendingLabel({ mode: 'remote', pc_online: false }),
     'esperando la PC de Joshua…',
-    `Expected pendingLabel to update to 'esperando la PC de Joshua…' after N ms, got: '${state.get().pendingLabel}'`
+    'remote + offline probe MUST produce "esperando la PC de Joshua…"'
+  );
+  assert.equal(
+    resolveVocalPendingLabel({ mode: 'remote', pc_online: true }),
+    'separando voces…',
+    'remote + online probe MUST produce generic "separando voces…"'
+  );
+  assert.equal(
+    resolveVocalPendingLabel({ mode: 'local', pc_online: true }),
+    'separando voces…',
+    'local mode MUST produce generic "separando voces…"'
+  );
+  assert.equal(
+    resolveVocalPendingLabel(null),
+    'separando voces…',
+    'missing/fallback gpuStatus MUST produce generic "separando voces…"'
   );
 
-  // 17c. When turn resolves, pendingLabel restores to 'Ressy está pensando...'
+  // 17b. ChatState integration with gpuStatus on vocal separation intent
+  const state = createChatState();
+
+  // Offline probe: sets 'esperando la PC de Joshua…' directly from real probe fact
+  const turnOffline = state.beginTurn({
+    message: 'Separa la voz de esta pista',
+    gpuStatus: { mode: 'remote', pc_online: false },
+  });
+  assert.equal(state.get().pending, true);
+  assert.equal(state.get().vocalSeparationPending, true);
+  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+
+  // Restores cleanly on resolve
   state.resolveTurn({
-    generationId: turn.generationId,
+    generationId: turnOffline.generationId,
     response: {
       message: 'Separación completada.',
       actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
@@ -637,46 +654,44 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   assert.equal(state.get().pending, false);
   assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
 
-  // 17d. Fast turn: if resolved before N ms, timer is cleared and label restores cleanly
-  const fastTurn = state.beginTurn({ message: 'Separa coros' });
-  assert.equal(state.get().pendingLabel, 'separando voces…');
-  state.resolveTurn({
-    generationId: fastTurn.generationId,
-    response: {
-      message: 'Listo',
-      actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
-    },
+  // 17c. Online probe: sets 'separando voces…' (generic)
+  const turnOnline = state.beginTurn({
+    message: 'Separa coros',
+    gpuStatus: { mode: 'remote', pc_online: true },
   });
-  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+  assert.equal(state.get().pendingLabel, 'separando voces…');
 
-  // 17e. If turn fails, timer is cleared and label restores cleanly
-  const failTurnObj = state.beginTurn({ message: 'Separa coros' });
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+  // Restores cleanly on fail
   state.failTurn({
-    generationId: failTurnObj.generationId,
+    generationId: turnOnline.generationId,
     error: { code: 'pc_wake_timeout', message: 'Timeout' },
   });
+  assert.equal(state.get().pending, false);
   assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
 
-  // 17f. If turn is canceled, timer is cleared and label restores cleanly
-  state.beginTurn({ message: 'Separa la pista' });
-  await new Promise((r) => setTimeout(r, 50));
-  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+  // 17d. Local mode: sets 'separando voces…' (generic)
+  const turnLocal = state.beginTurn({
+    message: 'Separa coros',
+    gpuStatus: { mode: 'local', pc_online: true },
+  });
+  assert.equal(state.get().pendingLabel, 'separando voces…');
+
+  // Restores cleanly on cancel
   state.cancelTurn();
+  assert.equal(state.get().pending, false);
   assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
 
-  // 17g. If panel is closed mid-wait, timer is cleared and label restores cleanly
+  // 17e. Restores cleanly on close
   state.open();
-  state.beginTurn({ message: 'Separa la pista' });
-  await new Promise((r) => setTimeout(r, 50));
+  state.beginTurn({
+    message: 'Separa la pista',
+    gpuStatus: { mode: 'remote', pc_online: false },
+  });
   assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
   state.close();
   assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
 
-  console.log('✓ 17. Typing indicator shows "esperando la PC de Joshua…" after N seconds of pending separation even on first attempt, and restores cleanly');
+  console.log('✓ 17. GPU status probe integration (offline -> label espera; online -> genérico; local -> genérico)');
 }
 
 console.log('All Agent Chat State and API Client unit tests passed!');

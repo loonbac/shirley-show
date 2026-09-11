@@ -35,10 +35,8 @@ pub fn reconcile_audio_files(
     if let Ok(entries) = std::fs::read_dir(storage.staging_dir()) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Ok(()) = std::fs::remove_file(&path) {
-                    report.purged_staging += 1;
-                }
+            if path.is_file() && std::fs::remove_file(&path).is_ok() {
+                report.purged_staging += 1;
             }
         }
     }
@@ -48,13 +46,11 @@ pub fn reconcile_audio_files(
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if let Ok(()) = std::fs::remove_dir_all(&path) {
+                if std::fs::remove_dir_all(&path).is_ok() {
                     report.purged_vocal_work += 1;
                 }
-            } else if path.is_file() {
-                if let Ok(()) = std::fs::remove_file(&path) {
-                    report.purged_vocal_work += 1;
-                }
+            } else if path.is_file() && std::fs::remove_file(&path).is_ok() {
+                report.purged_vocal_work += 1;
             }
         }
     }

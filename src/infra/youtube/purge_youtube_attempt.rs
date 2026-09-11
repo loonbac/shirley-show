@@ -15,14 +15,12 @@ pub fn purge_youtube_attempt(staging_dir: &Path, stage_id: &str) {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            if file_name.starts_with(&prefix) || file_name == part_name {
-                if let Ok(metadata) = entry.metadata() {
-                    if metadata.is_file() {
-                        let _ = fs::remove_file(&path);
-                    }
-                }
-            }
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+            && (file_name.starts_with(&prefix) || file_name == part_name)
+            && let Ok(metadata) = entry.metadata()
+            && metadata.is_file()
+        {
+            let _ = fs::remove_file(&path);
         }
     }
 }
