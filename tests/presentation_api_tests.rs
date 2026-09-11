@@ -1,0 +1,217 @@
+use axum::body::Body;
+use http::{header, Request, StatusCode};
+use http_body_util::BodyExt;
+use serde_json::{json, Value};
+use shirley_show::infra::sqlite::{init_pool, migrate_pool};
+use shirley_show::router::create_router;
+use shirley_show::state::AppState;
+use tempfile::TempDir;
+use tower::ServiceExt;
+
+fn setup_app() -> (axum::Router, TempDir) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db_path = dir.path().join("test.sqlite3");
+    let path = db_path.to_str().expect("valid path");
+    let pool = init_pool(path).expect("init pool");
+    migrate_pool(&pool).expect("migrate pool");
+    let state = AppState::new(pool);
+    (create_router(state), dir)
+}
+
+async fn body_to_json(body: Body) -> Value {
+    let bytes = body.collect().await.expect("collect body").to_bytes();
+    serde_json::from_slice(&bytes).expect("parse json")
+}
+
+#[tokio::test]
+async fn test_get_presentations_empty() {
+    let (app, _dir) = setup_app();
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/presentations")
+        .body(Body::empty())
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let json = body_to_json(res.into_body()).await;
+    assert_eq!(json["presentations"], json!([]));
+}
+
+#[tokio::test]
+async fn test_create_and_get_presentation() {
+    let (app, _dir) = setup_app();
+
+    // POST /api/presentations
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "  Viernes Acústico  " }).to_string()))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let json = body_to_json(res.into_body()).await;
+    let presentation = &json["presentation"];
+    assert_eq!(presentation["title"], "Viernes Acústico");
+    let id = presentation["id"].as_str().unwrap().to_string();
+
+    // GET /api/presentations/:id
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/presentations/{id}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let json = body_to_json(res.into_body()).await;
+    assert_eq!(json["presentation"]["id"], id);
+    assert_eq!(json["presentation"]["title"], "Viernes Acústico");
+    assert_eq!(json["items"], json!([]));
+}
+
+#[tokio::test]
+async fn test_patch_presentation_rename() {
+    let (app, _dir) = setup_app();
+
+    // Create presentation
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Initial" }).to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let json = body_to_json(res.into_body()).await;
+    let id = json["presentation"]["id"].as_str().unwrap();
+
+    // PATCH /api/presentations/:id
+    let req = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Renamed Title" }).to_string()))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let json = body_to_json(res.into_body()).await;
+    assert_eq!(json["presentation"]["title"], "Renamed Title");
+    assert_eq!(json["presentation"]["id"], id);
+}
+
+#[tokio::test]
+async fn test_delete_presentation() {
+    let (app, _dir) = setup_app();
+
+    // Create presentation
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "To Delete" }).to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let json = body_to_json(res.into_body()).await;
+    let id = json["presentation"]["id"].as_str().unwrap();
+
+    // DELETE /api/presentations/:id
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/presentations/{id}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let json = body_to_json(res.into_body()).await;
+    assert_eq!(json["deleted_id"], id);
+    assert_eq!(json["cleanup_pending"], false);
+
+    // GET /api/presentations/:id should now return 404
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/presentations/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_error_response_format_and_status_codes() {
+    let (app, _dir) = setup_app();
+
+    // 400 Bad Request on malformed JSON
+    let req_bad_json = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from("{ invalid_json: "))
+        .unwrap();
+    let res_bad_json = app.clone().oneshot(req_bad_json).await.unwrap();
+    assert_eq!(res_bad_json.status(), StatusCode::BAD_REQUEST);
+    let json_bad = body_to_json(res_bad_json.into_body()).await;
+    assert!(json_bad.get("error").is_some());
+    assert!(json_bad["error"].get("code").is_some());
+    assert!(json_bad["error"].get("message").is_some());
+    assert!(json_bad["error"].as_object().unwrap().contains_key("field"));
+
+    // 404 Not Found on missing presentation
+    let req_not_found = Request::builder()
+        .method("GET")
+        .uri("/api/presentations/non-existent-uuid")
+        .body(Body::empty())
+        .unwrap();
+    let res_not_found = app.clone().oneshot(req_not_found).await.unwrap();
+    assert_eq!(res_not_found.status(), StatusCode::NOT_FOUND);
+    let json_404 = body_to_json(res_not_found.into_body()).await;
+    assert_eq!(json_404["error"]["code"], "presentation_not_found");
+    assert!(json_404["error"].as_object().unwrap().contains_key("field"));
+
+    // 422 Unprocessable Entity on empty title in POST
+    let req_empty_post = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "   " }).to_string()))
+        .unwrap();
+    let res_empty_post = app.clone().oneshot(req_empty_post).await.unwrap();
+    assert_eq!(res_empty_post.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let json_422_post = body_to_json(res_empty_post.into_body()).await;
+    assert_eq!(json_422_post["error"]["code"], "title_required");
+    assert_eq!(json_422_post["error"]["field"], "title");
+
+    // 422 Unprocessable Entity on empty title in PATCH
+    let req_create = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Valid" }).to_string()))
+        .unwrap();
+    let res_create = app.clone().oneshot(req_create).await.unwrap();
+    let id = body_to_json(res_create.into_body()).await["presentation"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let req_empty_patch = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "" }).to_string()))
+        .unwrap();
+    let res_empty_patch = app.oneshot(req_empty_patch).await.unwrap();
+    assert_eq!(res_empty_patch.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let json_422_patch = body_to_json(res_empty_patch.into_body()).await;
+    assert_eq!(json_422_patch["error"]["code"], "title_required");
+    assert_eq!(json_422_patch["error"]["field"], "title");
+}

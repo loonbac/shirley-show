@@ -21,29 +21,29 @@ Chain strategy: pending
 ## Slice A: Backend Foundation, Domain, SQLite Storage & Presentations API
 
 ### 1. Project Setup and Core Domain Models
-- [ ] RED: Create initial `Cargo.toml` and write unit tests for presentation domain entities and validation rules in `tests/domain_presentation_tests.rs`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement presentation domain types (`Presentation`, validation, trimming) and error types in `src/domain/presentation.rs`, `src/domain/mod.rs`, and `src/error.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Add domain tests for whitespace trimming, Unicode handling, and non-empty title constraints, ensuring `cargo test --test domain_presentation_tests` passes. <!-- sdd-owner: implementation -->
+- [x] RED: Create initial `Cargo.toml` and write unit tests for presentation domain entities and validation rules in `tests/domain_presentation_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement presentation domain types (`Presentation`, validation, trimming) and error types in `src/domain/presentation.rs`, `src/domain/mod.rs`, and `src/error.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Add domain tests for whitespace trimming, Unicode handling, and non-empty title constraints, ensuring `cargo test --test domain_presentation_tests` passes. <!-- sdd-owner: implementation -->
 
 ### 2. SQLite Database Schema, Pool Configuration and Migrations
-- [ ] RED: Write integration tests in `tests/sqlite_migration_tests.rs` asserting WAL mode, `busy_timeout=5000`, `foreign_keys=ON`, and table creation for `presentations`, `show_items`, and `pending_audio_deletions`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement SQL migration `migrations/0001_shirley_show_core.sql`, pool initialization in `src/infra/sqlite/connect.rs`, and embedded migration runner in `src/infra/sqlite/migrate.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Verify migration idempotency and PRAGMA settings on fresh SQLite databases via `cargo test --test sqlite_migration_tests`. <!-- sdd-owner: implementation -->
+- [x] RED: Write integration tests in `tests/sqlite_migration_tests.rs` asserting WAL mode, `busy_timeout=5000`, `foreign_keys=ON`, and table creation for `presentations`, `show_items`, and `pending_audio_deletions`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement SQL migration `migrations/0001_shirley_show_core.sql`, pool initialization in `src/infra/sqlite/connect.rs`, and embedded migration runner in `src/infra/sqlite/migrate.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Verify migration idempotency and PRAGMA settings on fresh SQLite databases via `cargo test --test sqlite_migration_tests`. <!-- sdd-owner: implementation -->
 
 ### 3. Presentation Repository Ports and SQLite Implementation
-- [ ] RED: Write repository integration tests in `tests/presentation_repository_tests.rs` covering create, list, get, rename, and delete cascade behavior. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Define traits in `src/ports/presentation_reader.rs`, `src/ports/presentation_writer.rs`, and implement `SqlitePresentationRepository` in `src/infra/sqlite/presentation_repository.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Add edge cases for duplicate presentation titles yielding distinct UUIDs, rename preserving items, and non-existent IDs returning `NotFound`. <!-- sdd-owner: implementation -->
+- [x] RED: Write repository integration tests in `tests/presentation_repository_tests.rs` covering create, list, get, rename, and delete cascade behavior. <!-- sdd-owner: implementation -->
+- [x] GREEN: Define traits in `src/ports/presentation_reader.rs`, `src/ports/presentation_writer.rs`, and implement `SqlitePresentationRepository` in `src/infra/sqlite/presentation_repository.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Add edge cases for duplicate presentation titles yielding distinct UUIDs, rename preserving items, and non-existent IDs returning `NotFound`. <!-- sdd-owner: implementation -->
 
 ### 4. Presentation Use Cases
-- [ ] RED: Write unit tests in `tests/presentation_use_cases_tests.rs` with mock/in-memory ports for `CreatePresentation`, `ListPresentations`, `GetPresentation`, `RenamePresentation`, and `DeletePresentation`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement use case structs in `src/use_cases/create_presentation.rs`, `src/use_cases/list_presentations.rs`, `src/use_cases/get_presentation.rs`, `src/use_cases/rename_presentation.rs`, and `src/use_cases/delete_presentation.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Ensure strict validation error mapping (empty titles, whitespace-only titles) and wire exports in `src/use_cases/mod.rs`. <!-- sdd-owner: implementation -->
+- [x] RED: Write unit tests in `tests/presentation_use_cases_tests.rs` with mock/in-memory ports for `CreatePresentation`, `ListPresentations`, `GetPresentation`, `RenamePresentation`, and `DeletePresentation`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement use case structs in `src/use_cases/create_presentation.rs`, `src/use_cases/list_presentations.rs`, `src/use_cases/get_presentation.rs`, `src/use_cases/rename_presentation.rs`, and `src/use_cases/delete_presentation.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Ensure strict validation error mapping (empty titles, whitespace-only titles) and wire exports in `src/use_cases/mod.rs`. <!-- sdd-owner: implementation -->
 
 ### 5. Presentations HTTP Handlers and API Routing
-- [ ] RED: Write HTTP integration tests using `axum::Router` and `tower::ServiceExt` in `tests/presentation_api_tests.rs` verifying `/api/presentations` endpoints (GET, POST, GET :id, PATCH :id, DELETE :id). <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement DTOs in `src/handlers/dto.rs`, Axum handlers in `src/handlers/presentations/list.rs`, `create.rs`, `get.rs`, `rename.rs`, `delete.rs`, router in `src/router.rs`, application state in `src/state/app_state.rs`, and library root in `src/lib.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Add tests for error response JSON format `{ "error": { "code", "message", "field" } }` and status codes (200, 201, 400, 404, 422). <!-- sdd-owner: implementation -->
+- [x] RED: Write HTTP integration tests using `axum::Router` and `tower::ServiceExt` in `tests/presentation_api_tests.rs` verifying `/api/presentations` endpoints (GET, POST, GET :id, PATCH :id, DELETE :id). <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement DTOs in `src/handlers/dto.rs`, Axum handlers in `src/handlers/presentations/list.rs`, `create.rs`, `get.rs`, `rename.rs`, `delete.rs`, router in `src/router.rs`, application state in `src/state/app_state.rs`, and library root in `src/lib.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Add tests for error response JSON format `{ "error": { "code", "message", "field" } }` and status codes (200, 201, 400, 404, 422). <!-- sdd-owner: implementation -->
 
 ---
 
