@@ -7,7 +7,7 @@ import { useFocusTrap } from '../../behaviors/use-focus-trap.js';
 import { useStickToBottom } from '../../behaviors/use-stick-to-bottom.js';
 
 /**
- * Organism managing the large Shirley AI conversational interface.
+ * Organism managing the large Ressy AI conversational interface.
  * Implements 580px slide-over on desktop, 100% overlay on mobile,
  * focus trap, active repertoire context badge, and auto-scrolling transcript.
  *

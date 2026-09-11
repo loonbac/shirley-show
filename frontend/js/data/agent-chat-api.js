@@ -41,7 +41,7 @@ export function validateAudioAttachment(file) {
 }
 
 /**
- * Dispatches a chat message to Shirley AI Agent backend.
+ * Dispatches a chat message to Ressy AI Agent backend.
  * Uses JSON for text-only messages, and FormData for turns with an attached audio file.
  *
  * @param {{

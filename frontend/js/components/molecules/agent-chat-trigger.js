@@ -2,8 +2,8 @@ import { createElement } from '../../utils/dom/create-element.js';
 import { createIcon } from '../atoms/icon.js';
 
 /**
- * Creates the primary navigation trigger for the Shirley AI Assistant chat.
- * Enforces a minimum tactile target of >= 48x48px, high-contrast visible label "Shirley",
+ * Creates the primary navigation trigger for the Ressy AI Assistant chat.
+ * Enforces a minimum tactile target of >= 48x48px, high-contrast visible label "Ressy",
  * and prominent gold brand styling.
  *
  * @param {{

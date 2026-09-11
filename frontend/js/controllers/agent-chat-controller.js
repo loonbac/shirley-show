@@ -15,7 +15,7 @@ export function getActiveAgentChatController() {
 }
 
 /**
- * Controller orchestrating the Shirley AI Agent conversational lifecycle.
+ * Controller orchestrating the Ressy AI Agent conversational lifecycle.
  * Manages the singleton panel, network dispatch, reactive view refresh signals,
  * and ephemeral state synchronization.
  *
