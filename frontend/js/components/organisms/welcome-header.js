@@ -3,7 +3,7 @@ import { createButton } from '../atoms/button.js';
 import { createIcon } from '../atoms/icon.js';
 
 /**
- * Pure organism for the warm library welcome header & Shirley AI Agent Hero.
+ * Pure organism for the warm library welcome header & Ressy AI Agent Hero.
  * Serves as the central protagonist of the application: large greeting, prominent
  * chat composer with real-world singer examples, send trigger that opens the slide-over chat,
  * aggregate repertoire metrics, and manual presentation creation action.
@@ -57,7 +57,7 @@ export function createWelcomeHeader(props = {}) {
     class: 'welcome-header-chat-input',
     placeholder: 'Escríbeme… ej: créame la presentación Gala Acústica',
     rows: '2',
-    'aria-label': 'Escribe una instrucción o mensaje para Shirley',
+    'aria-label': 'Escribe una instrucción o mensaje para Ressy',
   });
 
   const sendIcon = createIcon({ name: 'send', size: 'base', className: 'welcome-header-send-icon' });
@@ -67,7 +67,7 @@ export function createWelcomeHeader(props = {}) {
     {
       type: 'submit',
       class: 'welcome-header-chat-send btn btn-primary',
-      'aria-label': 'Enviar mensaje a Shirley',
+      'aria-label': 'Enviar mensaje a Ressy',
     },
     [sendIcon, sendLabel]
   );
@@ -191,7 +191,7 @@ export function createWelcomeHeader(props = {}) {
     createBtn.el,
   ]);
 
-  const el = createElement('section', { class: 'welcome-header welcome-header--hero', 'aria-label': 'Asistente Shirley' }, [
+  const el = createElement('section', { class: 'welcome-header welcome-header--hero', 'aria-label': 'Asistente Ressy' }, [
     introRow,
     heroChatArea,
     footerRow,

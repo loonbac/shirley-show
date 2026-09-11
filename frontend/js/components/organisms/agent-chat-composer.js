@@ -111,10 +111,10 @@ export function createAgentChatComposer(props) {
   // Textarea input
   const textareaEl = createElement('textarea', {
     class: 'agent-composer-textarea',
-    placeholder: 'Escribe una instrucción para Shirley...',
+    placeholder: 'Escribe una instrucción para Ressy...',
     rows: '2',
     disabled: pending,
-    'aria-label': 'Mensaje para el asistente Shirley',
+    'aria-label': 'Mensaje para el asistente Ressy',
     onInput: (e) => {
       draft = e.target.value;
       if (typeof onChangeDraft === 'function') {
@@ -173,7 +173,7 @@ export function createAgentChatComposer(props) {
     {
       type: 'button',
       class: 'agent-composer-btn agent-composer-btn--send',
-      'aria-label': 'Enviar mensaje a Shirley',
+      'aria-label': 'Enviar mensaje a Ressy',
       title: 'Enviar mensaje',
       disabled: pending,
       onClick: () => {

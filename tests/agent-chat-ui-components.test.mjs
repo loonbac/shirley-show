@@ -71,7 +71,7 @@ console.log('Running Agent Chat UI Components and Behaviors Test Harness...');
 
   assert.ok(trigger.el.classList.contains('agent-chat-trigger'));
   assert.equal(trigger.el.getAttribute('type'), 'button');
-  assert.ok(trigger.el.textContent.includes('Asistente Shirley'));
+  assert.ok(trigger.el.textContent.includes('Ressy'));
   assert.ok(trigger.el.textContent.includes('K')); // Keyboard shortcut hint
 
   trigger.el.dispatchEvent(new Event('click'));
@@ -87,13 +87,13 @@ console.log('Running Agent Chat UI Components and Behaviors Test Harness...');
     message: {
       id: 'm1',
       role: 'user',
-      content: 'Hola Shirley',
+      content: 'Hola Ressy',
       timestamp: Date.now(),
     },
   });
   assert.ok(userBubble.el.classList.contains('agent-message-bubble'));
   assert.ok(userBubble.el.classList.contains('agent-message-bubble--user'));
-  assert.ok(userBubble.el.textContent.includes('Hola Shirley'));
+  assert.ok(userBubble.el.textContent.includes('Hola Ressy'));
 
   // Assistant bubble with potentially malicious HTML / script
   const maliciousContent = `<script>alert('xss')</script><img src=x onerror=alert(1)>Verso 1\nVerso 2`;
@@ -132,7 +132,7 @@ console.log('Running Agent Chat UI Components and Behaviors Test Harness...');
   const indicator = createAgentTypingIndicator();
   assert.ok(indicator.el.classList.contains('agent-typing-indicator'));
   assert.equal(indicator.el.getAttribute('aria-live'), 'polite');
-  assert.ok(indicator.el.textContent.includes('Shirley está pensando...'));
+  assert.ok(indicator.el.textContent.includes('Ressy está pensando...'));
   assert.ok(indicator.el.querySelector('.agent-typing-dots') !== null);
 
   console.log('✓ 4. Agent typing indicator has aria-live="polite" and pulsing dots container');

@@ -59,7 +59,7 @@ export function createAgentChatPanel(props) {
   // Header Title
   const titleIcon = createIcon({ name: 'sparkles', size: 'base', className: 'agent-header-icon' });
   const titleText = createElement('h2', { id: 'agent-chat-title', class: 'agent-chat-header-title' }, [
-    'Asistente Shirley',
+    'Asistente Ressy',
   ]);
   const titleGroup = createElement('div', { class: 'agent-chat-title-group' }, [titleIcon, titleText]);
 
@@ -95,7 +95,7 @@ export function createAgentChatPanel(props) {
   const transcriptEl = createElement('div', {
     class: 'agent-chat-transcript',
     tabindex: '0',
-    'aria-label': 'Historial de conversación con Shirley',
+    'aria-label': 'Historial de conversación con Ressy',
   });
 
   // Stick to bottom auto-scroll behavior
@@ -166,7 +166,7 @@ export function createAgentChatPanel(props) {
 
     if (messages.length === 0) {
       const emptyIcon = createIcon({ name: 'sparkles', size: 'lg' });
-      const emptyTitle = createElement('p', { class: 'agent-chat-empty-title' }, ['¡Hola! Soy Shirley']);
+      const emptyTitle = createElement('p', { class: 'agent-chat-empty-title' }, ['¡Hola! Soy Ressy']);
       const emptyDesc = createElement('p', { class: 'agent-chat-empty-desc' }, [
         'Puedo ayudarte a crear shows, agregar letras, notas o pistas de audio con playback listo.',
       ]);
@@ -193,7 +193,7 @@ export function createAgentChatPanel(props) {
       case 'provider_auth':
         return 'No se pudo autenticar con el proveedor de IA. Por favor, verifica la clave de API configurada en el servidor.';
       case 'provider_rate_limited':
-        return 'Shirley está experimentando una alta demanda en este momento. Por favor, intenta de nuevo en unos instantes o utiliza los controles directos.';
+        return 'Ressy está experimentando una alta demanda en este momento. Por favor, intenta de nuevo en unos instantes o utiliza los controles directos.';
       case 'provider_unavailable':
         return 'El proveedor de IA no está disponible temporalmente. Por favor, intenta de nuevo más tarde.';
       case 'agent_timeout':

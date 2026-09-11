@@ -20,7 +20,7 @@ export function createAgentChatTrigger(props = {}) {
 
   const icon = createIcon({ name: 'sparkles', size: 'base', className: 'agent-chat-trigger-icon' });
   const srPrefix = createElement('span', { class: 'agent-chat-trigger-sr-only' }, ['Asistente ']);
-  const labelText = createElement('span', { class: 'agent-chat-trigger-text' }, ['Shirley']);
+  const labelText = createElement('span', { class: 'agent-chat-trigger-text' }, ['Ressy']);
   const kbdHint = createElement('kbd', { class: 'agent-chat-trigger-kbd' }, ['⌘K']);
 
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform || '');
@@ -31,7 +31,7 @@ export function createAgentChatTrigger(props = {}) {
     {
       type: 'button',
       class: `agent-chat-trigger ${isOpen ? 'is-active' : ''}`,
-      'aria-label': 'Abrir asistente Shirley',
+      'aria-label': 'Abrir asistente Ressy',
       'aria-haspopup': 'dialog',
       'aria-expanded': isOpen ? 'true' : 'false',
       onClick: (e) => {

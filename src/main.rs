@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     config.groq.model.clone(),
                 );
                 println!(
-                    "Asistente Shirley configurada con modelo {}",
+                    "Asistente Ressy configurada con modelo {}",
                     config.groq.model
                 );
             }
@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        println!("Asistente Shirley en modo no configurado (GROQ_API_KEY no detectada).");
+        println!("Asistente Ressy en modo no configurado (GROQ_API_KEY no detectada).");
     }
 
     let app = create_router(state);

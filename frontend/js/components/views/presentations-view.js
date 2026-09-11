@@ -8,7 +8,7 @@ import { createWelcomeHeader } from '../organisms/welcome-header.js';
 
 /**
  * Pure view for presentations home catalog.
- * Orchestrates the protagonist Shirley AI chat hero card and presentation cards,
+ * Orchestrates the protagonist Ressy AI chat hero card and presentation cards,
  * maintaining the warm canonical catalog underneath on desktop and mobile.
  *
  * @param {{
@@ -63,7 +63,7 @@ export function createPresentationsView(props) {
       return;
     }
 
-    // Always render the Shirley AI Chat Hero at the top
+    // Always render the Ressy AI Chat Hero at the top
     const welcomeHeader = createWelcomeHeader({
       greeting: '¡Hola, Shirley!',
       subtitle: 'Tu asistente personal para el escenario',
@@ -85,7 +85,7 @@ export function createPresentationsView(props) {
       const empty = createEmptyState({
         iconName: 'track',
         title: 'Tu biblioteca está lista',
-        description: 'Escríbele a Shirley arriba qué repertorio quieres preparar o usa la opción manual.',
+        description: 'Escríbele a Ressy arriba qué repertorio quieres preparar o usa la opción manual.',
         actions: [createFirstBtn.el],
       });
 

@@ -2,7 +2,7 @@ import { createElement } from '../../utils/dom/create-element.js';
 import { createIcon } from '../atoms/icon.js';
 
 /**
- * Visual confirmation card for a confirmed tool action executed by Shirley.
+ * Visual confirmation card for a confirmed tool action executed by Ressy.
  *
  * @param {{
  *   action: {

@@ -118,7 +118,7 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
     restoredWindowScroll = { x, y };
   };
 
-  // Shirley adds a second item to the show sequence
+  // Ressy adds a second item to the show sequence
   itemsInShow.push({
     id: 'item-2',
     presentation_id: 'pres-test-999',

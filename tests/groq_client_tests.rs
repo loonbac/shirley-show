@@ -56,7 +56,7 @@ async fn start_mock_server() -> (SocketAddr, MockServerState) {
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": "¡Hola! Soy Shirley."
+                        "content": "¡Hola! Soy Ressy."
                     },
                     "finish_reason": "stop"
                 }
@@ -93,10 +93,10 @@ async fn test_groq_client_request_serialization_and_auth_header() {
 
     let request = CompletionRequest {
         model: "llama-3.3-70b-versatile".to_string(),
-        system_prompt: "Eres Shirley, asistente de escenario.".to_string(),
+        system_prompt: "Eres Ressy, asistente de escenario.".to_string(),
         messages: vec![
             AgentMessage::User {
-                content: "Hola Shirley".to_string(),
+                content: "Hola Ressy".to_string(),
             },
             AgentMessage::Assistant {
                 content: None,
@@ -126,7 +126,7 @@ async fn test_groq_client_request_serialization_and_auth_header() {
         .complete(request)
         .await
         .expect("successful completion");
-    assert_eq!(response.content.as_deref(), Some("¡Hola! Soy Shirley."));
+    assert_eq!(response.content.as_deref(), Some("¡Hola! Soy Ressy."));
     assert!(response.tool_calls.is_empty());
 
     // Check headers received by mock server
@@ -144,10 +144,10 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     assert_eq!(messages[0]["role"], "system");
     assert_eq!(
         messages[0]["content"],
-        "Eres Shirley, asistente de escenario."
+        "Eres Ressy, asistente de escenario."
     );
     assert_eq!(messages[1]["role"], "user");
-    assert_eq!(messages[1]["content"], "Hola Shirley");
+    assert_eq!(messages[1]["content"], "Hola Ressy");
     assert_eq!(messages[2]["role"], "assistant");
     assert_eq!(messages[2]["tool_calls"][0]["id"], "call_abc123");
     assert_eq!(messages[2]["tool_calls"][0]["type"], "function");

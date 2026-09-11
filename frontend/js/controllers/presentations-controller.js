@@ -17,7 +17,7 @@ import { toPresentation } from '../router/navigate.js';
  * Controller orchestrating the presentations catalog.
  * Consumes enriched presentation summaries, calculates aggregate library metrics,
  * handles presentation lifecycle actions (open, create, rename, delete),
- * and routes messages from the Shirley Hero chat directly to the AI agent controller.
+ * and routes messages from the Ressy Hero chat directly to the AI agent controller.
  *
  * @param {{
  *   audioController: { stop: () => void },

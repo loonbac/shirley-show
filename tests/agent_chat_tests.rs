@@ -96,7 +96,7 @@ async fn test_agent_chat_unconfigured_provider() {
     );
 
     let input = AgentChatInput {
-        message: "Hola Shirley".to_string(),
+        message: "Hola Ressy".to_string(),
         history: vec![],
         presentation_id: Some("pres-1".to_string()),
         staged_audio: None,

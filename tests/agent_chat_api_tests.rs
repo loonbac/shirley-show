@@ -125,7 +125,7 @@ async fn test_chat_api_unconfigured_key_returns_200_with_notice() {
 #[tokio::test]
 async fn test_chat_api_valid_text_json_request() {
     let (app, _, _tmp) = setup_app_with_provider(CompletionResponse {
-        content: Some("¡Hola! Soy Shirley.".to_string()),
+        content: Some("¡Hola! Soy Ressy.".to_string()),
         tool_calls: vec![],
     });
 
@@ -133,7 +133,7 @@ async fn test_chat_api_valid_text_json_request() {
         .method("POST")
         .uri("/api/agent/chat")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "message": "Hola Shirley" }).to_string()))
+        .body(Body::from(json!({ "message": "Hola Ressy" }).to_string()))
         .unwrap();
 
     let response = app.oneshot(req).await.unwrap();
@@ -141,7 +141,7 @@ async fn test_chat_api_valid_text_json_request() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["message"], "¡Hola! Soy Shirley.");
+    assert_eq!(json["message"], "¡Hola! Soy Ressy.");
     assert_eq!(json["actions_taken"], json!([]));
 }
 
@@ -459,7 +459,7 @@ async fn test_chat_api_json_history_single_message_exceeding_32k_chars() {
     })];
 
     let payload = json!({
-        "message": "Hola Shirley",
+        "message": "Hola Ressy",
         "history": history,
     });
 

@@ -22,7 +22,7 @@ export function createAgentTypingIndicator() {
     dot3,
   ]);
 
-  const textLabel = createElement('span', { class: 'agent-typing-label' }, ['Shirley está pensando...']);
+  const textLabel = createElement('span', { class: 'agent-typing-label' }, ['Ressy está pensando...']);
 
   const bubble = createElement('div', { class: 'agent-typing-bubble' }, [
     dotsContainer,
@@ -35,7 +35,7 @@ export function createAgentTypingIndicator() {
       class: 'agent-typing-indicator',
       role: 'status',
       'aria-live': 'polite',
-      'aria-label': 'Shirley está pensando...',
+      'aria-label': 'Ressy está pensando...',
     },
     [avatar, bubble]
   );
