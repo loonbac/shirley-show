@@ -1,0 +1,48 @@
+.agent-tool-card {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding: 6px 12px;
+  background-color: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border-subtle, #ede7db);
+  border-left: 3px solid var(--color-success, #15803d);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.8125rem;
+  color: var(--color-text, #1c1917);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.agent-tool-card-icon {
+  color: var(--color-success, #15803d);
+  flex-shrink: 0;
+}
+
+.agent-tool-card-summary {
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Tool specific accent variations */
+.agent-tool-card--create-presentation {
+  border-left-color: var(--color-primary, #b8860b);
+}
+
+.agent-tool-card--add-track-from-staged {
+  border-left-color: var(--color-accent-track, #6d28d9);
+}
+
+.agent-tool-card--add-lyrics {
+  border-left-color: var(--color-accent-lyrics, #0e7490);
+}
+
+.agent-tool-card--add-note {
+  border-left-color: var(--color-accent-note, #b45309);
+}
+
+.agent-tool-card.is-error {
+  border-left-color: var(--color-danger, #dc2626);
+}
+
+.agent-tool-card.is-error .agent-tool-card-icon {
+  color: var(--color-danger, #dc2626);
+}

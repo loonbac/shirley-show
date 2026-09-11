@@ -29,6 +29,11 @@
 @import "./molecules/drag-handle.css";
 @import "./molecules/playback-controls.css";
 @import "./molecules/empty-state.css";
+@import "./molecules/agent-chat-trigger.css";
+@import "./molecules/agent-message-bubble.css";
+@import "./molecules/agent-typing-indicator.css";
+@import "./molecules/agent-attachment-chip.css";
+@import "./molecules/agent-tool-card.css";
 
 /* Organisms */
 @import "./organisms/app-topbar.css";
@@ -41,6 +46,8 @@
 @import "./organisms/add-item-dialog.css";
 @import "./organisms/quick-edit-dialog.css";
 @import "./organisms/stage-mode-view.css";
+@import "./organisms/agent-chat-composer.css";
+@import "./organisms/agent-chat-panel.css";
 
 /* Views */
 @import "./views/presentations-view.css";

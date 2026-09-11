@@ -5,10 +5,15 @@ import { navigateTo } from './router/navigate.js';
 import { activeRouteSignal } from './state/active-route.js';
 import { createPresentationsController } from './controllers/presentations-controller.js';
 import { createPresentationDetailController } from './controllers/presentation-detail-controller.js';
+import { createChatState } from './core/state/chat-state.js';
+import { createAgentChatController } from './controllers/agent-chat-controller.js';
+import { bindAgentChatShortcuts } from './behaviors/bind-agent-chat-shortcuts.js';
+import { stageModeSignal } from './core/state/stage-mode-state.js';
 
 /**
  * Shirley Show Composition Root.
- * Initializes singleton audio controller, sets up shell layout, and handles routing.
+ * Initializes singleton audio controller, singleton AI agent chat controller,
+ * sets up shell layout, and handles routing.
  */
 function init() {
   const rootEl = document.getElementById('app');
@@ -19,6 +24,17 @@ function init() {
 
   // Exactly ONE audio controller for the entire application session
   const audioController = createAudioController();
+
+  // Exactly ONE in-memory chat state and agent controller for the entire session
+  const chatState = createChatState();
+  const agentChatController = createAgentChatController({ chatState });
+  document.body.appendChild(agentChatController.panelEl);
+
+  // Global keyboard shortcuts (Ctrl+K / Cmd+K), suppressed during Stage Mode
+  bindAgentChatShortcuts({
+    onToggleChat: () => agentChatController.toggle(),
+    isStageModeActive: () => stageModeSignal.get(),
+  });
 
   // Root layout
   const shell = createShellLayout();
@@ -46,6 +62,7 @@ function init() {
     if (parsed.view === 'presentations') {
       activeController = createPresentationsController({
         audioController,
+        onOpenAgent: () => agentChatController.open(),
       });
       shell.setHeader(activeController.topbarEl);
       shell.setMain(activeController.viewEl);
@@ -54,6 +71,7 @@ function init() {
       activeController = createPresentationDetailController({
         presentationId,
         audioController,
+        onOpenAgent: () => agentChatController.open(),
       });
       shell.setHeader(activeController.topbarEl);
       shell.setMain(activeController.viewEl);

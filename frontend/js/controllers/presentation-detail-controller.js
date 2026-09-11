@@ -1,6 +1,7 @@
 import { createAppTopbar } from '../components/organisms/app-topbar.js';
 import { createButton } from '../components/atoms/button.js';
 import { createIcon } from '../components/atoms/icon.js';
+import { createAgentChatTrigger } from '../components/molecules/agent-chat-trigger.js';
 import { createPresentationDetailView } from '../components/views/presentation-detail-view.js';
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createAddItemDialog } from '../components/organisms/add-item-dialog.js';
@@ -8,6 +9,9 @@ import { createQuickEditDialog } from '../components/organisms/quick-edit-dialog
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
 import { createStageModeView } from '../components/organisms/stage-mode-view.js';
 import { useWakeLock } from '../behaviors/use-wake-lock.js';
+import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
+import { setStageModeActive } from '../core/state/stage-mode-state.js';
+import { onAgentRefresh } from '../core/state/agent-refresh.js';
 import { getPresentation } from '../data/get-presentation.js';
 import { renamePresentation } from '../data/rename-presentation.js';
 import { deletePresentation } from '../data/delete-presentation.js';
@@ -32,6 +36,7 @@ import { playbackSignal } from '../state/playback-state.js';
  *     seek: (time: number) => void,
  *     stop: () => void,
  *   },
+ *   onOpenAgent?: () => void,
  * }} deps 
  * @returns {{
  *   topbarEl: HTMLElement,
@@ -40,7 +45,7 @@ import { playbackSignal } from '../state/playback-state.js';
  * }}
  */
 export function createPresentationDetailController(deps) {
-  const { presentationId, audioController } = deps;
+  const { presentationId, audioController, onOpenAgent } = deps;
 
   let presentation = null;
   let items = [];
@@ -69,6 +74,8 @@ export function createPresentationDetailController(deps) {
 
   function enterStageMode() {
     if (stageModeView || !presentation) return;
+
+    setStageModeActive(true);
 
     stageModeView = createStageModeView({
       presentation,
@@ -104,6 +111,7 @@ export function createPresentationDetailController(deps) {
   function exitStageMode() {
     if (!stageModeView) return;
 
+    setStageModeActive(false);
     wakeLock.deactivate();
 
     try {
@@ -117,6 +125,15 @@ export function createPresentationDetailController(deps) {
     stageModeView.destroy();
     stageModeView = null;
   }
+
+  // Agent Chat Trigger button in topbar
+  const agentChatTrigger = createAgentChatTrigger({
+    onClick: () => {
+      if (typeof onOpenAgent === 'function') {
+        onOpenAgent();
+      }
+    },
+  });
 
   const stageBtn = createButton({
     text: 'Modo Escenario',
@@ -138,7 +155,7 @@ export function createPresentationDetailController(deps) {
       audioController.stop();
       toPresentations();
     },
-    actions: [stageBtn.el, addItemBtn.el],
+    actions: [agentChatTrigger.el, stageBtn.el, addItemBtn.el],
   });
 
   const view = createPresentationDetailView({
@@ -173,6 +190,13 @@ export function createPresentationDetailController(deps) {
     }
   });
 
+  // Subscribe to agent refresh events for this presentation
+  const unsubscribeRefresh = onAgentRefresh((event) => {
+    if (event.scope === 'presentation' && event.presentationId === presentationId) {
+      loadData();
+    }
+  });
+
   async function loadData() {
     isLoading = true;
     errorMessage = null;
@@ -184,6 +208,12 @@ export function createPresentationDetailController(deps) {
       items = data.items || [];
       confirmedItems = [...items];
       isLoading = false;
+
+      // Publish active presentation context for the AI agent
+      activePresentationContextSignal.set({
+        id: presentation.id,
+        title: presentation.title,
+      });
 
       topbar.update({ title: presentation.title });
       view.update({ presentation, items, isLoading: false });
@@ -214,6 +244,10 @@ export function createPresentationDetailController(deps) {
         try {
           const res = await renamePresentation(presentationId, { title: newTitle });
           presentation = res.presentation;
+          activePresentationContextSignal.set({
+            id: presentation.id,
+            title: presentation.title,
+          });
           topbar.update({ title: presentation.title });
           view.update({ presentation });
           if (stageModeView) {
@@ -396,6 +430,8 @@ export function createPresentationDetailController(deps) {
   loadData();
 
   function destroy() {
+    setStageModeActive(false);
+    unsubscribeRefresh();
     unsubscribePlayback();
     exitStageMode();
     wakeLock.destroy();

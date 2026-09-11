@@ -1,7 +1,7 @@
 /**
  * Pure SVG Icon registry and creator.
  * @param {{
- *   name: 'play' | 'pause' | 'plus' | 'trash' | 'edit' | 'arrow-up' | 'arrow-down' | 'back' | 'track' | 'lyrics' | 'note' | 'check' | 'close' | 'grip',
+ *   name: 'play' | 'pause' | 'plus' | 'trash' | 'edit' | 'arrow-up' | 'arrow-down' | 'back' | 'track' | 'lyrics' | 'note' | 'check' | 'close' | 'grip' | 'sparkles' | 'send' | 'paperclip' | 'bot',
  *   size?: 'sm' | 'base' | 'lg' | 'xl',
  *   className?: string,
  * }} props 
@@ -64,6 +64,18 @@ export function createIcon(props = {}) {
       break;
     case 'close':
       svg.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>';
+      break;
+    case 'sparkles':
+      svg.innerHTML = '<path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"></path><path d="M18 2l1 3 3 1-3 1-1 3-1-3-3-1 3-1z"></path>';
+      break;
+    case 'send':
+      svg.innerHTML = '<line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>';
+      break;
+    case 'paperclip':
+      svg.innerHTML = '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>';
+      break;
+    case 'bot':
+      svg.innerHTML = '<rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8.01" y2="16"></line><line x1="16" y1="16" x2="16.01" y2="16"></line>';
       break;
     default:
       svg.innerHTML = '<circle cx="12" cy="12" r="10"></circle>';

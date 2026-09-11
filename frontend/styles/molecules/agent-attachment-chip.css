@@ -1,0 +1,66 @@
+.agent-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding: 4px var(--space-2, 8px);
+  background-color: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2dbce);
+  border-radius: var(--radius-base, 6px);
+  font-size: var(--font-size-sm, 0.875rem);
+  color: var(--color-text, #1c1917);
+  max-width: 100%;
+}
+
+.agent-attachment-chip.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.agent-attachment-chip-icon {
+  color: var(--color-primary, #b8860b);
+  flex-shrink: 0;
+}
+
+.agent-attachment-chip-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-attachment-chip-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-attachment-chip-size {
+  color: var(--color-text-dim, #7d7367);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.agent-attachment-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 48px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim, #7d7367);
+  cursor: pointer;
+  border-radius: 4px;
+  margin: -8px -4px -8px 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.agent-attachment-chip-remove:hover {
+  color: var(--color-danger, #dc2626);
+}
+
+.agent-attachment-chip-remove:focus-visible {
+  outline: 2px solid var(--color-focus-ring, #b8860b);
+}

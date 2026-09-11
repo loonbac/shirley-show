@@ -1,0 +1,98 @@
+.agent-message-bubble {
+  display: flex;
+  margin-bottom: var(--space-3, 12px);
+  width: 100%;
+  animation: messageFadeIn var(--transition-base, 250ms ease-in-out);
+}
+
+@keyframes messageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-message-bubble {
+    animation: none !important;
+  }
+}
+
+.agent-message-bubble--user {
+  justify-content: flex-end;
+}
+
+.agent-message-bubble--assistant {
+  justify-content: flex-start;
+  gap: var(--space-2, 8px);
+}
+
+.agent-message-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--color-primary-subtle, rgba(184, 134, 11, 0.12));
+  color: var(--color-primary, #b8860b);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.agent-message-content {
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.agent-message-bubble--user .agent-message-text {
+  background-color: var(--color-text, #1c1917);
+  color: #ffffff;
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border-radius: 16px 16px 4px 16px;
+  font-size: var(--font-size-base, 1rem);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-message-bubble--assistant .agent-message-text {
+  background-color: var(--color-surface, #ffffff);
+  color: var(--color-text, #1c1917);
+  border: 1px solid var(--color-border-subtle, #ede7db);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border-radius: 16px 16px 16px 4px;
+  font-size: var(--font-size-base, 1rem);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.agent-message-attachment-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-text-dim, #7d7367);
+  padding: 4px 8px;
+  background: var(--color-bg, #faf8f5);
+  border-radius: 4px;
+  border: 1px dashed var(--color-border, #e2dbce);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-message-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}

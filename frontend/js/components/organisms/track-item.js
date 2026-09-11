@@ -4,19 +4,7 @@ import { createIconButton } from '../molecules/icon-button.js';
 import { createDragHandle } from '../molecules/drag-handle.js';
 import { createReorderControls } from '../molecules/reorder-controls.js';
 import { createPlaybackControls } from '../molecules/playback-controls.js';
-
-/**
- * Formats bytes to human readable string (KB / MB).
- * @param {number} bytes 
- * @returns {string}
- */
-function formatBytes(bytes) {
-  if (!bytes || bytes <= 0) return '';
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { formatBytes } from '../../utils/format/bytes.js';
 
 /**
  * Formats seconds to MM:SS string.

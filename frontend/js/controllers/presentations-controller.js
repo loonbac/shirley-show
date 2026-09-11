@@ -3,6 +3,9 @@ import { createAppTopbar } from '../components/organisms/app-topbar.js';
 import { createPresentationsView } from '../components/views/presentations-view.js';
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
+import { createAgentChatTrigger } from '../components/molecules/agent-chat-trigger.js';
+import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
+import { onAgentRefresh } from '../core/state/agent-refresh.js';
 import { listPresentations } from '../data/list-presentations.js';
 import { createPresentation } from '../data/create-presentation.js';
 import { renamePresentation } from '../data/rename-presentation.js';
@@ -16,6 +19,7 @@ import { toPresentation } from '../router/navigate.js';
  *
  * @param {{
  *   audioController: { stop: () => void },
+ *   onOpenAgent?: () => void,
  * }} deps 
  * @returns {{
  *   topbarEl: HTMLElement,
@@ -24,12 +28,15 @@ import { toPresentation } from '../router/navigate.js';
  * }}
  */
 export function createPresentationsController(deps) {
-  const { audioController } = deps;
+  const { audioController, onOpenAgent } = deps;
 
   // Enforce exclusive playback: stop audio when on catalog view
   if (audioController) {
     audioController.stop();
   }
+
+  // Catalog view has no active presentation context
+  activePresentationContextSignal.set(null);
 
   let presentations = [];
   let isLoading = true;
@@ -43,9 +50,18 @@ export function createPresentationsController(deps) {
     }
   }
 
-  // La acción de crear vive en el welcome-header (una sola vía, sin duplicar en el topbar).
+  // Agent Chat Trigger button in topbar
+  const agentChatTrigger = createAgentChatTrigger({
+    onClick: () => {
+      if (typeof onOpenAgent === 'function') {
+        onOpenAgent();
+      }
+    },
+  });
+
   const topbar = createAppTopbar({
     title: 'Shirley Show',
+    actions: [agentChatTrigger.el],
   });
 
   const view = createPresentationsView({
@@ -148,10 +164,18 @@ export function createPresentationsController(deps) {
     document.body.appendChild(activeDialog.el);
   }
 
+  // Subscribe to reactive agent refresh events for catalog scope
+  const unsubscribeRefresh = onAgentRefresh((event) => {
+    if (event.scope === 'catalog') {
+      loadData();
+    }
+  });
+
   // Initial load
   loadData();
 
   function destroy() {
+    unsubscribeRefresh();
     closeActiveDialog();
   }
 
