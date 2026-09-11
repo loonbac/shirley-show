@@ -369,11 +369,15 @@ fn test_reserve_guarded_auto_releases_on_drop() {
     );
 
     {
-        let guard = registry.reserve_guarded(&descriptor.staged_audio_id).expect("reserve_guarded ok");
+        let guard = registry
+            .reserve_guarded(&descriptor.staged_audio_id)
+            .expect("reserve_guarded ok");
         assert_eq!(guard.staged_audio_id, descriptor.staged_audio_id);
         assert_eq!(
             registry.get_state(&descriptor.staged_audio_id).unwrap(),
-            StagedAudioState::Reserved { lease_id: guard.lease_id.clone() }
+            StagedAudioState::Reserved {
+                lease_id: guard.lease_id.clone()
+            }
         );
         // Guard is dropped here without commit
     }
@@ -384,10 +388,15 @@ fn test_reserve_guarded_auto_releases_on_drop() {
         StagedAudioState::Available
     );
     // Staging file on disk must still exist
-    assert!(file_path.exists(), "File on disk must still exist after auto-release");
+    assert!(
+        file_path.exists(),
+        "File on disk must still exist after auto-release"
+    );
 
     // Can be reserved again
-    let second_guard = registry.reserve_guarded(&descriptor.staged_audio_id).expect("second reserve ok");
+    let second_guard = registry
+        .reserve_guarded(&descriptor.staged_audio_id)
+        .expect("second reserve ok");
     assert_eq!(second_guard.staged_audio_id, descriptor.staged_audio_id);
 }
 
@@ -408,11 +417,18 @@ fn test_commit_processed_deletes_file_and_retains_consumed_tombstone() {
         2_000_000,
     );
 
-    let lease = registry.reserve(&descriptor.staged_audio_id).expect("reserve ok");
-    registry.commit_processed(&descriptor.staged_audio_id, &lease.lease_id).expect("commit_processed ok");
+    let lease = registry
+        .reserve(&descriptor.staged_audio_id)
+        .expect("reserve ok");
+    registry
+        .commit_processed(&descriptor.staged_audio_id, &lease.lease_id)
+        .expect("commit_processed ok");
 
     // 1. File on disk must be deleted
-    assert!(!file_path.exists(), "Source file must be deleted by commit_processed");
+    assert!(
+        !file_path.exists(),
+        "Source file must be deleted by commit_processed"
+    );
 
     // 2. State must be Consumed
     assert_eq!(
@@ -442,10 +458,15 @@ fn test_guard_commit_processed_deletes_file() {
         1_500_000,
     );
 
-    let guard = registry.reserve_guarded(&descriptor.staged_audio_id).expect("reserve_guarded ok");
+    let guard = registry
+        .reserve_guarded(&descriptor.staged_audio_id)
+        .expect("reserve_guarded ok");
     guard.commit_processed().expect("guard commit_processed ok");
 
-    assert!(!file_path.exists(), "Source file must be deleted by guard commit_processed");
+    assert!(
+        !file_path.exists(),
+        "Source file must be deleted by guard commit_processed"
+    );
     assert_eq!(
         registry.get_state(&descriptor.staged_audio_id).unwrap(),
         StagedAudioState::Consumed

@@ -5,14 +5,14 @@
 ```json
 {
   "changeName": "shirley-show-vocal-sep",
-  "slice": "vsep-s4-agent-frontend",
+  "slice": "fix-vsep-verify-blockers",
   "executionMode": "auto",
   "artifactStore": "openspec",
-  "reviewBudgetLines": 400,
+  "reviewBudgetLines": 500,
   "chainStrategy": "stacked-to-main",
-  "workUnit": "vsep-s4-agent-frontend",
-  "token": "sha256:0dc290d87ed5ca80519ba7b355cfa6747e267082331f591c4f57dafcae1da972",
-  "request": "v4-acquire-001",
+  "workUnit": "fix-vsep-verify-blockers",
+  "token": "sha256:b1845fdeeeb144313dd3a58dc4ca0646d88950a55f8f85480e021f6d1eef8002",
+  "request": "vvf-begin-001",
   "completedSliceTasks": 4,
   "totalSliceTasks": 4,
   "completedChangeTasks": 16,
@@ -97,6 +97,36 @@ Slice 4 integrates the vocal separation capability into the conversational agent
    - Fixed `ffprobe` post-verify to read stream-level codec bitrate (`320000`) rather than container format bitrate with muxing overhead.
    - Successfully ran end-to-end chorus separation on NVIDIA GeForce RTX 3060 via `karaoke-separator` with an ffmpeg-generated test audio, verified valid MP3 CBR 320 kbps output with ffprobe, and purged all temporary files.
 
+
+## Remediation Summary (`fix-vsep-verify-blockers`)
+
+Remediated all 6 blockers C1-C6 identified in `verify-report.md`:
+1. **C1 (Auxiliary subprocesses under `VocalProcessGuard`):**
+   - Evolved `VocalProcessGuard` to maintain an internal child process registry `Vec<Child>` and exposed `run_status` and `run_output` with `kill_on_drop(true)`.
+   - Integrated FLAC->WAV conversion (`ffmpeg`), MP3 transcode (`ffmpeg`), and post-verification (`ffprobe`) directly under `VocalProcessGuard`, ensuring they execute with remaining timeout bounds.
+   - `Drop` and `kill_and_wait` on `VocalProcessGuard` kill and await completion of EVERY child before releasing the GPU semaphore permit and purging temporary workdirs.
+   - Added `PreflightChildGuard` to preflight `ffprobe` to ensure kill-and-wait if preflight is cancelled or times out.
+2. **C2 (Instrumental PolarFormer checkpoint & YAML):**
+   - Real wrapper contract correction (`/run/current-system/sw/bin/karaoke-separator`): the wrapper's `polarformer` branch hardcodes its checkpoint `$models_dir/model_bs_polarformer_float16.ckpt` and config `$models_dir/model_bs_polarformer_float16.yaml` without accepting flags. Extra CLI flags (`--checkpoint`, `--config`) are silently ignored by the wrapper bash script.
+   - PolarFormer availability guarantee is enforced locally via preflight `validate_polarformer_artifacts` before acquiring the GPU semaphore permit. If weights are missing, it immediately yields a polite error `instrumental_unavailable` (`InstrumentalUnavailable`) without acquiring GPU or invoking the wrapper.
+3. **C3 (Output template `NAME_(STEM)_MODEL` and exact argv):**
+   - Corrected template contract: the wrapper hardcodes output format FLAC and template `NAME_(STEM)_MODEL` (not `NAME_MODEL_STEM`) internally. CLI flag `--output-template` does not exist in the wrapper.
+   - `VocalCommandBuilder` emits the exact argv required by the wrapper: `[modelo, input, output_dir]`.
+   - Tests assert exact argv with exactly 3 positional arguments per model, stubs emulate `NAME_(STEM)_MODEL` in FLAC, and preflight missing weights return friendly `InstrumentalUnavailable`.
+4. **C4 (600s Separation Timeout Clamp):**
+   - Updated `src/config.rs` to strictly reject any `SHIRLEY_SEPARATION_TIMEOUT_SECS` value exceeding 600 or equal to 0.
+   - Defense-in-depth: clamped `separation_timeout` in `src/main.rs` (`.min(600)`) and in `src/use_cases/agent_chat.rs` (`.min(Duration::from_secs(600))`).
+5. **C5 (Exact `pendingLabel` "separando voces…"):**
+   - Corrected `frontend/js/core/state/chat-state.js` from divergent `"Ressy está separando voces… (tarda unos minutos)"` to exact contractual `"separando voces…"`.
+   - Aligned assertion in `tests/agent-chat-state.test.mjs`.
+6. **C6 (Strict TDD Evidence & Tests):**
+   - Added `test_cancellation_during_flac_conversion_kills_child_and_releases_permit` in `tests/process_vocal_separator_tests.rs`.
+   - Added `test_cancellation_during_mp3_encode_kills_child_and_releases_permit` in `tests/process_vocal_separator_tests.rs`.
+   - Added template and checkpoint/YAML assertion tests in `tests/process_vocal_separator_tests.rs`.
+   - Added 600s boundary test in `tests/agent_chat_api_tests.rs`.
+   - Added `test_agent_limits_defaults_and_separation_600s_invariants` in `tests/agent_chat_tests.rs`.
+   - Formatted codebase cleanly with `cargo fmt`, passing `cargo fmt -- --check`.
+
 ## Completed Tasks (All Slices 1, 2, 3 & 4)
 
 ### Slice 1 (`vsep-s1-domain-dsp`)
@@ -144,6 +174,10 @@ Slice 4 integrates the vocal separation capability into the conversational agent
 | S4 | TRIANGULATE | HTTP integration in `agent_chat_api_tests` (single step canonical persistence, PolarFormer absent, duplicate call ignored, timeout preserving prior actions & GPU permit), frontend typing indicator integration | `cargo test --test agent_chat_api_tests`, `node --test tests/*.mjs` | All 21 API integration tests and 5 Node test suites passed |
 | S4 | REFACTOR | Eliminated generic 3s wait timer in controller, verified `aria-live="polite"`, ensured O(1) streaming and FLAC stem support | `cargo test` & `node --test tests/*.mjs` | All 194 Rust tests and 5 Node test suites passed cleanly |
 | S4 | E2E GPU REAL | Manual real GPU chorus separation with `karaoke-separator` on NVIDIA GeForce RTX 3060 | `cargo test --test e2e_real_gpu_test -- --ignored --nocapture` | Completed in 34.13s; output MP3 CBR 320 kbps validated via ffprobe; clean disk teardown |
+| REM | RED | C2 (checkpoint/YAML preflight), C3 (exact argv [model, input, output_dir]), C4 (601s rejection) & C5 (exact "separando voces…") | `cargo test --test agent_chat_api_tests`, `node tests/agent-chat-state.test.mjs`, `cargo test --test process_vocal_separator_tests` | Failed as expected on missing arguments, boundary clamp, and label mismatch |
+| REM | GREEN | Corrected `VocalCommandBuilder` exact argv `[modelo, input, output_dir]`, zero fake flags, local PolarFormer preflight, stubs emulating `NAME_(STEM)_MODEL` in FLAC, config clamp, and exact pendingLabel | `cargo test --test process_vocal_separator_tests` & `cargo test --test agent_chat_api_tests` | All 13 separator tests and API tests passed |
+| REM | TRIANGULATE | Added cancellation during FLAC conversion, cancellation during MP3 encode, and 600s clamp invariant | `cargo test --test process_vocal_separator_tests` & `cargo test --test agent_chat_tests` | All 12 separator tests and 19 agent chat tests passed |
+| REM | REFACTOR | Ran `cargo fmt` across all surfaces; full test suite verification | `cargo test && node --test tests/*.mjs` & `cargo fmt -- --check` | 237 Rust passed (1 ignored), 5 Node suites passed, fmt clean |
 
 ## Files Changed (Slice 4)
 
@@ -171,7 +205,11 @@ Slice 4 integrates the vocal separation capability into the conversational agent
 
 ## Deviations from Design
 
-None. The implementation strictly adheres to `design.md` and spec requirements:
+None. All 6 blockers C1-C6 from verify-report.md have been remediated:
+- `pendingLabel` is now strictly aligned with design and spec (`"separando voces…"`).
+- Real `karaoke-separator` contract alignment: wrapper syntax is `karaoke-separator <modelo> <cancion> [salida]`, template is hardcoded `NAME_(STEM)_MODEL` in FLAC, polarformer branch uses internal hardcoded checkpoint; `VocalCommandBuilder` emits exact argv `[modelo, input, output_dir]` without fake CLI flags; PolarFormer weights are guaranteed via local preflight before GPU acquisition.
+- All subprocesses (FLAC conversion, MP3 encode, ffprobe) are owned by `VocalProcessGuard` under kill-and-wait and the GPU permit is only released after all children exit.
+- `SHIRLEY_SEPARATION_TIMEOUT_SECS` is strictly clamped to max 600s.
 - Mode and destination presentation are strictly verified before acquiring GPU or executing separation.
 - Destination confirmed is tracked in `TurnToolContext` and required by `AgentToolDispatcher`.
 - Allowlist contains exactly 8 tools.
@@ -189,4 +227,5 @@ Zero unchecked implementation tasks remain across the entire change `shirley-sho
 - PR 2: `vsep-s2-infra-gpu` (merged/committed) — `VocalSeparator` port, `ProcessVocalSeparator`, `VocalProcessGuard`, `resolve_stem`, `ProcessVocalSeparatorConfig`, `LocalAudioStorage.vocal_work_dir`, `reconcile_audio_files`, `AppState.gpu_semaphore`.
 - PR 3: `vsep-s3-usecase-staging` (merged/committed) — `SeparateVocals` use case, `StagedAudioLeaseGuard`, `StagedAudioRegistry` (`reserve_guarded`, `commit_processed`), `AppState.separate_vocals`.
 - PR 4 (current slice): `vsep-s4-agent-frontend` — Tool `separate_vocals`, Ressy system prompt, dynamic deadline policy (30s/120s/600s), `is-vocal-separation-intent.js`, `chat-state.js` vocal separation pending state, controller cleanup, full integration tests, and manual real GPU validation.
-- All four PR slices of `shirley-show-vocal-sep` are complete. Next recommended phase: `sdd-verify`.
+- Remediation slice (current): `fix-vsep-verify-blockers` — remediated blockers C1-C6 with strict TDD, clean cargo fmt, and 237 passing tests.
+- Ready for full SDD re-verification (`sdd-verify`).

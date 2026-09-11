@@ -25,10 +25,14 @@ async fn test_real_gpu_chorus_separation_with_karaoke_separator() {
     // 1. Generate a short 3-second test WAV with ffmpeg (stereo, 44100Hz, 16-bit)
     let gen_status = Command::new("ffmpeg")
         .args([
-            "-f", "lavfi",
-            "-i", "sine=frequency=440:duration=3",
-            "-ac", "2",
-            "-ar", "44100",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=3",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
             source_path.to_str().unwrap(),
             "-y",
         ])
@@ -52,22 +56,40 @@ async fn test_real_gpu_chorus_separation_with_karaoke_separator() {
     let start = std::time::Instant::now();
     let result = separator.separate(req).await;
     let elapsed = start.elapsed();
-    println!("Separation finished in {:.2}s. Result: {:?}", elapsed.as_secs_f64(), result);
+    println!(
+        "Separation finished in {:.2}s. Result: {:?}",
+        elapsed.as_secs_f64(),
+        result
+    );
 
-    assert!(result.is_ok(), "Real GPU chorus separation failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Real GPU chorus separation failed: {:?}",
+        result.err()
+    );
     let separated = result.unwrap();
-    println!("Separated audio: duration={}s, size={} bytes", separated.duration_secs, separated.size_bytes);
+    println!(
+        "Separated audio: duration={}s, size={} bytes",
+        separated.duration_secs, separated.size_bytes
+    );
 
     // 3. Verify MP3 output file with ffprobe
     assert!(output_path.exists(), "Output MP3 must exist on disk");
-    assert!(output_path.metadata().unwrap().len() > 0, "Output MP3 must not be empty");
+    assert!(
+        output_path.metadata().unwrap().len() > 0,
+        "Output MP3 must not be empty"
+    );
 
     let probe_out = Command::new("ffprobe")
         .args([
-            "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=codec_name,bit_rate:format=duration",
-            "-of", "json",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name,bit_rate:format=duration",
+            "-of",
+            "json",
             output_path.to_str().unwrap(),
         ])
         .output()
@@ -77,12 +99,16 @@ async fn test_real_gpu_chorus_separation_with_karaoke_separator() {
     let probe_str = String::from_utf8_lossy(&probe_out.stdout);
     println!("ffprobe verification output:\n{}", probe_str);
 
-    let parsed: serde_json::Value = serde_json::from_slice(&probe_out.stdout).expect("parse ffprobe json");
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&probe_out.stdout).expect("parse ffprobe json");
     let codec = parsed["streams"][0]["codec_name"].as_str().unwrap();
     assert_eq!(codec, "mp3", "Codec must be mp3");
     let bitrate_str = parsed["streams"][0]["bit_rate"].as_str().unwrap_or("0");
     let bitrate: u64 = bitrate_str.parse().unwrap_or(0);
-    assert!(bitrate >= 310000 && bitrate <= 330000, "Bitrate must be ~320k, got: {bitrate}");
+    assert!(
+        bitrate >= 310000 && bitrate <= 330000,
+        "Bitrate must be ~320k, got: {bitrate}"
+    );
 
     // 4. Clean up everything
     let _ = std::fs::remove_file(&source_path);

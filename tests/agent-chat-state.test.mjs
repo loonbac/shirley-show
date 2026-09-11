@@ -500,7 +500,7 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
     state.get().pendingLabel.includes('separando voces…'),
     `pendingLabel must include 'separando voces…', got: ${state.get().pendingLabel}`
   );
-  assert.equal(state.get().pendingLabel, 'Ressy está separando voces… (tarda unos minutos)');
+  assert.equal(state.get().pendingLabel, 'separando voces…');
 
   // 15b. Staged audio ID returned from separation response is preserved in ephemeral memory
   state.resolveTurn({

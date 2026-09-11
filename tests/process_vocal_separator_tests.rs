@@ -8,8 +8,8 @@ use tempfile::TempDir;
 use tokio::sync::Semaphore;
 
 use shirley_show::domain::vocal_separation_mode::VocalSeparationMode;
-use shirley_show::infra::vocal::process_vocal_separator_config::ProcessVocalSeparatorConfig;
 use shirley_show::infra::vocal::ProcessVocalSeparator;
+use shirley_show::infra::vocal::process_vocal_separator_config::ProcessVocalSeparatorConfig;
 use shirley_show::ports::vocal_separator::{
     VocalSeparationError, VocalSeparationRequest, VocalSeparator,
 };
@@ -71,14 +71,10 @@ impl TestSeparatorEnv {
         let sample_wav = temp_dir.path().join("sample.wav");
         create_test_wav(&sample_wav, 4410, 44100);
 
-        let checkpoint_file = temp_dir
-            .path()
-            .join("model_bs_polarformer_float16.ckpt");
+        let checkpoint_file = temp_dir.path().join("model_bs_polarformer_float16.ckpt");
         File::create(&checkpoint_file).expect("failed to create fake ckpt");
 
-        let config_file = temp_dir
-            .path()
-            .join("model_bs_polarformer_float16.yaml");
+        let config_file = temp_dir.path().join("model_bs_polarformer_float16.yaml");
         File::create(&config_file).expect("failed to create fake yaml");
 
         let gpu = Arc::new(Semaphore::new(1));
@@ -108,26 +104,41 @@ exit 0
 "#;
         let ffprobe_bin = create_executable_script(&self.bin_dir, "ffprobe", ffprobe_script);
 
-        // Stub for ffmpeg: creates a valid MP3 file on output
+        // Stub for ffmpeg: handles FLAC->WAV conversion (pcm_s24le) and MP3 transcode
         let ffmpeg_script = r#"#!/bin/sh
 if [ "$1" = "-version" ]; then
   echo "ffmpeg version 7.0"
   exit 0
 fi
+in_file=""
 out=""
 while [ "$#" -gt 0 ]; do
-  out="$1"
+  if [ "$1" = "-i" ]; then
+    shift
+    in_file="$1"
+  else
+    out="$1"
+  fi
   shift
 done
-# Write minimal valid MP3
-printf "ID3\x03\x00\x00\x00\x00\x00\x00\xff\xfb\x90\x64" > "$out"
-# Pad with zeros
-dd if=/dev/zero bs=1024 count=4 >> "$out" 2>/dev/null
-exit 0
+
+case "$out" in
+  *.wav)
+    # FLAC to WAV conversion: copy input test audio data to output WAV
+    cp "$in_file" "$out"
+    exit 0
+    ;;
+  *)
+    # MP3 encode: write minimal valid MP3
+    printf "ID3\x03\x00\x00\x00\x00\x00\x00\xff\xfb\x90\x64" > "$out"
+    dd if=/dev/zero bs=1024 count=4 >> "$out" 2>/dev/null
+    exit 0
+    ;;
+esac
 "#;
         let ffmpeg_bin = create_executable_script(&self.bin_dir, "ffmpeg", ffmpeg_script);
 
-        // Stub for karaoke-separator: logs args and copies sample WAV into model_dir
+        // Stub for karaoke-separator: logs args and creates FLAC stems matching NAME_(STEM)_MODEL
         let sample_wav_str = self.sample_wav.to_str().unwrap();
         let log_file_str = self.log_file.to_str().unwrap();
         let separator_script = format!(
@@ -139,8 +150,17 @@ mkdir -p "$outdir"
 printf '%s\n' "$@" >> "{log_file_str}"
 echo "---END---" >> "{log_file_str}"
 
-cp "{sample_wav_str}" "$outdir/track_${{model}}_vocals.wav"
-cp "{sample_wav_str}" "$outdir/track_${{model}}_karaoke.wav"
+case "$model" in
+  gabox-invertido) m="bs_karaoke_inv_gabox" ;;
+  frazer-becruily) m="bs_karaoke_becruily" ;;
+  anvuew) m="bs_karaoke_anvuew" ;;
+  polarformer) m="model_bs_polarformer_float16" ;;
+  *) m="$model" ;;
+esac
+
+base=$(basename "$input" | sed 's/\.[^.]*$//')
+cp "{sample_wav_str}" "$outdir/${{base}}_(Vocals)_${{m}}.flac"
+cp "{sample_wav_str}" "$outdir/${{base}}_(Instrumental)_${{m}}.flac"
 exit 0
 "#
         );
@@ -238,7 +258,7 @@ async fn test_polarformer_checkpoint_missing_returns_instrumental_unavailable_be
     let env = TestSeparatorEnv::new();
     let (vocal_sep_bin, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
 
-    // Point polarformer to nonexistent files
+    // Point polarformer checkpoint to nonexistent file
     let mut config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
     config.polarformer_checkpoint = Some(env.temp_dir.path().join("missing_checkpoint.ckpt"));
     let separator = ProcessVocalSeparator::new(config);
@@ -264,6 +284,34 @@ async fn test_polarformer_checkpoint_missing_returns_instrumental_unavailable_be
 }
 
 #[tokio::test]
+async fn test_polarformer_config_missing_returns_instrumental_unavailable_before_gpu() {
+    let env = TestSeparatorEnv::new();
+    let (vocal_sep_bin, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
+
+    // Point polarformer config to nonexistent file
+    let mut config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
+    config.polarformer_config = Some(env.temp_dir.path().join("missing_config.yaml"));
+    let separator = ProcessVocalSeparator::new(config);
+
+    let output_path = env.staging_dir.join("test_out_yaml.part");
+    let req = VocalSeparationRequest {
+        source_path: env.sample_wav.clone(),
+        output_path,
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(30),
+    };
+
+    let result = separator.separate(req).await;
+    match result {
+        Err(VocalSeparationError::InstrumentalUnavailable) => {}
+        other => panic!("expected InstrumentalUnavailable, got: {:?}", other),
+    }
+
+    assert_eq!(env.gpu.available_permits(), 1);
+    assert!(!env.log_file.exists());
+}
+
+#[tokio::test]
 async fn test_coros_sequential_models_and_resolve_stem_excluding_vocal() {
     let env = TestSeparatorEnv::new();
     let (vocal_sep_bin, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
@@ -285,13 +333,28 @@ async fn test_coros_sequential_models_and_resolve_stem_excluding_vocal() {
     assert!(separated.size_bytes > 0);
     assert!(output_path.is_file());
 
-    // Check log file: models were called in exact order
+    // Check log file: models were called in exact order with exact argv [model, input, output_dir]
     let log_content = fs::read_to_string(&env.log_file).expect("read log");
     let invocations: Vec<&str> = log_content.split("---END---\n").collect();
     assert!(invocations.len() >= 3);
-    assert!(invocations[0].starts_with("gabox-invertido\n"));
-    assert!(invocations[1].starts_with("frazer-becruily\n"));
-    assert!(invocations[2].starts_with("anvuew\n"));
+    let expected_models = ["gabox-invertido", "frazer-becruily", "anvuew"];
+    for (i, expected_model) in expected_models.iter().enumerate() {
+        let lines: Vec<&str> = invocations[i].trim().lines().collect();
+        assert_eq!(
+            lines.len(),
+            3,
+            "Chorus invocation {} must have exact argv [model, input, output_dir], got: {:?}",
+            i,
+            lines
+        );
+        assert_eq!(lines[0], *expected_model);
+        assert_eq!(lines[1], env.sample_wav.to_str().unwrap());
+        assert!(
+            lines[2].ends_with(expected_model),
+            "output dir must end with model name: {}",
+            lines[2]
+        );
+    }
 
     // GPU permit released
     assert_eq!(env.gpu.available_permits(), 1);
@@ -325,8 +388,27 @@ async fn test_instrumental_polarformer_success() {
     assert_eq!(separated.duration_secs, 180);
     assert!(output_path.is_file());
 
+    // Check log file: polarformer called with exact argv [model, input, output_dir]
     let log_content = fs::read_to_string(&env.log_file).expect("read log");
-    assert!(log_content.starts_with("polarformer\n"));
+    let invocations: Vec<&str> = log_content.split("---END---\n").collect();
+    assert!(!invocations.is_empty());
+    let lines: Vec<&str> = invocations[0].trim().lines().collect();
+    assert_eq!(
+        lines.len(),
+        3,
+        "Instrumental invocation must have exact argv [model, input, output_dir], got: {:?}",
+        lines
+    );
+    assert_eq!(lines[0], "polarformer");
+    assert_eq!(lines[1], env.sample_wav.to_str().unwrap());
+    assert!(
+        lines[2].ends_with("polarformer"),
+        "output dir must end with polarformer: {}",
+        lines[2]
+    );
+    assert!(!log_content.contains("gabox-invertido"));
+    assert!(!log_content.contains("frazer-becruily"));
+    assert!(!log_content.contains("anvuew"));
 
     // GPU permit released
     assert_eq!(env.gpu.available_permits(), 1);
@@ -342,8 +424,7 @@ async fn test_cancellation_kills_child_purges_workdir_and_holds_permit() {
 sleep 30
 exit 0
 "#;
-    let vocal_sep_bin =
-        create_executable_script(&env.bin_dir, "blocking_sep", blocking_script);
+    let vocal_sep_bin = create_executable_script(&env.bin_dir, "blocking_sep", blocking_script);
 
     let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
     let separator = Arc::new(ProcessVocalSeparator::new(config));
@@ -360,13 +441,15 @@ exit 0
     let gpu_clone = env.gpu.clone();
 
     // Spawn separation task
-    let handle = tokio::spawn(async move {
-        sep_clone.separate(req).await
-    });
+    let handle = tokio::spawn(async move { sep_clone.separate(req).await });
 
     // Wait until child is spawned and permit is taken
     tokio::time::sleep(Duration::from_millis(150)).await;
-    assert_eq!(gpu_clone.available_permits(), 0, "GPU permit should be held by running task");
+    assert_eq!(
+        gpu_clone.available_permits(),
+        0,
+        "GPU permit should be held by running task"
+    );
 
     // Cancel the future by aborting the join handle
     handle.abort();
@@ -375,7 +458,11 @@ exit 0
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Permit must be released back to 1 AFTER kill and wait
-    assert_eq!(gpu_clone.available_permits(), 1, "Permit should be restored to 1");
+    assert_eq!(
+        gpu_clone.available_permits(),
+        1,
+        "Permit should be restored to 1"
+    );
 
     // Partial output must be purged
     assert!(!output_path.exists());
@@ -385,7 +472,204 @@ exit 0
         .unwrap()
         .filter_map(|e| e.ok())
         .collect();
-    assert_eq!(work_entries.len(), 0, "work_root must be cleaned after cancellation");
+    assert_eq!(
+        work_entries.len(),
+        0,
+        "work_root must be cleaned after cancellation"
+    );
+}
+
+#[tokio::test]
+async fn test_cancellation_during_flac_conversion_kills_child_and_releases_permit() {
+    let env = TestSeparatorEnv::new();
+    let (_, ffprobe_bin, _) = env.setup_default_stubs();
+
+    // Separator stub that produces FLAC stems with NAME_(STEM)_MODEL format
+    let sample_wav_str = env.sample_wav.to_str().unwrap();
+    let sep_script = format!(
+        r#"#!/bin/sh
+model="$1"
+input="$2"
+outdir="$3"
+mkdir -p "$outdir"
+
+case "$model" in
+  gabox-invertido) m="bs_karaoke_inv_gabox" ;;
+  frazer-becruily) m="bs_karaoke_becruily" ;;
+  anvuew) m="bs_karaoke_anvuew" ;;
+  polarformer) m="model_bs_polarformer_float16" ;;
+  *) m="$model" ;;
+esac
+
+base=$(basename "$input" | sed 's/\.[^.]*$//')
+cp "{sample_wav_str}" "$outdir/${{base}}_(Vocals)_${{m}}.flac"
+cp "{sample_wav_str}" "$outdir/${{base}}_(Instrumental)_${{m}}.flac"
+exit 0
+"#
+    );
+    let vocal_sep_bin = create_executable_script(&env.bin_dir, "flac_sep", &sep_script);
+
+    // Custom ffmpeg stub: if converting FLAC (contains pcm_s24le), create marker and sleep 30s
+    let marker_file = env.temp_dir.path().join("flac_conv_started");
+    let marker_str = marker_file.to_str().unwrap();
+    let ffmpeg_script = format!(
+        r#"#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "pcm_s24le" ]; then
+    touch "{marker_str}"
+    sleep 30
+    exit 0
+  fi
+done
+exit 0
+"#
+    );
+    let ffmpeg_bin = create_executable_script(&env.bin_dir, "slow_conv_ffmpeg", &ffmpeg_script);
+
+    let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
+    let separator = Arc::new(ProcessVocalSeparator::new(config));
+
+    let output_path = env.staging_dir.join("flac_cancelled.part");
+    let req = VocalSeparationRequest {
+        source_path: env.sample_wav.clone(),
+        output_path: output_path.clone(),
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let sep_clone = separator.clone();
+    let gpu_clone = env.gpu.clone();
+
+    let handle = tokio::spawn(async move { sep_clone.separate(req).await });
+
+    // Wait until FLAC conversion starts
+    for _ in 0..50 {
+        if marker_file.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(marker_file.exists(), "FLAC conversion must have started");
+    assert_eq!(
+        gpu_clone.available_permits(),
+        0,
+        "GPU permit should be held during FLAC conversion"
+    );
+
+    // Abort the task during FLAC conversion
+    handle.abort();
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Permit must be released back to 1 AFTER kill and wait of ffmpeg child
+    assert_eq!(
+        gpu_clone.available_permits(),
+        1,
+        "Permit should be restored to 1"
+    );
+    assert!(!output_path.exists());
+    let work_entries: Vec<_> = fs::read_dir(&env.work_root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(
+        work_entries.len(),
+        0,
+        "work_root must be cleaned after FLAC conversion cancellation"
+    );
+}
+
+#[tokio::test]
+async fn test_cancellation_during_mp3_encode_kills_child_and_releases_permit() {
+    let env = TestSeparatorEnv::new();
+    let (vocal_sep_bin, ffprobe_bin, _) = env.setup_default_stubs();
+
+    // Custom ffmpeg stub: converts FLAC to WAV when called with pcm_s24le,
+    // and if encoding mp3 (contains libmp3lame), creates marker and sleeps 30s
+    let marker_file = env.temp_dir.path().join("mp3_encode_started");
+    let marker_str = marker_file.to_str().unwrap();
+    let ffmpeg_script = format!(
+        r#"#!/bin/sh
+in_file=""
+out=""
+is_mp3=0
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-i" ]; then
+    shift
+    in_file="$1"
+  elif [ "$1" = "libmp3lame" ]; then
+    is_mp3=1
+  else
+    out="$1"
+  fi
+  shift
+done
+
+if [ "$is_mp3" = "1" ]; then
+  touch "{marker_str}"
+  sleep 30
+  exit 0
+fi
+
+if [ -n "$in_file" ] && [ -n "$out" ]; then
+  cp "$in_file" "$out"
+fi
+exit 0
+"#
+    );
+    let ffmpeg_bin = create_executable_script(&env.bin_dir, "slow_enc_ffmpeg", &ffmpeg_script);
+
+    let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
+    let separator = Arc::new(ProcessVocalSeparator::new(config));
+
+    let output_path = env.staging_dir.join("encode_cancelled.part");
+    let req = VocalSeparationRequest {
+        source_path: env.sample_wav.clone(),
+        output_path: output_path.clone(),
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let sep_clone = separator.clone();
+    let gpu_clone = env.gpu.clone();
+
+    let handle = tokio::spawn(async move { sep_clone.separate(req).await });
+
+    // Wait until MP3 encode starts
+    for _ in 0..50 {
+        if marker_file.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(marker_file.exists(), "MP3 encode must have started");
+    assert_eq!(
+        gpu_clone.available_permits(),
+        0,
+        "GPU permit should be held during MP3 encode"
+    );
+
+    // Abort the task during MP3 encode
+    handle.abort();
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Permit must be released back to 1 AFTER kill and wait of ffmpeg encode child
+    assert_eq!(
+        gpu_clone.available_permits(),
+        1,
+        "Permit should be restored to 1"
+    );
+    assert!(!output_path.exists());
+    let work_entries: Vec<_> = fs::read_dir(&env.work_root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(
+        work_entries.len(),
+        0,
+        "work_root must be cleaned after MP3 encode cancellation"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +686,7 @@ async fn test_coros_second_model_fails_cleans_up_and_returns_error() {
     let separator_script = format!(
         r#"#!/bin/sh
 model="$1"
+input="$2"
 outdir="$3"
 mkdir -p "$outdir"
 
@@ -409,8 +694,17 @@ if [ "$model" = "frazer-becruily" ]; then
   exit 1
 fi
 
-cp "{sample_wav_str}" "$outdir/track_${{model}}_vocals.wav"
-cp "{sample_wav_str}" "$outdir/track_${{model}}_karaoke.wav"
+case "$model" in
+  gabox-invertido) m="bs_karaoke_inv_gabox" ;;
+  frazer-becruily) m="bs_karaoke_becruily" ;;
+  anvuew) m="bs_karaoke_anvuew" ;;
+  polarformer) m="model_bs_polarformer_float16" ;;
+  *) m="$model" ;;
+esac
+
+base=$(basename "$input" | sed 's/\.[^.]*$//')
+cp "{sample_wav_str}" "$outdir/${{base}}_(Vocals)_${{m}}.flac"
+cp "{sample_wav_str}" "$outdir/${{base}}_(Instrumental)_${{m}}.flac"
 exit 0
 "#
     );
@@ -445,7 +739,11 @@ exit 0
         .unwrap()
         .filter_map(|e| e.ok())
         .collect();
-    assert_eq!(work_entries.len(), 0, "work_root must be purged after intermediate failure");
+    assert_eq!(
+        work_entries.len(),
+        0,
+        "work_root must be purged after intermediate failure"
+    );
 }
 
 #[tokio::test]
@@ -562,6 +860,7 @@ async fn test_two_concurrent_separations_serialized_without_vram_overlap() {
     let concurrency_script = format!(
         r#"#!/bin/sh
 model="$1"
+input="$2"
 outdir="$3"
 mkdir -p "$outdir"
 
@@ -570,13 +869,21 @@ echo "START" >> "{counter_str}"
 sleep 0.15
 echo "END" >> "{counter_str}"
 
-cp "{sample_wav_str}" "$outdir/track_${{model}}_vocals.wav"
-cp "{sample_wav_str}" "$outdir/track_${{model}}_karaoke.wav"
+case "$model" in
+  gabox-invertido) m="bs_karaoke_inv_gabox" ;;
+  frazer-becruily) m="bs_karaoke_becruily" ;;
+  anvuew) m="bs_karaoke_anvuew" ;;
+  polarformer) m="model_bs_polarformer_float16" ;;
+  *) m="$model" ;;
+esac
+
+base=$(basename "$input" | sed 's/\.[^.]*$//')
+cp "{sample_wav_str}" "$outdir/${{base}}_(Vocals)_${{m}}.flac"
+cp "{sample_wav_str}" "$outdir/${{base}}_(Instrumental)_${{m}}.flac"
 exit 0
 "#
     );
-    let vocal_sep_bin =
-        create_executable_script(&env.bin_dir, "conc_sep", &concurrency_script);
+    let vocal_sep_bin = create_executable_script(&env.bin_dir, "conc_sep", &concurrency_script);
 
     let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
     let separator = Arc::new(ProcessVocalSeparator::new(config));

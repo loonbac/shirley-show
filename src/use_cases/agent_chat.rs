@@ -249,11 +249,17 @@ impl AgentChat {
 
             if !response.tool_calls.is_empty() {
                 if fixed_deadline.is_none() {
-                    let has_separate = response.tool_calls.iter().any(|tc| tc.name == "separate_vocals");
-                    let has_download = response.tool_calls.iter().any(|tc| tc.name == "download_youtube_track");
+                    let has_separate = response
+                        .tool_calls
+                        .iter()
+                        .any(|tc| tc.name == "separate_vocals");
+                    let has_download = response
+                        .tool_calls
+                        .iter()
+                        .any(|tc| tc.name == "download_youtube_track");
 
                     if has_separate {
-                        let target = self.limits.separation_timeout;
+                        let target = self.limits.separation_timeout.min(Duration::from_secs(600));
                         if target > effective_budget {
                             effective_budget = target;
                             current_deadline = start_time + target;
@@ -297,7 +303,12 @@ impl AgentChat {
                     }
 
                     let remaining = current_deadline.saturating_duration_since(now);
-                    let res = match tokio::time::timeout(remaining, self.dispatcher.dispatch(&tc, &mut turn_context)).await {
+                    let res = match tokio::time::timeout(
+                        remaining,
+                        self.dispatcher.dispatch(&tc, &mut turn_context),
+                    )
+                    .await
+                    {
                         Ok(val) => val,
                         Err(_) => {
                             let committed = tracker_for_timeout.lock().unwrap();
@@ -335,7 +346,9 @@ impl AgentChat {
                     };
                     let message = compose_grounded_message(
                         &turn_context.actions_taken,
-                        Some("Alcancé el límite de pasos permitidos para este turno. Si necesitas continuar, indícamelo en un nuevo mensaje."),
+                        Some(
+                            "Alcancé el límite de pasos permitidos para este turno. Si necesitas continuar, indícamelo en un nuevo mensaje.",
+                        ),
                         turn_context.staged_audio_id.as_deref(),
                     );
                     return AgentChatOutput {

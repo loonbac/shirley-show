@@ -11,9 +11,10 @@ use uuid::Uuid;
 
 use super::process_vocal_separator_config::ProcessVocalSeparatorConfig;
 use super::resolve_stem::resolve_stem;
+use super::vocal_command_builder::VocalCommandBuilder;
 use super::vocal_process_guard::VocalProcessGuard;
-use crate::audio::avg_wave::{avg_wave, AvgWaveError};
-use crate::audio::encode_mp3::encode_mp3_320k;
+use crate::audio::avg_wave::{AvgWaveError, avg_wave};
+use crate::audio::encode_mp3::build_encode_mp3_cmd;
 use crate::domain::vocal_separation_mode::VocalSeparationMode;
 use crate::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
@@ -36,9 +37,24 @@ impl ProcessVocalSeparator {
     }
 
     async fn run_ffprobe_preflight(&self, source_path: &Path) -> Result<f64, VocalSeparationError> {
+        struct PreflightChildGuard(Option<tokio::process::Child>);
+        impl Drop for PreflightChildGuard {
+            fn drop(&mut self) {
+                if let Some(mut child) = self.0.take() {
+                    let _ = child.start_kill();
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        handle.spawn(async move {
+                            let _ = child.wait().await;
+                        });
+                    }
+                }
+            }
+        }
+
         let mut attempts = 0;
         let output = loop {
             let mut cmd = Command::new(&self.config.ffprobe_bin);
+            cmd.kill_on_drop(true);
             cmd.args([
                 "-v",
                 "error",
@@ -54,9 +70,42 @@ impl ProcessVocalSeparator {
             cmd.stdout(Stdio::piped());
             cmd.stderr(Stdio::null());
 
-            match tokio::time::timeout(Duration::from_secs(5), cmd.output()).await {
-                Ok(Ok(o)) if o.status.success() => break o,
+            let mut child = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) if e.raw_os_error() == Some(26) && attempts < 5 => {
+                    attempts += 1;
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                    continue;
+                }
+                Err(_) => return Err(VocalSeparationError::InvalidAudioDuration),
+            };
+            let mut stdout_pipe = child.stdout.take();
+            let mut pguard = PreflightChildGuard(Some(child));
+
+            let read_stdout = async {
+                let mut out = Vec::new();
+                if let Some(ref mut pipe) = stdout_pipe {
+                    let _ = tokio::io::AsyncReadExt::read_to_end(pipe, &mut out).await;
+                }
+                out
+            };
+            let wait_child = pguard.0.as_mut().unwrap().wait();
+            let combined = async {
+                let (status_res, stdout) = tokio::join!(wait_child, read_stdout);
+                status_res.map(|status| std::process::Output {
+                    status,
+                    stdout,
+                    stderr: Vec::new(),
+                })
+            };
+
+            match tokio::time::timeout(Duration::from_secs(5), combined).await {
+                Ok(Ok(o)) if o.status.success() => {
+                    pguard.0 = None;
+                    break o;
+                }
                 Ok(Err(e)) if e.raw_os_error() == Some(26) && attempts < 5 => {
+                    pguard.0 = None;
                     attempts += 1;
                     tokio::time::sleep(Duration::from_millis(15)).await;
                     continue;
@@ -72,9 +121,9 @@ impl ProcessVocalSeparator {
             .streams
             .as_ref()
             .map(|streams| {
-                streams.iter().any(|s| {
-                    s.codec_type.as_deref() == Some("audio") || s.codec_name.is_some()
-                })
+                streams
+                    .iter()
+                    .any(|s| s.codec_type.as_deref() == Some("audio") || s.codec_name.is_some())
             })
             .unwrap_or(false);
 
@@ -108,7 +157,9 @@ impl ProcessVocalSeparator {
 
     async fn run_ffprobe_post_verify(
         &self,
+        guard: &mut VocalProcessGuard,
         output_path: &Path,
+        remaining_timeout: Duration,
     ) -> Result<(f64, String, u64), VocalSeparationError> {
         let mut attempts = 0;
         let output = loop {
@@ -125,17 +176,20 @@ impl ProcessVocalSeparator {
             ]);
             cmd.arg(output_path);
             cmd.stdin(Stdio::null());
-            cmd.stdout(Stdio::piped());
-            cmd.stderr(Stdio::null());
 
-            match tokio::time::timeout(Duration::from_secs(5), cmd.output()).await {
-                Ok(Ok(o)) if o.status.success() => break o,
-                Ok(Err(e)) if e.raw_os_error() == Some(26) && attempts < 5 => {
-                    attempts += 1;
-                    tokio::time::sleep(Duration::from_millis(15)).await;
-                    continue;
+            let probe_step = remaining_timeout.min(Duration::from_secs(5));
+            match guard.run_output(cmd, probe_step).await {
+                Ok(o) if o.status.success() => break o,
+                Ok(o) => {
+                    let is_etxtbsy = o.status.code() == Some(26);
+                    if is_etxtbsy && attempts < 5 {
+                        attempts += 1;
+                        tokio::time::sleep(Duration::from_millis(15)).await;
+                        continue;
+                    }
+                    return Err(VocalSeparationError::TranscodeFailed);
                 }
-                _ => return Err(VocalSeparationError::TranscodeFailed),
+                Err(_) => return Err(VocalSeparationError::TranscodeFailed),
             }
         };
 
@@ -223,6 +277,9 @@ impl VocalSeparator for ProcessVocalSeparator {
             }
 
             // 2. Instrumental preflight before GPU
+            // Guarantee PolarFormer checkpoint and config exist locally before acquiring the GPU permit.
+            // The karaoke-separator wrapper uses fixed weights paths for PolarFormer without accepting CLI flags,
+            // so availability is verified strictly at this preflight stage.
             if request.mode == VocalSeparationMode::Instrumental {
                 this.config.validate_polarformer_artifacts()?;
             }
@@ -261,11 +318,8 @@ impl VocalSeparator for ProcessVocalSeparator {
                 .await
                 .map_err(|_| VocalSeparationError::SeparationFailed)?;
 
-            let mut guard = VocalProcessGuard::new(
-                work_dir.clone(),
-                Some(request.output_path.clone()),
-                permit,
-            );
+            let mut guard =
+                VocalProcessGuard::new(work_dir.clone(), Some(request.output_path.clone()), permit);
 
             // 7. Execute separation pipeline
             match request.mode {
@@ -291,40 +345,24 @@ impl VocalSeparator for ProcessVocalSeparator {
                             return Err(VocalSeparationError::SeparationFailed);
                         }
 
-                        let mut cmd = Command::new(&vocal_bin);
-                        cmd.arg(model_name);
-                        cmd.arg(&request.source_path);
-                        cmd.arg(&model_dir);
-                        cmd.current_dir(&work_dir);
-                        cmd.stdin(Stdio::null());
-                        cmd.stdout(Stdio::piped());
-                        cmd.stderr(Stdio::piped());
+                        let cmd = VocalCommandBuilder::new_chorus(
+                            &vocal_bin,
+                            model_name,
+                            &request.source_path,
+                            &model_dir,
+                        )
+                        .current_dir(&work_dir)
+                        .build();
 
-                        let child = match cmd.spawn() {
-                            Ok(c) => c,
-                            Err(_) => {
+                        let status = match guard.run_status(cmd, remaining_step).await {
+                            Ok(s) if s.success() => s,
+                            Ok(_) => {
                                 guard.kill_and_wait().await;
                                 return Err(VocalSeparationError::SeparationFailed);
                             }
+                            Err(e) => return Err(e),
                         };
-                        guard.attach_child(child);
-
-                        let exit_res = tokio::time::timeout(remaining_step, guard.wait_child()).await;
-                        match exit_res {
-                            Ok(Ok(status)) if status.success() => {}
-                            Ok(Ok(_)) => {
-                                guard.kill_and_wait().await;
-                                return Err(VocalSeparationError::SeparationFailed);
-                            }
-                            Ok(Err(_)) => {
-                                guard.kill_and_wait().await;
-                                return Err(VocalSeparationError::SeparationFailed);
-                            }
-                            Err(_) => {
-                                guard.kill_and_wait().await;
-                                return Err(VocalSeparationError::SeparationTimeout);
-                            }
-                        }
+                        let _ = status;
 
                         let stem = match resolve_stem(&model_dir, model_name) {
                             Ok(p) => p,
@@ -336,25 +374,41 @@ impl VocalSeparator for ProcessVocalSeparator {
                         stems.push(stem);
                     }
 
-                    // Convert any non-wav stem to wav using ffmpeg so avg_wave (hound) can process it
+                    // Convert any non-wav stem to wav using ffmpeg under guard so avg_wave (hound) can process it
                     let mut wav_stems = Vec::new();
                     for stem in &stems {
                         if stem.extension().and_then(|e| e.to_str()) == Some("wav") {
                             wav_stems.push(stem.clone());
                         } else {
+                            let remaining_conv = request
+                                .timeout
+                                .checked_sub(start.elapsed())
+                                .ok_or(VocalSeparationError::SeparationTimeout);
+                            let remaining_conv = match remaining_conv {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    guard.kill_and_wait().await;
+                                    return Err(e);
+                                }
+                            };
+
                             let wav_path = stem.with_extension("wav");
                             let mut conv = Command::new(&this.config.ffmpeg_bin);
                             conv.args([
-                                "-v", "error",
+                                "-v",
+                                "error",
                                 "-y",
-                                "-i", stem.to_str().unwrap(),
-                                "-c:a", "pcm_s24le",
+                                "-i",
+                                stem.to_str().unwrap(),
+                                "-c:a",
+                                "pcm_s24le",
                                 wav_path.to_str().unwrap(),
                             ]);
                             conv.stdin(Stdio::null());
                             conv.stdout(Stdio::null());
                             conv.stderr(Stdio::null());
-                            match conv.status().await {
+
+                            match guard.run_status(conv, remaining_conv).await {
                                 Ok(s) if s.success() => wav_stems.push(wav_path),
                                 _ => {
                                     guard.kill_and_wait().await;
@@ -380,16 +434,27 @@ impl VocalSeparator for ProcessVocalSeparator {
                         }
                     }
 
-                    // Transcode to MP3 320k
-                    match encode_mp3_320k(
+                    // Transcode to MP3 320k under guard
+                    let remaining_enc = request
+                        .timeout
+                        .checked_sub(start.elapsed())
+                        .ok_or(VocalSeparationError::SeparationTimeout);
+                    let remaining_enc = match remaining_enc {
+                        Ok(r) => r,
+                        Err(e) => {
+                            guard.kill_and_wait().await;
+                            return Err(e);
+                        }
+                    };
+
+                    let enc_cmd = build_encode_mp3_cmd(
                         Some(&this.config.ffmpeg_bin),
                         &avg_output,
                         &request.output_path,
-                    )
-                    .await
-                    {
-                        Ok(()) => {}
-                        Err(_) => {
+                    );
+                    match guard.run_status(enc_cmd, remaining_enc).await {
+                        Ok(s) if s.success() && request.output_path.is_file() => {}
+                        _ => {
                             guard.kill_and_wait().await;
                             return Err(VocalSeparationError::TranscodeFailed);
                         }
@@ -414,40 +479,25 @@ impl VocalSeparator for ProcessVocalSeparator {
                         return Err(VocalSeparationError::SeparationFailed);
                     }
 
-                    let mut cmd = Command::new(&vocal_bin);
-                    cmd.arg("polarformer");
-                    cmd.arg(&request.source_path);
-                    cmd.arg(&model_dir);
-                    cmd.current_dir(&work_dir);
-                    cmd.stdin(Stdio::null());
-                    cmd.stdout(Stdio::piped());
-                    cmd.stderr(Stdio::piped());
+                    // The karaoke-separator wrapper uses exact argv [modelo, input, output_dir].
+                    // PolarFormer weights are loaded directly by the wrapper without CLI flags.
+                    let cmd = VocalCommandBuilder::new_instrumental(
+                        &vocal_bin,
+                        &request.source_path,
+                        &model_dir,
+                    )
+                    .current_dir(&work_dir)
+                    .build();
 
-                    let child = match cmd.spawn() {
-                        Ok(c) => c,
-                        Err(_) => {
+                    let status = match guard.run_status(cmd, remaining_step).await {
+                        Ok(s) if s.success() => s,
+                        Ok(_) => {
                             guard.kill_and_wait().await;
                             return Err(VocalSeparationError::SeparationFailed);
                         }
+                        Err(e) => return Err(e),
                     };
-                    guard.attach_child(child);
-
-                    let exit_res = tokio::time::timeout(remaining_step, guard.wait_child()).await;
-                    match exit_res {
-                        Ok(Ok(status)) if status.success() => {}
-                        Ok(Ok(_)) => {
-                            guard.kill_and_wait().await;
-                            return Err(VocalSeparationError::SeparationFailed);
-                        }
-                        Ok(Err(_)) => {
-                            guard.kill_and_wait().await;
-                            return Err(VocalSeparationError::SeparationFailed);
-                        }
-                        Err(_) => {
-                            guard.kill_and_wait().await;
-                            return Err(VocalSeparationError::SeparationTimeout);
-                        }
-                    }
+                    let _ = status;
 
                     let stem = match resolve_stem(&model_dir, "polarformer") {
                         Ok(p) => p,
@@ -457,16 +507,27 @@ impl VocalSeparator for ProcessVocalSeparator {
                         }
                     };
 
-                    // Transcode to MP3 320k
-                    match encode_mp3_320k(
+                    // Transcode to MP3 320k under guard
+                    let remaining_enc = request
+                        .timeout
+                        .checked_sub(start.elapsed())
+                        .ok_or(VocalSeparationError::SeparationTimeout);
+                    let remaining_enc = match remaining_enc {
+                        Ok(r) => r,
+                        Err(e) => {
+                            guard.kill_and_wait().await;
+                            return Err(e);
+                        }
+                    };
+
+                    let enc_cmd = build_encode_mp3_cmd(
                         Some(&this.config.ffmpeg_bin),
                         &stem,
                         &request.output_path,
-                    )
-                    .await
-                    {
-                        Ok(()) => {}
-                        Err(_) => {
+                    );
+                    match guard.run_status(enc_cmd, remaining_enc).await {
+                        Ok(s) if s.success() && request.output_path.is_file() => {}
+                        _ => {
                             guard.kill_and_wait().await;
                             return Err(VocalSeparationError::TranscodeFailed);
                         }
@@ -507,9 +568,21 @@ impl VocalSeparator for ProcessVocalSeparator {
                 return Err(VocalSeparationError::TranscodeFailed);
             }
 
-            // Second ffprobe verification
+            // Second ffprobe verification under guard
+            let remaining_probe = request
+                .timeout
+                .checked_sub(start.elapsed())
+                .ok_or(VocalSeparationError::SeparationTimeout);
+            let remaining_probe = match remaining_probe {
+                Ok(r) => r,
+                Err(e) => {
+                    guard.kill_and_wait().await;
+                    return Err(e);
+                }
+            };
+
             let (final_duration, codec, bitrate) = match this
-                .run_ffprobe_post_verify(&request.output_path)
+                .run_ffprobe_post_verify(&mut guard, &request.output_path, remaining_probe)
                 .await
             {
                 Ok(v) => v,

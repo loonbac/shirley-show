@@ -4,8 +4,8 @@ use std::path::Path;
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use tempfile::tempdir;
 
-use shirley_show::audio::avg_wave::{avg_wave, AvgWaveError};
-use shirley_show::audio::encode_mp3::{encode_mp3_320k, EncodeMp3Error};
+use shirley_show::audio::avg_wave::{AvgWaveError, avg_wave};
+use shirley_show::audio::encode_mp3::{EncodeMp3Error, encode_mp3_320k};
 use shirley_show::domain::vocal_separation_mode::VocalSeparationMode;
 
 /// Helper to create a synthetic WAV file on disk with specified spec and samples.
@@ -39,7 +39,8 @@ fn write_synthetic_wav_f32(path: &Path, spec: WavSpec, samples: &[f32]) {
 
 #[test]
 fn test_vocal_separation_mode_serde_roundtrip() {
-    let chorus: VocalSeparationMode = serde_json::from_str("\"chorus\"").expect("should parse chorus");
+    let chorus: VocalSeparationMode =
+        serde_json::from_str("\"chorus\"").expect("should parse chorus");
     assert_eq!(chorus, VocalSeparationMode::Coros);
     assert_eq!(serde_json::to_string(&chorus).unwrap(), "\"chorus\"");
     assert_eq!(chorus.as_str(), "chorus");
@@ -129,7 +130,10 @@ fn test_avg_wave_three_mono_16bit_wavs() {
     write_synthetic_wav_i16(&p3, spec, &s3);
 
     let res = avg_wave([&p1, &p2, &p3], &out);
-    assert!(res.is_ok(), "avg_wave should succeed on valid inputs: {res:?}");
+    assert!(
+        res.is_ok(),
+        "avg_wave should succeed on valid inputs: {res:?}"
+    );
     assert!(out.exists(), "output WAV file must exist on success");
 
     let mut reader = WavReader::open(&out).expect("output must be valid WAV");
@@ -397,7 +401,10 @@ fn test_avg_wave_absolute_silence() {
     let mut reader = WavReader::open(&out).unwrap();
     let samples: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
     assert_eq!(samples.len(), 100);
-    assert!(samples.iter().all(|&s| s == 0), "all samples must be strictly 0");
+    assert!(
+        samples.iter().all(|&s| s == 0),
+        "all samples must be strictly 0"
+    );
 }
 
 #[test]
@@ -422,7 +429,10 @@ fn test_avg_wave_empty_zero_sample_wavs_rejected() {
 
     let res = avg_wave([&p1, &p2, &p3], &out);
     assert!(matches!(res, Err(AvgWaveError::EmptyAudio)));
-    assert!(!out.exists(), "output file must not exist after EmptyAudio rejection");
+    assert!(
+        !out.exists(),
+        "output file must not exist after EmptyAudio rejection"
+    );
 }
 
 #[test]
@@ -479,7 +489,10 @@ fn test_avg_wave_nonexistent_input_file_returns_read_error() {
 
     let res = avg_wave([&p1, &p2, &p3], &out);
     assert!(matches!(res, Err(AvgWaveError::InputReadError)));
-    assert!(!out.exists(), "output file must not exist when an input is missing");
+    assert!(
+        !out.exists(),
+        "output file must not exist when an input is missing"
+    );
 }
 
 #[test]
@@ -511,7 +524,10 @@ fn test_avg_wave_corrupt_truncated_file_purges_output() {
 
     let res = avg_wave([&p1, &p2, &p3], &out);
     assert!(res.is_err(), "should fail on truncated stream: {res:?}");
-    assert!(!out.exists(), "output file must be cleaned up after mid-stream read failure");
+    assert!(
+        !out.exists(),
+        "output file must be cleaned up after mid-stream read failure"
+    );
 }
 
 #[test]
@@ -566,7 +582,8 @@ async fn test_encode_mp3_320k_success() {
     // 1 second of stereo audio
     let mut samples = Vec::with_capacity(88200);
     for i in 0..44100 {
-        let val = ((i as f32 * 440.0 * 2.0 * std::f32::consts::PI / 44100.0).sin() * 16000.0) as i16;
+        let val =
+            ((i as f32 * 440.0 * 2.0 * std::f32::consts::PI / 44100.0).sin() * 16000.0) as i16;
         samples.push(val);
         samples.push(val);
     }

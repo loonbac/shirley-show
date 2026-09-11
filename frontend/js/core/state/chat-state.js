@@ -118,7 +118,7 @@ export function createChatState(initialState = {}) {
     let turnPendingLabel = pendingLabel;
     if (!turnPendingLabel) {
       if (isVocalIntent) {
-        turnPendingLabel = 'Ressy está separando voces… (tarda unos minutos)';
+        turnPendingLabel = 'separando voces…';
       } else if (containsYouTubeUrl(message)) {
         turnPendingLabel = 'Ressy está descargando el audio…';
       } else {

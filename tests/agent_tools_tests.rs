@@ -825,16 +825,18 @@ async fn test_dispatcher_separate_vocals_success_and_chained_with_add_track_from
 
     // Stage a source audio in registry
     let staged_source_part = state.storage.staging_dir().join("src123.part");
-    std::fs::write(&staged_source_part, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
-    let reg_entry = state
-        .staged_audio_registry
-        .register(
-            "stage-src-1".to_string(),
-            staged_source_part,
-            "Canción Fuente".to_string(),
-            180,
-            5000000,
-        );
+    std::fs::write(
+        &staged_source_part,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-src-1".to_string(),
+        staged_source_part,
+        "Canción Fuente".to_string(),
+        180,
+        5000000,
+    );
 
     let dispatcher = AgentToolDispatcher::new(state.clone());
     let mut context = TurnToolContext::with_staged_audio_id(
@@ -887,16 +889,18 @@ async fn test_dispatcher_separate_vocals_deduplication_ignored() {
     let pres = state.create_presentation.execute("Show Dedup").unwrap();
 
     let staged_part = state.storage.staging_dir().join("dedup.part");
-    std::fs::write(&staged_part, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
-    let reg_entry = state
-        .staged_audio_registry
-        .register(
-            "stage-dedup-1".to_string(),
-            staged_part,
-            "Tema Dedup".to_string(),
-            120,
-            3000000,
-        );
+    std::fs::write(
+        &staged_part,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-dedup-1".to_string(),
+        staged_part,
+        "Tema Dedup".to_string(),
+        120,
+        3000000,
+    );
 
     let dispatcher = AgentToolDispatcher::new(state);
     let mut context = TurnToolContext::with_staged_audio_id(

@@ -29,7 +29,9 @@ pub enum VocalSeparationError {
     SeparatorNotConfigured,
     #[error("El modo instrumental no está disponible en el servidor")]
     InstrumentalUnavailable,
-    #[error("El procesador de audio está ocupado con otra separación. Por favor, intenta de nuevo en unos minutos")]
+    #[error(
+        "El procesador de audio está ocupado con otra separación. Por favor, intenta de nuevo en unos minutos"
+    )]
     GpuBusy,
     #[error("La separación produjo archivos de salida inválidos o incompletos")]
     InvalidSeparatorOutput,
@@ -68,7 +70,9 @@ impl VocalSeparationError {
             Self::SeparatorNotConfigured => {
                 "La herramienta de separación vocal no está disponible en el servidor"
             }
-            Self::InstrumentalUnavailable => "El modo instrumental no está disponible en el servidor",
+            Self::InstrumentalUnavailable => {
+                "El modo instrumental no está disponible en el servidor"
+            }
             Self::GpuBusy => {
                 "El procesador de audio está ocupado con otra separación. Por favor, intenta de nuevo en unos minutos"
             }

@@ -22,9 +22,7 @@ use crate::use_cases::create_presentation::CreatePresentation;
 use crate::use_cases::download_youtube_audio::DownloadYouTubeAudio;
 use crate::use_cases::get_presentation::GetPresentation;
 use crate::use_cases::list_presentations::ListPresentations;
-use crate::use_cases::separate_vocals::{
-    SeparateVocals, SeparateVocalsInput, VocalAudioSource,
-};
+use crate::use_cases::separate_vocals::{SeparateVocals, SeparateVocalsInput, VocalAudioSource};
 use crate::use_cases::upload_track::UploadTrack;
 
 #[derive(Deserialize)]

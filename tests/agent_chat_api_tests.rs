@@ -576,9 +576,33 @@ fn test_config_reads_yt_dlp_bin_and_agent_timeout_secs() {
             "non-numeric timeout must be rejected"
         );
 
+        std::env::remove_var("SHIRLEY_AGENT_TIMEOUT_SECS");
+
+        // 5. SHIRLEY_SEPARATION_TIMEOUT_SECS boundary tests (clamp at 600 max)
+        std::env::set_var("SHIRLEY_SEPARATION_TIMEOUT_SECS", " 450 ");
+        let cfg_sep = Config::from_env().expect("separation timeout 450 valid");
+        assert_eq!(cfg_sep.separation_timeout_secs, 450);
+
+        std::env::set_var("SHIRLEY_SEPARATION_TIMEOUT_SECS", "600");
+        let cfg_sep600 = Config::from_env().expect("separation timeout 600 valid");
+        assert_eq!(cfg_sep600.separation_timeout_secs, 600);
+
+        std::env::set_var("SHIRLEY_SEPARATION_TIMEOUT_SECS", "601");
+        assert!(
+            Config::from_env().is_err(),
+            "separation timeout > 600 must be rejected"
+        );
+
+        std::env::set_var("SHIRLEY_SEPARATION_TIMEOUT_SECS", "0");
+        assert!(
+            Config::from_env().is_err(),
+            "separation timeout 0 must be rejected"
+        );
+
         // Clean up
         std::env::remove_var("YT_DLP_BIN");
         std::env::remove_var("SHIRLEY_AGENT_TIMEOUT_SECS");
+        std::env::remove_var("SHIRLEY_SEPARATION_TIMEOUT_SECS");
     }
 }
 
@@ -879,7 +903,10 @@ impl ChatCompletionProvider for MultiStepMockProvider {
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<
-                    Output = Result<CompletionResponse, shirley_show::infra::groq::error::ProviderError>,
+                    Output = Result<
+                        CompletionResponse,
+                        shirley_show::infra::groq::error::ProviderError,
+                    >,
                 > + Send,
         >,
     > {
@@ -907,7 +934,11 @@ async fn test_chat_api_separation_single_step_persists_to_active_presentation() 
         .unwrap();
 
     let staged_src = state.storage.staging_dir().join("api_src.part");
-    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    std::fs::write(
+        &staged_src,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
     let reg_entry = state.staged_audio_registry.register(
         "stage-api-src".to_string(),
         staged_src,
@@ -987,7 +1018,12 @@ async fn test_chat_api_separation_single_step_persists_to_active_presentation() 
         }
         _ => panic!("expected track"),
     }
-    assert_eq!(fake_sep.execution_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        fake_sep
+            .execution_count
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
 }
 
 #[tokio::test]
@@ -1000,7 +1036,11 @@ async fn test_chat_api_separation_polarformer_absent_returns_friendly_error_no_p
     let pres = state.create_presentation.execute("Show Polar").unwrap();
 
     let staged_src = state.storage.staging_dir().join("polar_src.part");
-    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    std::fs::write(
+        &staged_src,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
     let reg_entry = state.staged_audio_registry.register(
         "stage-polar-src".to_string(),
         staged_src,
@@ -1071,7 +1111,11 @@ async fn test_chat_api_separation_duplicate_call_ignored_single_gpu_execution() 
     let pres = state.create_presentation.execute("Show Dedup API").unwrap();
 
     let staged_src = state.storage.staging_dir().join("dedup_api.part");
-    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    std::fs::write(
+        &staged_src,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
     let reg_entry = state.staged_audio_registry.register(
         "stage-dedup-api".to_string(),
         staged_src,
@@ -1132,7 +1176,12 @@ async fn test_chat_api_separation_duplicate_call_ignored_single_gpu_execution() 
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(fake_sep.execution_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        fake_sep
+            .execution_count
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
 }
 
 #[tokio::test]
@@ -1140,10 +1189,17 @@ async fn test_chat_api_separation_timeout_preserves_prior_actions_and_releases_g
     let (_app, state, _tmp) = setup_test_app();
     let fake_sep = Arc::new(FakeVocalSeparator::with_delay(Duration::from_millis(500)));
     let state = state.with_vocal_separator(fake_sep);
-    let pres = state.create_presentation.execute("Show Timeout API").unwrap();
+    let pres = state
+        .create_presentation
+        .execute("Show Timeout API")
+        .unwrap();
 
     let staged_src = state.storage.staging_dir().join("timeout_api.part");
-    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    std::fs::write(
+        &staged_src,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
     let reg_entry = state.staged_audio_registry.register(
         "stage-timeout-api".to_string(),
         staged_src,
@@ -1188,11 +1244,8 @@ async fn test_chat_api_separation_timeout_preserves_prior_actions_and_releases_g
         separation_timeout: Duration::from_millis(150),
     };
 
-    let state = state.with_agent_provider(
-        Some(provider),
-        limits,
-        "openai/gpt-oss-120b".to_string(),
-    );
+    let state =
+        state.with_agent_provider(Some(provider), limits, "openai/gpt-oss-120b".to_string());
     let app = create_router(state.clone());
 
     let payload = json!({
@@ -1216,7 +1269,11 @@ async fn test_chat_api_separation_timeout_preserves_prior_actions_and_releases_g
 
     assert_eq!(json["notice"]["code"], "agent_timeout");
     let actions = json["actions_taken"].as_array().unwrap();
-    assert_eq!(actions.len(), 1, "Prior committed note action must be preserved");
+    assert_eq!(
+        actions.len(),
+        1,
+        "Prior committed note action must be preserved"
+    );
     assert_eq!(actions[0]["tool"], "add_note");
     // GPU permit must be available (released)
     assert_eq!(state.gpu_semaphore.available_permits(), 1);

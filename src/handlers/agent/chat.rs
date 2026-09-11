@@ -57,7 +57,8 @@ pub async fn chat(
             return Ok((
                 StatusCode::OK,
                 Json(AgentChatOutput {
-                    message: "La solicitud tardó más del límite de tiempo (30 s) y fue cancelada.".to_string(),
+                    message: "La solicitud tardó más del límite de tiempo (30 s) y fue cancelada."
+                        .to_string(),
                     actions_taken: vec![],
                     active_presentation_id: None,
                     staged_audio_id: None,

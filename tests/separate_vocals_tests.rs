@@ -7,10 +7,7 @@ use tempfile::TempDir;
 use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::domain::presentation::Presentation;
 use shirley_show::domain::show_item::NotePayload;
-use shirley_show::use_cases::upload_track::UploadTrack;
 use shirley_show::domain::show_item::{ShowItem, ShowItemPayload, TrackPayload};
-use shirley_show::ports::presentation_writer::PresentationWriter;
-use shirley_show::ports::show_item_writer::ShowItemWriter;
 use shirley_show::domain::vocal_separation_mode::VocalSeparationMode;
 use shirley_show::domain::youtube_url::YouTubeUrl;
 use shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage;
@@ -18,6 +15,8 @@ use shirley_show::infra::sqlite::connect::{DbPool, init_pool};
 use shirley_show::infra::sqlite::migrate::migrate_pool;
 use shirley_show::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use shirley_show::infra::sqlite::show_item_repository::SqliteShowItemRepository;
+use shirley_show::ports::presentation_writer::PresentationWriter;
+use shirley_show::ports::show_item_writer::ShowItemWriter;
 use shirley_show::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
 };
@@ -29,6 +28,7 @@ use shirley_show::use_cases::download_youtube_audio::DownloadYouTubeAudio;
 use shirley_show::use_cases::separate_vocals::{
     SeparateVocals, SeparateVocalsInput, VocalAudioSource,
 };
+use shirley_show::use_cases::upload_track::UploadTrack;
 
 #[derive(Clone)]
 struct FakeVocalSeparator {
@@ -79,8 +79,11 @@ impl VocalSeparator for FakeVocalSeparator {
 
         Box::pin(async move {
             // Simulate writing a valid MP3 file to output_path
-            std::fs::write(&request.output_path, b"ID3\x03\0\0\0\0\0\0dummy-320k-mp3-bytes")
-                .expect("write dummy mp3");
+            std::fs::write(
+                &request.output_path,
+                b"ID3\x03\0\0\0\0\0\0dummy-320k-mp3-bytes",
+            )
+            .expect("write dummy mp3");
             Ok(SeparatedAudio {
                 duration_secs,
                 size_bytes,
@@ -112,7 +115,8 @@ impl YoutubeDownloader for FakeDownloader {
         &self,
         _url: YouTubeUrl,
         target: YoutubeDownloadTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>>
+    {
         if let Some(err) = self.fail_with_error.clone() {
             return Box::pin(async move { Err(err) });
         }
@@ -166,7 +170,10 @@ impl TestContext {
     }
 
     fn create_staged_audio(&self, title: &str, content: &[u8]) -> (String, PathBuf) {
-        let (stage_id, stage_path) = self.storage.create_staging_file().expect("create staging file");
+        let (stage_id, stage_path) = self
+            .storage
+            .create_staging_file()
+            .expect("create staging file");
         std::fs::write(&stage_path, content).expect("write staging content");
         let descriptor = self.registry.register(
             stage_id,
@@ -178,7 +185,12 @@ impl TestContext {
         (descriptor.staged_audio_id, stage_path)
     }
 
-    fn create_managed_track(&self, presentation_id: &str, title: &str, content: &[u8]) -> (ShowItem, PathBuf) {
+    fn create_managed_track(
+        &self,
+        presentation_id: &str,
+        title: &str,
+        content: &[u8],
+    ) -> (ShowItem, PathBuf) {
         let audio_key = format!("{}.mp3", uuid::Uuid::new_v4());
         let track_path = self.storage.files_dir().join(&audio_key);
         std::fs::create_dir_all(self.storage.files_dir()).expect("create files dir");
@@ -191,7 +203,10 @@ impl TestContext {
             byte_size: content.len() as i64,
         });
 
-        let item = self.item_repo.append(presentation_id, payload).expect("append show item");
+        let item = self
+            .item_repo
+            .append(presentation_id, payload)
+            .expect("append show item");
         (item, track_path)
     }
 
@@ -218,7 +233,8 @@ impl TestContext {
 #[tokio::test]
 async fn test_separate_vocals_from_staged_audio_id_success() {
     let ctx = TestContext::new();
-    let (staged_audio_id, source_path) = ctx.create_staged_audio("Bohemian Rhapsody", b"source audio content");
+    let (staged_audio_id, source_path) =
+        ctx.create_staged_audio("Bohemian Rhapsody", b"source audio content");
     assert!(source_path.exists());
 
     let separator = Arc::new(FakeVocalSeparator::new(355, 14_000_000));
@@ -245,11 +261,17 @@ async fn test_separate_vocals_from_staged_audio_id_success() {
         ctx.registry.get_state(&output.staged_audio_id).unwrap(),
         StagedAudioState::Available
     );
-    let desc = ctx.registry.get_descriptor(&output.staged_audio_id).unwrap();
+    let desc = ctx
+        .registry
+        .get_descriptor(&output.staged_audio_id)
+        .unwrap();
     assert_eq!(desc.title, "Bohemian Rhapsody (Coros)");
 
     // 3. Source staged file must be removed from disk via commit_processed
-    assert!(!source_path.exists(), "Source staged file must be deleted after commit_processed");
+    assert!(
+        !source_path.exists(),
+        "Source staged file must be deleted after commit_processed"
+    );
 
     // 4. Source staged_audio_id must be marked as Consumed (tombstone retained)
     assert_eq!(
@@ -312,15 +334,24 @@ async fn test_separate_vocals_from_track_id_preserves_original_file() {
 async fn test_separate_vocals_from_youtube_url_success() {
     let ctx = TestContext::new();
     let separator = Arc::new(FakeVocalSeparator::new(210, 8_400_000));
-    let downloader = Arc::new(FakeDownloader::new("Never Gonna Give You Up", 210, 8_400_000));
+    let downloader = Arc::new(FakeDownloader::new(
+        "Never Gonna Give You Up",
+        210,
+        8_400_000,
+    ));
     let use_case = ctx.build_separate_vocals(separator.clone(), downloader);
 
     let input = SeparateVocalsInput {
-        source: VocalAudioSource::YoutubeUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string()),
+        source: VocalAudioSource::YoutubeUrl(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
+        ),
         mode: VocalSeparationMode::Coros,
     };
 
-    let output = use_case.execute(input).await.expect("youtube separation succeeds");
+    let output = use_case
+        .execute(input)
+        .await
+        .expect("youtube separation succeeds");
 
     assert_eq!(output.title, "Never Gonna Give You Up (Coros)");
     assert_eq!(output.mode, VocalSeparationMode::Coros);
@@ -337,24 +368,29 @@ fn test_source_resolution_priority_order() {
         Some("staged-123".to_string()),
         Some("track-456".to_string()),
         Some("https://youtu.be/abc".to_string()),
-    ).expect("resolve ok");
-    assert_eq!(res1, VocalAudioSource::StagedAudioId("staged-123".to_string()));
+    )
+    .expect("resolve ok");
+    assert_eq!(
+        res1,
+        VocalAudioSource::StagedAudioId("staged-123".to_string())
+    );
 
     // track_id > youtube_url when staged is None or empty
     let res2 = VocalAudioSource::resolve(
         Some("   ".to_string()),
         Some("track-456".to_string()),
         Some("https://youtu.be/abc".to_string()),
-    ).expect("resolve ok");
+    )
+    .expect("resolve ok");
     assert_eq!(res2, VocalAudioSource::TrackId("track-456".to_string()));
 
     // youtube_url when others are None
-    let res3 = VocalAudioSource::resolve(
-        None,
-        None,
-        Some("https://youtu.be/abc".to_string()),
-    ).expect("resolve ok");
-    assert_eq!(res3, VocalAudioSource::YoutubeUrl("https://youtu.be/abc".to_string()));
+    let res3 = VocalAudioSource::resolve(None, None, Some("https://youtu.be/abc".to_string()))
+        .expect("resolve ok");
+    assert_eq!(
+        res3,
+        VocalAudioSource::YoutubeUrl("https://youtu.be/abc".to_string())
+    );
 
     // None of all -> SourceRequired error
     let err = VocalAudioSource::resolve(None, None, None).unwrap_err();
@@ -364,10 +400,13 @@ fn test_source_resolution_priority_order() {
 #[tokio::test]
 async fn test_separator_failure_preserves_source_staged_audio() {
     let ctx = TestContext::new();
-    let (staged_audio_id, source_path) = ctx.create_staged_audio("Retry Track", b"source retry content");
+    let (staged_audio_id, source_path) =
+        ctx.create_staged_audio("Retry Track", b"source retry content");
     assert!(source_path.exists());
 
-    let separator = Arc::new(FakeVocalSeparator::failing(VocalSeparationError::TranscodeFailed));
+    let separator = Arc::new(FakeVocalSeparator::failing(
+        VocalSeparationError::TranscodeFailed,
+    ));
     let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
     let use_case = ctx.build_separate_vocals(separator, downloader);
 
@@ -395,9 +434,12 @@ async fn test_separator_failure_preserves_source_staged_audio() {
 #[tokio::test]
 async fn test_instrumental_unavailable_degrades_gracefully() {
     let ctx = TestContext::new();
-    let (staged_audio_id, source_path) = ctx.create_staged_audio("Instrumental Source", b"inst audio content");
+    let (staged_audio_id, source_path) =
+        ctx.create_staged_audio("Instrumental Source", b"inst audio content");
 
-    let separator = Arc::new(FakeVocalSeparator::failing(VocalSeparationError::InstrumentalUnavailable));
+    let separator = Arc::new(FakeVocalSeparator::failing(
+        VocalSeparationError::InstrumentalUnavailable,
+    ));
     let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
     let use_case = ctx.build_separate_vocals(separator, downloader);
 
@@ -408,7 +450,10 @@ async fn test_instrumental_unavailable_degrades_gracefully() {
 
     let err = use_case.execute(input).await.unwrap_err();
     assert_eq!(err.code(), "instrumental_unavailable");
-    assert_eq!(err.message(), "El modo instrumental no está disponible en el servidor");
+    assert_eq!(
+        err.message(),
+        "El modo instrumental no está disponible en el servidor"
+    );
 
     // Source remains available
     assert!(source_path.exists());
@@ -442,7 +487,9 @@ async fn test_separate_vocals_already_consumed_staged_audio_rejected() {
 
     // Manually reserve and commit as consumed
     let lease = ctx.registry.reserve(&staged_audio_id).unwrap();
-    ctx.registry.commit_consumed(&staged_audio_id, &lease.lease_id).unwrap();
+    ctx.registry
+        .commit_consumed(&staged_audio_id, &lease.lease_id)
+        .unwrap();
 
     let separator = Arc::new(FakeVocalSeparator::new(180, 1000));
     let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
@@ -482,10 +529,13 @@ async fn test_separate_vocals_track_id_not_a_track_returns_source_not_track() {
     ctx.pres_repo.create(&pres).expect("create pres");
 
     // Create a note item instead of a track
-    let note_item = ctx.item_repo.append(
-        &pres.id,
-        ShowItemPayload::Note(NotePayload::new("Una nota").unwrap()),
-    ).expect("append note");
+    let note_item = ctx
+        .item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Una nota").unwrap()),
+        )
+        .expect("append note");
 
     let separator = Arc::new(FakeVocalSeparator::new(180, 1000));
     let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
@@ -498,7 +548,10 @@ async fn test_separate_vocals_track_id_not_a_track_returns_source_not_track() {
 
     let err = use_case.execute(input).await.unwrap_err();
     assert_eq!(err.code(), "source_not_track");
-    assert_eq!(err.message(), "El elemento seleccionado no es una pista de audio");
+    assert_eq!(
+        err.message(),
+        "El elemento seleccionado no es una pista de audio"
+    );
 }
 
 #[tokio::test]
@@ -511,7 +564,9 @@ async fn test_separate_vocals_youtube_download_failure_aborts_before_separator()
     let use_case = ctx.build_separate_vocals(separator.clone(), Arc::new(downloader));
 
     let input = SeparateVocalsInput {
-        source: VocalAudioSource::YoutubeUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string()),
+        source: VocalAudioSource::YoutubeUrl(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
+        ),
         mode: VocalSeparationMode::Coros,
     };
 
@@ -525,9 +580,12 @@ async fn test_separate_vocals_youtube_download_failure_aborts_before_separator()
 #[tokio::test]
 async fn test_separate_vocals_duration_exceeded_propagates_and_preserves_source() {
     let ctx = TestContext::new();
-    let (staged_audio_id, source_path) = ctx.create_staged_audio("Long Track", b"long audio content");
+    let (staged_audio_id, source_path) =
+        ctx.create_staged_audio("Long Track", b"long audio content");
 
-    let separator = Arc::new(FakeVocalSeparator::failing(VocalSeparationError::DurationExceeded));
+    let separator = Arc::new(FakeVocalSeparator::failing(
+        VocalSeparationError::DurationExceeded,
+    ));
     let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
     let use_case = ctx.build_separate_vocals(separator, downloader);
 
@@ -573,7 +631,10 @@ async fn test_separated_output_consumable_by_upload_track_to_canonical() {
     // Now consume the separated audio into the canonical show presentation via UploadTrack
     let upload_track = UploadTrack::new(ctx.item_repo.clone(), ctx.storage.clone());
 
-    let lease = ctx.registry.reserve(&output.staged_audio_id).expect("reserve separated audio");
+    let lease = ctx
+        .registry
+        .reserve(&output.staged_audio_id)
+        .expect("reserve separated audio");
     let created_item = upload_track
         .execute(
             &pres.id,
@@ -594,13 +655,22 @@ async fn test_separated_output_consumable_by_upload_track_to_canonical() {
         ShowItemPayload::Track(t) => {
             assert_eq!(t.title, "Yesterday (Coros)");
             assert_eq!(t.media_type, "audio/mpeg");
-            let canonical_path = ctx.storage.resolve_path_str(&t.audio_key).expect("resolve path");
-            assert!(canonical_path.exists(), "Canonical audio file must exist in managed files dir");
+            let canonical_path = ctx
+                .storage
+                .resolve_path_str(&t.audio_key)
+                .expect("resolve path");
+            assert!(
+                canonical_path.exists(),
+                "Canonical audio file must exist in managed files dir"
+            );
         }
         _ => panic!("Expected Track payload"),
     }
 
     // Separated staged audio cannot be consumed a second time
     let err = ctx.registry.reserve(&output.staged_audio_id).unwrap_err();
-    assert_eq!(err, shirley_show::state::staged_audio_registry::StagedAudioRegistryError::AlreadyConsumed);
+    assert_eq!(
+        err,
+        shirley_show::state::staged_audio_registry::StagedAudioRegistryError::AlreadyConsumed
+    );
 }

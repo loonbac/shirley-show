@@ -19,9 +19,7 @@ pub struct ProcessVocalSeparatorConfig {
 impl ProcessVocalSeparatorConfig {
     /// Builds configuration from environment variables and defaults.
     pub fn from_env(work_root: PathBuf, gpu: Arc<Semaphore>) -> Self {
-        let vocal_sep_bin = std::env::var("VOCAL_SEP_BIN")
-            .ok()
-            .map(PathBuf::from);
+        let vocal_sep_bin = std::env::var("VOCAL_SEP_BIN").ok().map(PathBuf::from);
 
         let ffprobe_bin = std::env::var("FFPROBE_BIN")
             .map(PathBuf::from)
@@ -62,9 +60,10 @@ impl ProcessVocalSeparatorConfig {
     /// be a regular file, and be executable. An invalid explicit binary NEVER silently falls back to PATH.
     /// In absence of an explicit binary, resolves `karaoke-separator` from system `PATH`.
     pub fn resolve_vocal_binary(&self) -> Result<PathBuf, VocalSeparationError> {
-        let explicit = self.vocal_sep_bin.clone().or_else(|| {
-            std::env::var("VOCAL_SEP_BIN").ok().map(PathBuf::from)
-        });
+        let explicit = self
+            .vocal_sep_bin
+            .clone()
+            .or_else(|| std::env::var("VOCAL_SEP_BIN").ok().map(PathBuf::from));
 
         if let Some(path) = explicit {
             if is_executable_file(&path) {

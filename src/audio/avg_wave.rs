@@ -138,12 +138,12 @@ pub fn avg_wave(inputs: [&Path; 3], output: &Path) -> Result<(), AvgWaveError> {
                 loop {
                     match (it0.next(), it1.next(), it2.next()) {
                         (Some(s0), Some(s1), Some(s2)) => {
-                            let v0 =
-                                (s0.map_err(|_| AvgWaveError::InputReadError)? as f32) / 8_388_608.0;
-                            let v1 =
-                                (s1.map_err(|_| AvgWaveError::InputReadError)? as f32) / 8_388_608.0;
-                            let v2 =
-                                (s2.map_err(|_| AvgWaveError::InputReadError)? as f32) / 8_388_608.0;
+                            let v0 = (s0.map_err(|_| AvgWaveError::InputReadError)? as f32)
+                                / 8_388_608.0;
+                            let v1 = (s1.map_err(|_| AvgWaveError::InputReadError)? as f32)
+                                / 8_388_608.0;
+                            let v2 = (s2.map_err(|_| AvgWaveError::InputReadError)? as f32)
+                                / 8_388_608.0;
                             write_clamped_sample_24(&mut writer, v0, v1, v2)?;
                         }
                         (None, None, None) => break,

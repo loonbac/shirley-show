@@ -23,15 +23,23 @@ impl StagedAudioLeaseGuard {
     /// Commits the staged audio as consumed while deleting the temporary source file from disk.
     /// Retains the single-use tombstone in the registry.
     pub fn commit_processed(mut self) -> Result<(), StagedAudioRegistryError> {
-        let lease = self.lease.take().ok_or(StagedAudioRegistryError::InvalidLease)?;
-        self.registry.commit_processed(&lease.staged_audio_id, &lease.lease_id)
+        let lease = self
+            .lease
+            .take()
+            .ok_or(StagedAudioRegistryError::InvalidLease)?;
+        self.registry
+            .commit_processed(&lease.staged_audio_id, &lease.lease_id)
     }
 
     /// Commits the staged audio as consumed assuming the file was moved to permanent storage.
     /// Retains the single-use tombstone in the registry without deleting the path.
     pub fn commit_consumed(mut self) -> Result<(), StagedAudioRegistryError> {
-        let lease = self.lease.take().ok_or(StagedAudioRegistryError::InvalidLease)?;
-        self.registry.commit_consumed(&lease.staged_audio_id, &lease.lease_id)
+        let lease = self
+            .lease
+            .take()
+            .ok_or(StagedAudioRegistryError::InvalidLease)?;
+        self.registry
+            .commit_consumed(&lease.staged_audio_id, &lease.lease_id)
     }
 
     /// Defuses the guard without performing release or deletion.
@@ -41,8 +49,12 @@ impl StagedAudioLeaseGuard {
 
     /// Explicitly releases the reservation back to available state.
     pub fn release(mut self) -> Result<(), StagedAudioRegistryError> {
-        let lease = self.lease.take().ok_or(StagedAudioRegistryError::InvalidLease)?;
-        self.registry.release(&lease.staged_audio_id, &lease.lease_id)
+        let lease = self
+            .lease
+            .take()
+            .ok_or(StagedAudioRegistryError::InvalidLease)?;
+        self.registry
+            .release(&lease.staged_audio_id, &lease.lease_id)
     }
 
     pub fn lease(&self) -> &StagedAudioLease {
@@ -61,7 +73,9 @@ impl Deref for StagedAudioLeaseGuard {
 impl Drop for StagedAudioLeaseGuard {
     fn drop(&mut self) {
         if let Some(ref lease) = self.lease {
-            let _ = self.registry.release(&lease.staged_audio_id, &lease.lease_id);
+            let _ = self
+                .registry
+                .release(&lease.staged_audio_id, &lease.lease_id);
         }
     }
 }

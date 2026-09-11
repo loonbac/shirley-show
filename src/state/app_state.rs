@@ -25,9 +25,9 @@ use crate::use_cases::download_youtube_audio::DownloadYouTubeAudio;
 use crate::use_cases::get_presentation::GetPresentation;
 use crate::use_cases::list_presentations::ListPresentations;
 use crate::use_cases::open_track_audio::OpenTrackAudio;
-use crate::use_cases::separate_vocals::SeparateVocals;
 use crate::use_cases::rename_presentation::RenamePresentation;
 use crate::use_cases::reorder_item::ReorderItem;
+use crate::use_cases::separate_vocals::SeparateVocals;
 use crate::use_cases::update_show_item::UpdateShowItem;
 use crate::use_cases::upload_track::UploadTrack;
 

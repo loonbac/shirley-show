@@ -8,14 +8,10 @@ use crate::error::AppError;
 use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use crate::infra::filesystem::staging_guard::StagingFileGuard;
 use crate::ports::show_item_reader::ShowItemReader;
-use crate::ports::vocal_separator::{
-    VocalSeparationError, VocalSeparationRequest, VocalSeparator,
-};
+use crate::ports::vocal_separator::{VocalSeparationError, VocalSeparationRequest, VocalSeparator};
 use crate::state::staged_audio_lease_guard::StagedAudioLeaseGuard;
 use crate::state::staged_audio_registry::{StagedAudioRegistry, StagedAudioRegistryError};
-use crate::use_cases::download_youtube_audio::{
-    DownloadYouTubeAudio, DownloadYouTubeAudioError,
-};
+use crate::use_cases::download_youtube_audio::{DownloadYouTubeAudio, DownloadYouTubeAudioError};
 
 pub const DEFAULT_SEPARATION_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -214,7 +210,9 @@ impl<R: ShowItemReader> SeparateVocals<R> {
 
         // 5. Destructively commit temporary source audio if applicable (e.g. staged / youtube)
         if let Some(guard) = resolved.lease_guard {
-            guard.commit_processed().map_err(SeparateVocalsError::from)?;
+            guard
+                .commit_processed()
+                .map_err(SeparateVocalsError::from)?;
         }
 
         Ok(SeparateVocalsOutput {

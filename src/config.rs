@@ -138,6 +138,12 @@ impl Config {
                             "SHIRLEY_SEPARATION_TIMEOUT_SECS must be strictly positive".to_string()
                         );
                     }
+                    if parsed > 600 {
+                        return Err(
+                            "SHIRLEY_SEPARATION_TIMEOUT_SECS must not exceed 600 seconds"
+                                .to_string(),
+                        );
+                    }
                     parsed
                 }
             }

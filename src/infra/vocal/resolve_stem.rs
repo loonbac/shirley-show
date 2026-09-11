@@ -29,7 +29,8 @@ pub fn resolve_stem_with_tokens(
         return Err(VocalSeparationError::InvalidSeparatorOutput);
     }
 
-    let entries = std::fs::read_dir(dir).map_err(|_| VocalSeparationError::InvalidSeparatorOutput)?;
+    let entries =
+        std::fs::read_dir(dir).map_err(|_| VocalSeparationError::InvalidSeparatorOutput)?;
 
     let mut non_vocal_stem: Option<PathBuf> = None;
     let mut vocal_stem_found = false;

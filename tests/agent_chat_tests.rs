@@ -1062,7 +1062,10 @@ async fn test_agent_chat_separation_flow_asks_destination_before_gpu() {
 
     // Turn where destination is not active, Shirley asks for mode/destination without calling separate_vocals
     let provider = Arc::new(StubChatProvider::new(vec![Ok(CompletionResponse {
-        content: Some("¿Quieres conservar coros o dejarla instrumental, y en qué presentación la guardo?".to_string()),
+        content: Some(
+            "¿Quieres conservar coros o dejarla instrumental, y en qué presentación la guardo?"
+                .to_string(),
+        ),
         tool_calls: vec![],
     })]));
 
@@ -1096,8 +1099,18 @@ async fn test_agent_chat_separation_chains_when_destination_active() {
 
     // Stage a source audio file
     let staged_src = state.storage.staging_dir().join("source.part");
-    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
-    let reg_entry = state.staged_audio_registry.register("stage-demo-1".to_string(), staged_src, "Canción Demo".to_string(), 180, 7200000);
+    std::fs::write(
+        &staged_src,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-demo-1".to_string(),
+        staged_src,
+        "Canción Demo".to_string(),
+        180,
+        7200000,
+    );
 
     let dispatcher = AgentToolDispatcher::new(state.clone());
 
@@ -1165,12 +1178,24 @@ async fn test_agent_chat_separation_chains_when_destination_active() {
 async fn test_agent_chat_separation_extended_deadline_600s() {
     let (state, _tmp) = setup_test_state();
     // Separator that finishes in 200ms
-    let state = state.with_vocal_separator(Arc::new(FakeVocalSeparator::with_delay(Duration::from_millis(200))));
+    let state = state.with_vocal_separator(Arc::new(FakeVocalSeparator::with_delay(
+        Duration::from_millis(200),
+    )));
     let pres = state.create_presentation.execute("Show Largo").unwrap();
 
     let staged_src = state.storage.staging_dir().join("slow_source.part");
-    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
-    let reg_entry = state.staged_audio_registry.register("stage-long-1".to_string(), staged_src, "Canción Larga".to_string(), 180, 7200000);
+    std::fs::write(
+        &staged_src,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-long-1".to_string(),
+        staged_src,
+        "Canción Larga".to_string(),
+        180,
+        7200000,
+    );
 
     let dispatcher = AgentToolDispatcher::new(state);
 
@@ -1193,22 +1218,89 @@ async fn test_agent_chat_separation_extended_deadline_600s() {
         }),
     ]));
 
-    // Agent limits with separation timeout 600s
+    // Standard conversational request timeout is 30s, separation timeout extends to 600s
     let limits = AgentLimits {
         max_iterations: 5,
-        request_timeout: Duration::from_secs(600),
+        request_timeout: Duration::from_secs(30),
         separation_timeout: Duration::from_secs(600),
     };
 
-    let agent_chat = AgentChat::new(
-        Some(provider),
-        dispatcher,
-        limits,
-        "model".to_string(),
-    );
+    let agent_chat = AgentChat::new(Some(provider), dispatcher, limits, "model".to_string());
 
     let input = AgentChatInput {
         message: "Separa coros de esta canción".to_string(),
+        history: vec![],
+        presentation_id: Some(pres.id),
+        staged_audio_id: Some(reg_entry.staged_audio_id),
+        staged_audio: None,
+        staged_filename: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+    assert_eq!(output.actions_taken.len(), 1);
+    assert_eq!(output.actions_taken[0].tool, "separate_vocals");
+    assert!(output.notice.is_none());
+}
+
+#[tokio::test]
+async fn test_agent_limits_defaults_and_separation_600s_invariants() {
+    let defaults = AgentLimits::default();
+    assert_eq!(defaults.request_timeout, Duration::from_secs(120));
+    assert_eq!(defaults.separation_timeout, Duration::from_secs(600));
+
+    // Verify clamp in AgentLimits when exceeding 600s
+    let (state, _tmp) = setup_test_state();
+    let state_sep = state.with_vocal_separator(Arc::new(FakeVocalSeparator::with_delay(
+        Duration::from_millis(20),
+    )));
+    let pres = state_sep
+        .create_presentation
+        .execute("Show Invariant")
+        .unwrap();
+    let staged_src = state_sep.storage.staging_dir().join("inv_src.part");
+    std::fs::write(
+        &staged_src,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    let reg_entry = state_sep.staged_audio_registry.register(
+        "stage-inv-1".to_string(),
+        staged_src,
+        "Inv Track".to_string(),
+        180,
+        7200000,
+    );
+
+    let dispatcher = AgentToolDispatcher::new(state_sep);
+    let provider = Arc::new(StubChatProvider::new(vec![
+        Ok(CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_sep_inv".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "chorus",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        }),
+        Ok(CompletionResponse {
+            content: Some("Listo.".to_string()),
+            tool_calls: vec![],
+        }),
+    ]));
+
+    let limits = AgentLimits {
+        max_iterations: 5,
+        request_timeout: Duration::from_secs(30),
+        separation_timeout: Duration::from_secs(900), // Exceeds 600s
+    };
+
+    let agent_chat = AgentChat::new(Some(provider), dispatcher, limits, "model".to_string());
+
+    let input = AgentChatInput {
+        message: "Separa coros".to_string(),
         history: vec![],
         presentation_id: Some(pres.id),
         staged_audio_id: Some(reg_entry.staged_audio_id),
