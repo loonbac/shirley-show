@@ -1,31 +1,39 @@
 :root {
-  --color-bg: #0f1117;
-  --color-surface: #1a1d26;
-  --color-surface-hover: #222632;
-  --color-surface-elevated: #262a37;
-  --color-border: #313746;
-  --color-border-subtle: #242936;
-  
-  --color-text: #f3f4f6;
-  --color-text-muted: #9ca3af;
-  --color-text-dim: #6b7280;
-  
-  --color-primary: #3b82f6;
-  --color-primary-hover: #2563eb;
-  --color-primary-subtle: rgba(59, 130, 246, 0.15);
-  
-  --color-danger: #ef4444;
-  --color-danger-hover: #dc2626;
-  --color-danger-subtle: rgba(239, 68, 68, 0.15);
-  
-  --color-success: #10b981;
-  --color-success-subtle: rgba(16, 185, 129, 0.15);
-  
-  --color-accent-note: #f59e0b;
-  --color-accent-note-subtle: rgba(245, 158, 11, 0.12);
-  --color-accent-track: #8b5cf6;
-  --color-accent-lyrics: #06b6d4;
-  
-  --color-focus-ring: #60a5fa;
-  --color-overlay: rgba(0, 0, 0, 0.75);
+  color-scheme: light;
+
+  /* Surfaces & Backgrounds - Warm Ivory & Crisp White */
+  --color-bg: #faf8f5;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f4efe6;
+  --color-surface-elevated: #ffffff;
+  --color-border: #e2dbce;
+  --color-border-subtle: #ede7db;
+
+  /* Typography - High Contrast Stage Readability (Warm Charcoal) */
+  --color-text: #1c1917;
+  --color-text-muted: #574f45;
+  --color-text-dim: #7d7367;
+
+  /* Primary Brand - Sober Metallic Antique Gold */
+  --color-primary: #b8860b;
+  --color-primary-hover: #9a7209;
+  --color-primary-subtle: rgba(184, 134, 11, 0.12);
+
+  /* Semantic Feedback - Danger & Success */
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-danger-subtle: rgba(220, 38, 38, 0.08);
+
+  --color-success: #15803d;
+  --color-success-subtle: rgba(21, 128, 61, 0.08);
+
+  /* Item Type Accents - Harmonized Warm Jewel Tones */
+  --color-accent-note: #b45309;
+  --color-accent-note-subtle: rgba(180, 83, 9, 0.08);
+  --color-accent-track: #6d28d9;
+  --color-accent-lyrics: #0e7490;
+
+  /* Focus & Overlay */
+  --color-focus-ring: #b8860b;
+  --color-overlay: rgba(28, 25, 23, 0.5);
 }
