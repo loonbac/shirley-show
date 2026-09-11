@@ -21,6 +21,7 @@ http-body-util = "0.1"
 tokio-util = { version = "0.7", features = ["io"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dotenvy = "0.15"
+url = "2"
 
 [dev-dependencies]
 tempfile = "3"

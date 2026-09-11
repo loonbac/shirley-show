@@ -7,6 +7,7 @@ pub mod presentation_summary;
 pub mod show_item;
 pub mod show_item_kind;
 pub mod show_item_update;
+pub mod youtube_url;
 
 pub use agent_message::{AgentMessage, CompletionResponse, HistoryMessage};
 pub use agent_tool::{AgentNotice, ToolAction, ToolCall, ToolDefinition};
@@ -17,3 +18,4 @@ pub use presentation_summary::{PresentationSummary, ShowItemPreview};
 pub use show_item::{LyricsPayload, NotePayload, ShowItem, ShowItemPayload, TrackPayload};
 pub use show_item_kind::ShowItemKind;
 pub use show_item_update::ShowItemUpdate;
+pub use youtube_url::{YouTubeUrl, YouTubeUrlError};
