@@ -57,7 +57,7 @@ export function createChatState(initialState = {}) {
 
   function close() {
     if (!state.isOpen) return;
-    state = { ...state, isOpen: false };
+    state = { ...state, isOpen: false, pendingLabel: 'Ressy está pensando...' };
     notify();
   }
 
@@ -115,9 +115,15 @@ export function createChatState(initialState = {}) {
       }
     }
 
+    let isPriorRemoteWaiting = Boolean(
+      state.notice && (state.notice.code === 'wake_wait' || state.notice.code === 'pc_offline')
+    );
+
     let turnPendingLabel = pendingLabel;
     if (!turnPendingLabel) {
-      if (isVocalIntent) {
+      if (isPriorRemoteWaiting) {
+        turnPendingLabel = 'esperando la PC de Joshua…';
+      } else if (isVocalIntent) {
         turnPendingLabel = 'separando voces…';
       } else if (containsYouTubeUrl(message)) {
         turnPendingLabel = 'Ressy está descargando el audio…';

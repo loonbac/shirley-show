@@ -348,6 +348,63 @@ fn test_ssh_command_builder_argv_construction() {
             "/tmp/shirley-vocal/test-uuid",
         ]
     );
+
+    // 7. Cancel shutdown
+    let cancel_cmd = builder.build_cancel_shutdown();
+    let cancel_args: Vec<_> = cancel_cmd
+        .as_std()
+        .get_args()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        cancel_args,
+        vec![
+            "-p",
+            "22",
+            "-i",
+            "/home/shirley/.ssh/id_ed25519",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "loonbac@100.73.247.39",
+            "sudo",
+            "-n",
+            "/run/current-system/sw/bin/shutdown",
+            "-c",
+        ]
+    );
+
+    // 8. Schedule idle shutdown (+60)
+    let schedule_cmd = builder.build_schedule_shutdown();
+    let schedule_args: Vec<_> = schedule_cmd
+        .as_std()
+        .get_args()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        schedule_args,
+        vec![
+            "-p",
+            "22",
+            "-i",
+            "/home/shirley/.ssh/id_ed25519",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "loonbac@100.73.247.39",
+            "sudo",
+            "-n",
+            "/run/current-system/sw/bin/shutdown",
+            "+60",
+            "Shirley Show idle shutdown",
+        ]
+    );
 }
 
 #[tokio::test]
@@ -1063,4 +1120,531 @@ async fn test_ssh_vocal_separator_missing_source_file() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.code(), "invalid_audio_duration");
+}
+
+#[tokio::test]
+async fn test_ssh_vocal_separator_remote_energy_lifecycle() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+
+    let ssh_bin = bin_dir.join("ssh");
+    let scp_bin = bin_dir.join("scp");
+    let ffprobe_bin = bin_dir.join("ffprobe");
+    let log_file = temp_dir.path().join("ssh_cmds.log");
+
+    let ssh_script = format!(
+        r#"#!/bin/sh
+cmd="$@"
+echo "$cmd" >> "{}"
+case "$cmd" in
+    *true)
+        exit 0
+        ;;
+    *shutdown*-c*)
+        exit 0
+        ;;
+    *shutdown*+60*)
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+"#,
+        log_file.display()
+    );
+    create_executable_script(&ssh_bin, &ssh_script);
+
+    create_executable_script(
+        &scp_bin,
+        r#"#!/bin/sh
+dest=""
+for arg in "$@"; do
+    dest="$arg"
+done
+case "$dest" in
+    *:*) ;;
+    *)
+        if [ -n "$dest" ] && [ ! -d "$dest" ]; then
+            printf '%2048s' 'x' > "$dest"
+        fi
+        ;;
+esac
+exit 0
+"#,
+    );
+
+    create_executable_script(
+        &ffprobe_bin,
+        r#"#!/bin/sh
+cat <<'EOF'
+{
+  "streams": [
+    {
+      "codec_type": "audio",
+      "codec_name": "mp3",
+      "duration": "120.0",
+      "bit_rate": "320000"
+    }
+  ],
+  "format": {
+    "duration": "120.0",
+    "bit_rate": "320000"
+  }
+}
+EOF
+exit 0
+"#,
+    );
+
+    let key_file = temp_dir.path().join("id_ed25519");
+    std::fs::write(&key_file, b"mock-key").unwrap();
+    let source_file = temp_dir.path().join("source.mp3");
+    std::fs::write(&source_file, b"mock-source-audio").unwrap();
+    let output_file = temp_dir.path().join("output.mp3");
+
+    let jpc = JoshuaPcConfig {
+        host: "100.73.247.39".to_string(),
+        user: "loonbac".to_string(),
+        key_path: key_file,
+        port: 22,
+        wake_timeout: Duration::from_secs(10),
+    };
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let config = SshVocalSeparatorConfig::with_custom_bins(jpc, ssh_bin, scp_bin, ffprobe_bin, sem);
+    let separator = SshVocalSeparator::new(config);
+
+    let request = VocalSeparationRequest {
+        source_path: source_file,
+        output_path: output_file,
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let result = separator.separate(request).await;
+    assert!(
+        result.is_ok(),
+        "separation with energy management should succeed: {:?}",
+        result.err()
+    );
+
+    let log = std::fs::read_to_string(&log_file).unwrap();
+    let lines: Vec<&str> = log.lines().collect();
+
+    // Verify probe happened
+    assert!(lines.iter().any(|l| l.contains("true")));
+
+    // Find index of shutdown -c, mkdir, and shutdown +60
+    let cancel_idx = lines
+        .iter()
+        .position(|l| l.contains("shutdown") && l.contains("-c"));
+    let mkdir_idx = lines.iter().position(|l| l.contains("mkdir"));
+    let schedule_idx = lines
+        .iter()
+        .position(|l| l.contains("shutdown") && l.contains("+60"));
+
+    assert!(cancel_idx.is_some(), "shutdown -c must be executed");
+    assert!(mkdir_idx.is_some(), "mkdir must be executed");
+    assert!(schedule_idx.is_some(), "shutdown +60 must be executed");
+
+    assert!(
+        cancel_idx.unwrap() < mkdir_idx.unwrap(),
+        "shutdown -c must run BEFORE remote mkdir and upload"
+    );
+    assert!(
+        mkdir_idx.unwrap() < schedule_idx.unwrap(),
+        "shutdown +60 must run AFTER successful work"
+    );
+}
+
+#[tokio::test]
+async fn test_ssh_vocal_separator_shutdown_c_sudo_denied_fails_fast() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+
+    let ssh_bin = bin_dir.join("ssh");
+    let scp_bin = bin_dir.join("scp");
+    let ffprobe_bin = bin_dir.join("ffprobe");
+    let log_file = temp_dir.path().join("ssh_cmds.log");
+
+    let ssh_script = format!(
+        r#"#!/bin/sh
+cmd="$@"
+echo "$cmd" >> "{}"
+case "$cmd" in
+    *true)
+        exit 0
+        ;;
+    *shutdown*-c*)
+        echo "sudo: a password is required" >&2
+        exit 1
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+"#,
+        log_file.display()
+    );
+    create_executable_script(&ssh_bin, &ssh_script);
+    create_executable_script(&scp_bin, "#!/bin/sh\nexit 0\n");
+    create_executable_script(
+        &ffprobe_bin,
+        r#"#!/bin/sh
+cat <<'EOF'
+{
+  "streams": [
+    {
+      "codec_type": "audio",
+      "codec_name": "mp3",
+      "duration": "120.0"
+    }
+  ],
+  "format": {
+    "duration": "120.0"
+  }
+}
+EOF
+exit 0
+"#,
+    );
+
+    let key_file = temp_dir.path().join("id_ed25519");
+    std::fs::write(&key_file, b"mock-key").unwrap();
+    let source_file = temp_dir.path().join("source.mp3");
+    std::fs::write(&source_file, b"mock-source-audio").unwrap();
+    let output_file = temp_dir.path().join("output.mp3");
+
+    let jpc = JoshuaPcConfig {
+        host: "100.73.247.39".to_string(),
+        user: "loonbac".to_string(),
+        key_path: key_file,
+        port: 22,
+        wake_timeout: Duration::from_secs(10),
+    };
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let config = SshVocalSeparatorConfig::with_custom_bins(jpc, ssh_bin, scp_bin, ffprobe_bin, sem);
+    let separator = SshVocalSeparator::new(config);
+
+    let request = VocalSeparationRequest {
+        source_path: source_file,
+        output_path: output_file,
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let result = separator.separate(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.code(), "remote_sudo_denied");
+
+    let log = std::fs::read_to_string(&log_file).unwrap();
+    assert!(
+        !log.contains("mkdir"),
+        "mkdir must NOT be executed after sudo denial"
+    );
+    assert!(!log.contains("+60"), "shutdown +60 must NOT be executed");
+}
+
+#[tokio::test]
+async fn test_ssh_vocal_separator_shutdown_c_no_pending_timer_ignored() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+
+    let ssh_bin = bin_dir.join("ssh");
+    let scp_bin = bin_dir.join("scp");
+    let ffprobe_bin = bin_dir.join("ffprobe");
+
+    create_executable_script(
+        &ssh_bin,
+        r#"#!/bin/sh
+cmd="$@"
+case "$cmd" in
+    *true)
+        exit 0
+        ;;
+    *shutdown*-c*)
+        echo "Cannot find any scheduled shutdown" >&2
+        exit 1
+        ;;
+    *shutdown*+60*)
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+"#,
+    );
+
+    create_executable_script(
+        &scp_bin,
+        r#"#!/bin/sh
+dest=""
+for arg in "$@"; do
+    dest="$arg"
+done
+case "$dest" in
+    *:*) ;;
+    *)
+        if [ -n "$dest" ] && [ ! -d "$dest" ]; then
+            printf '%2048s' 'x' > "$dest"
+        fi
+        ;;
+esac
+exit 0
+"#,
+    );
+
+    create_executable_script(
+        &ffprobe_bin,
+        r#"#!/bin/sh
+cat <<'EOF'
+{
+  "streams": [
+    {
+      "codec_type": "audio",
+      "codec_name": "mp3",
+      "duration": "120.0",
+      "bit_rate": "320000"
+    }
+  ],
+  "format": {
+    "duration": "120.0",
+    "bit_rate": "320000"
+  }
+}
+EOF
+exit 0
+"#,
+    );
+
+    let key_file = temp_dir.path().join("id_ed25519");
+    std::fs::write(&key_file, b"mock-key").unwrap();
+    let source_file = temp_dir.path().join("source.mp3");
+    std::fs::write(&source_file, b"mock-source-audio").unwrap();
+    let output_file = temp_dir.path().join("output.mp3");
+
+    let jpc = JoshuaPcConfig {
+        host: "100.73.247.39".to_string(),
+        user: "loonbac".to_string(),
+        key_path: key_file,
+        port: 22,
+        wake_timeout: Duration::from_secs(10),
+    };
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let config = SshVocalSeparatorConfig::with_custom_bins(jpc, ssh_bin, scp_bin, ffprobe_bin, sem);
+    let separator = SshVocalSeparator::new(config);
+
+    let request = VocalSeparationRequest {
+        source_path: source_file,
+        output_path: output_file,
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let result = separator.separate(request).await;
+    assert!(
+        result.is_ok(),
+        "exit code 1 from shutdown -c must be ignored when no shutdown was pending"
+    );
+}
+
+#[tokio::test]
+async fn test_ssh_vocal_separator_pipeline_failure_skips_shutdown_schedule() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+
+    let ssh_bin = bin_dir.join("ssh");
+    let scp_bin = bin_dir.join("scp");
+    let ffprobe_bin = bin_dir.join("ffprobe");
+    let log_file = temp_dir.path().join("ssh_cmds.log");
+
+    let ssh_script = format!(
+        r#"#!/bin/sh
+cmd="$@"
+echo "$cmd" >> "{}"
+case "$cmd" in
+    *true)
+        exit 0
+        ;;
+    *shutdown*-c*)
+        exit 0
+        ;;
+    *sh*-s*--*)
+        exit 1
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+"#,
+        log_file.display()
+    );
+    create_executable_script(&ssh_bin, &ssh_script);
+    create_executable_script(&scp_bin, "#!/bin/sh\nexit 0\n");
+    create_executable_script(
+        &ffprobe_bin,
+        r#"#!/bin/sh
+cat <<'EOF'
+{
+  "streams": [
+    {
+      "codec_type": "audio",
+      "codec_name": "mp3",
+      "duration": "120.0"
+    }
+  ],
+  "format": {
+    "duration": "120.0"
+  }
+}
+EOF
+exit 0
+"#,
+    );
+
+    let key_file = temp_dir.path().join("id_ed25519");
+    std::fs::write(&key_file, b"mock-key").unwrap();
+    let source_file = temp_dir.path().join("source.mp3");
+    std::fs::write(&source_file, b"mock-source-audio").unwrap();
+    let output_file = temp_dir.path().join("output.mp3");
+
+    let jpc = JoshuaPcConfig {
+        host: "100.73.247.39".to_string(),
+        user: "loonbac".to_string(),
+        key_path: key_file,
+        port: 22,
+        wake_timeout: Duration::from_secs(10),
+    };
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let config = SshVocalSeparatorConfig::with_custom_bins(jpc, ssh_bin, scp_bin, ffprobe_bin, sem);
+    let separator = SshVocalSeparator::new(config);
+
+    let request = VocalSeparationRequest {
+        source_path: source_file,
+        output_path: output_file,
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let result = separator.separate(request).await;
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err().code(), "separation_failed");
+
+    let log = std::fs::read_to_string(&log_file).unwrap();
+    assert!(
+        !log.contains("+60"),
+        "shutdown +60 must NOT be called after pipeline failure"
+    );
+}
+
+#[tokio::test]
+async fn test_ssh_vocal_separator_shutdown_schedule_failure_does_not_fail_audio() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let bin_dir = temp_dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+
+    let ssh_bin = bin_dir.join("ssh");
+    let scp_bin = bin_dir.join("scp");
+    let ffprobe_bin = bin_dir.join("ffprobe");
+
+    create_executable_script(
+        &ssh_bin,
+        r#"#!/bin/sh
+cmd="$@"
+case "$cmd" in
+    *true)
+        exit 0
+        ;;
+    *shutdown*-c*)
+        exit 0
+        ;;
+    *shutdown*+60*)
+        echo "Failed to schedule shutdown" >&2
+        exit 1
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+"#,
+    );
+
+    create_executable_script(
+        &scp_bin,
+        r#"#!/bin/sh
+dest=""
+for arg in "$@"; do
+    dest="$arg"
+done
+case "$dest" in
+    *:*) ;;
+    *)
+        if [ -n "$dest" ] && [ ! -d "$dest" ]; then
+            printf '%2048s' 'x' > "$dest"
+        fi
+        ;;
+esac
+exit 0
+"#,
+    );
+
+    create_executable_script(
+        &ffprobe_bin,
+        r#"#!/bin/sh
+cat <<'EOF'
+{
+  "streams": [
+    {
+      "codec_type": "audio",
+      "codec_name": "mp3",
+      "duration": "120.0",
+      "bit_rate": "320000"
+    }
+  ],
+  "format": {
+    "duration": "120.0",
+    "bit_rate": "320000"
+  }
+}
+EOF
+exit 0
+"#,
+    );
+
+    let key_file = temp_dir.path().join("id_ed25519");
+    std::fs::write(&key_file, b"mock-key").unwrap();
+    let source_file = temp_dir.path().join("source.mp3");
+    std::fs::write(&source_file, b"mock-source-audio").unwrap();
+    let output_file = temp_dir.path().join("output.mp3");
+
+    let jpc = JoshuaPcConfig {
+        host: "100.73.247.39".to_string(),
+        user: "loonbac".to_string(),
+        key_path: key_file,
+        port: 22,
+        wake_timeout: Duration::from_secs(10),
+    };
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let config = SshVocalSeparatorConfig::with_custom_bins(jpc, ssh_bin, scp_bin, ffprobe_bin, sem);
+    let separator = SshVocalSeparator::new(config);
+
+    let request = VocalSeparationRequest {
+        source_path: source_file,
+        output_path: output_file,
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let result = separator.separate(request).await;
+    assert!(
+        result.is_ok(),
+        "failure to schedule shutdown +60 must not invalidate valid audio: {:?}",
+        result.err()
+    );
 }

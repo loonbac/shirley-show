@@ -171,6 +171,14 @@ impl<R: ShowItemReader> SeparateVocals<R> {
         self
     }
 
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    pub async fn probe(&self, timeout: Duration) -> bool {
+        self.separator.probe(timeout).await
+    }
+
     pub async fn execute(
         &self,
         input: SeparateVocalsInput,

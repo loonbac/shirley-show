@@ -350,6 +350,90 @@ impl SshVocalSeparator {
 
         Ok((duration_num, file_size))
     }
+
+    pub async fn check_probe(&self, timeout: Duration) -> bool {
+        let probe_step = Duration::from_secs(3).min(timeout);
+        let mut probe_cmd = self
+            .command_builder
+            .build_probe(probe_step.as_secs().max(1) as u32);
+        probe_cmd.kill_on_drop(true);
+        probe_cmd.stdin(Stdio::null());
+        probe_cmd.stdout(Stdio::null());
+        probe_cmd.stderr(Stdio::null());
+
+        match spawn_probe_retry(&mut probe_cmd).await {
+            Ok(mut child) => match tokio::time::timeout(probe_step, child.wait()).await {
+                Ok(Ok(status)) => status.success(),
+                _ => {
+                    let _ = child.start_kill();
+                    let _ = child.wait().await;
+                    false
+                }
+            },
+            Err(_) => false,
+        }
+    }
+
+    async fn cancel_remote_shutdown(&self, timeout: Duration) -> Result<(), VocalSeparationError> {
+        let mut cmd = self.command_builder.build_cancel_shutdown();
+        cmd.kill_on_drop(true);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+
+        let output = match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(out)) => out,
+            Ok(Err(_)) => return Err(VocalSeparationError::SeparationFailed),
+            Err(_) => return Err(VocalSeparationError::SeparationTimeout),
+        };
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+
+        if stderr.contains("password")
+            || stderr.contains("denied")
+            || stderr.contains("not allowed")
+            || stderr.contains("not permitted")
+            || stdout.contains("password")
+            || stdout.contains("denied")
+        {
+            return Err(VocalSeparationError::RemoteSudoDenied);
+        }
+
+        // Exit code 1 without sudo denial means no shutdown was scheduled, which is harmless
+        if output.status.code() == Some(1) {
+            return Ok(());
+        }
+
+        Err(VocalSeparationError::SeparationFailed)
+    }
+
+    async fn schedule_remote_shutdown(&self, timeout: Duration) {
+        let mut cmd = self.command_builder.build_schedule_shutdown();
+        cmd.kill_on_drop(true);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::piped());
+
+        match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(out)) => {
+                if !out.status.success() {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    eprintln!("Aviso: fallo al programar apagado remoto (+60): {err}");
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("Aviso: error al ejecutar comando de apagado remoto: {e}");
+            }
+            Err(_) => {
+                eprintln!("Aviso: tiempo de espera agotado al programar apagado remoto");
+            }
+        }
+    }
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -373,6 +457,11 @@ struct FfprobeFormatEntry {
 }
 
 impl VocalSeparator for SshVocalSeparator {
+    fn probe(&self, timeout: Duration) -> Pin<Box<dyn Future<Output = bool> + Send>> {
+        let this = self.clone();
+        Box::pin(async move { this.check_probe(timeout).await })
+    }
+
     fn separate(
         &self,
         request: VocalSeparationRequest,
@@ -422,6 +511,14 @@ impl VocalSeparator for SshVocalSeparator {
                 Ok(Ok(p)) => p,
                 _ => return Err(VocalSeparationError::GpuBusy),
             };
+
+            // 5b. Cancel any pending idle shutdown before creating remote directories or uploading
+            let remaining = request
+                .timeout
+                .checked_sub(start.elapsed())
+                .ok_or(VocalSeparationError::SeparationTimeout)?;
+            let cancel_step = remaining.min(Duration::from_secs(10));
+            this.cancel_remote_shutdown(cancel_step).await?;
 
             // 6. Setup guard and create remote op dir
             let mut guard = RemoteDirectoryGuard::new(
@@ -511,6 +608,14 @@ impl VocalSeparator for SshVocalSeparator {
 
             // 11. Complete guard (explicit remote cleanup, preserves local output, releases permit)
             guard.complete().await;
+
+            // 12. Schedule idle shutdown (+60) after successful validation
+            let remaining = request
+                .timeout
+                .checked_sub(start.elapsed())
+                .unwrap_or(Duration::from_secs(5));
+            let schedule_step = remaining.min(Duration::from_secs(10));
+            this.schedule_remote_shutdown(schedule_step).await;
 
             Ok(SeparatedAudio {
                 duration_secs: duration_num.round() as u32,

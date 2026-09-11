@@ -159,13 +159,23 @@ impl AppState {
             )),
         };
 
-        let separate_vocals = Arc::new(SeparateVocals::new(
-            vocal_separator.clone(),
-            storage.clone(),
-            staged_audio_registry.clone(),
-            item_repo.clone(),
-            download_youtube_audio.clone(),
-        ));
+        let is_remote = config.joshua_pc.is_some();
+        let separation_timeout = if is_remote {
+            std::time::Duration::from_secs(config.remote_separation_timeout_secs)
+        } else {
+            std::time::Duration::from_secs(config.separation_timeout_secs.min(600))
+        };
+
+        let separate_vocals = Arc::new(
+            SeparateVocals::new(
+                vocal_separator.clone(),
+                storage.clone(),
+                staged_audio_registry.clone(),
+                item_repo.clone(),
+                download_youtube_audio.clone(),
+            )
+            .with_timeout(separation_timeout),
+        );
 
         let dispatcher = AgentToolDispatcher::from_components(
             create_presentation.clone(),
@@ -180,13 +190,20 @@ impl AppState {
             separate_vocals.clone(),
         );
 
-        let limits = AgentLimits::default();
-        let agent_chat = Arc::new(AgentChat::new(
-            None,
-            dispatcher,
-            limits.clone(),
-            DEFAULT_GROQ_MODEL.to_string(),
-        ));
+        let limits = AgentLimits {
+            max_iterations: 5,
+            request_timeout: std::time::Duration::from_secs(config.agent_timeout_secs),
+            separation_timeout,
+        };
+        let agent_chat = Arc::new(
+            AgentChat::new(
+                None,
+                dispatcher,
+                limits.clone(),
+                DEFAULT_GROQ_MODEL.to_string(),
+            )
+            .with_remote_vocal_enabled(is_remote),
+        );
 
         let agent_runtime = AgentRuntime {
             agent_chat: agent_chat.clone(),
@@ -242,14 +259,18 @@ impl AppState {
     }
 
     pub fn with_vocal_separator(mut self, separator: Arc<dyn VocalSeparator>) -> Self {
+        let prev_timeout = self.separate_vocals.timeout();
         self.vocal_separator = separator.clone();
-        self.separate_vocals = Arc::new(SeparateVocals::new(
-            separator,
-            self.storage.clone(),
-            self.staged_audio_registry.clone(),
-            self.item_repo.clone(),
-            self.download_youtube_audio.clone(),
-        ));
+        self.separate_vocals = Arc::new(
+            SeparateVocals::new(
+                separator,
+                self.storage.clone(),
+                self.staged_audio_registry.clone(),
+                self.item_repo.clone(),
+                self.download_youtube_audio.clone(),
+            )
+            .with_timeout(prev_timeout),
+        );
         self
     }
 
@@ -260,7 +281,11 @@ impl AppState {
         model: String,
     ) -> Self {
         let dispatcher = AgentToolDispatcher::from_state(&self);
-        let agent_chat = Arc::new(AgentChat::new(provider, dispatcher, limits.clone(), model));
+        let is_remote = self.agent_chat.is_remote_vocal_enabled();
+        let agent_chat = Arc::new(
+            AgentChat::new(provider, dispatcher, limits.clone(), model)
+                .with_remote_vocal_enabled(is_remote),
+        );
         self.agent_runtime = AgentRuntime {
             agent_chat: agent_chat.clone(),
             limits,

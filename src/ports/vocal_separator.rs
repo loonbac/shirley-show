@@ -106,6 +106,10 @@ impl VocalSeparationError {
 }
 
 pub trait VocalSeparator: Send + Sync {
+    fn probe(&self, _timeout: Duration) -> Pin<Box<dyn Future<Output = bool> + Send>> {
+        Box::pin(async { true })
+    }
+
     fn separate(
         &self,
         request: VocalSeparationRequest,

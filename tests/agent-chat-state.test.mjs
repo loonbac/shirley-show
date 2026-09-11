@@ -544,4 +544,66 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   console.log('✓ 15. Vocal separation state lifecycle and typing indicator label');
 }
 
+// 16. Remote offline notices (wake_wait / pc_offline) set typing indicator label to "esperando la PC de Joshua…" and restore cleanly
+{
+  const state = createChatState();
+
+  // 16a. When previous notice was wake_wait, beginTurn sets pendingLabel to 'esperando la PC de Joshua…'
+  state.resolveTurn({
+    generationId: 0,
+    response: {
+      message: 'Por favor, enciende la PC de Joshua...',
+      actions_taken: [],
+      staged_audio_id: 'staged-keep-1',
+      notice: { code: 'wake_wait', message: 'Offline', retryable: true },
+    },
+  });
+  assert.equal(state.get().stagedAudioId, 'staged-keep-1');
+  assert.equal(state.get().notice.code, 'wake_wait');
+
+  const turn1 = state.beginTurn({ message: 'Ya la encendí' });
+  assert.equal(state.get().pending, true);
+  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+  assert.equal(state.get().stagedAudioId, 'staged-keep-1', 'stagedAudioId must be retained');
+
+  // 16b. Revert on turn resolution
+  state.resolveTurn({
+    generationId: turn1.generationId,
+    response: {
+      message: 'Voces separadas con éxito.',
+      actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+      staged_audio_id: 'staged-keep-1',
+    },
+  });
+  assert.equal(state.get().pending, false);
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  // 16c. When previous notice was alias pc_offline, beginTurn also sets 'esperando la PC de Joshua…'
+  state.resolveTurn({
+    generationId: turn1.generationId,
+    response: {
+      message: 'Esperando...',
+      actions_taken: [],
+      staged_audio_id: 'staged-keep-1',
+      notice: { code: 'pc_offline', message: 'Offline', retryable: true },
+    },
+  });
+  const turn2 = state.beginTurn({ message: 'Reintentar' });
+  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+
+  // 16d. Revert on cancelTurn
+  state.cancelTurn();
+  assert.equal(state.get().pending, false);
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  // 16e. Revert on close
+  state.open();
+  state.beginTurn({ message: 'Separa coros', pendingLabel: 'esperando la PC de Joshua…' });
+  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+  state.close();
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  console.log('✓ 16. Remote offline notices (wake_wait / pc_offline) set typing indicator label to "esperando la PC de Joshua…" and restore cleanly');
+}
+
 console.log('All Agent Chat State and API Client unit tests passed!');

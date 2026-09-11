@@ -64,10 +64,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     state.frontend_dir = config.frontend_dir;
 
+    let separation_timeout = if config.joshua_pc.is_some() {
+        std::time::Duration::from_secs(config.remote_separation_timeout_secs)
+    } else {
+        std::time::Duration::from_secs(config.separation_timeout_secs.min(600))
+    };
+
     let agent_limits = AgentLimits {
         max_iterations: 5,
         request_timeout: std::time::Duration::from_secs(config.agent_timeout_secs),
-        separation_timeout: std::time::Duration::from_secs(config.separation_timeout_secs.min(600)),
+        separation_timeout,
     };
 
     if config.groq.api_key.is_some() {

@@ -53,6 +53,7 @@ pub struct AgentChat {
     dispatcher: AgentToolDispatcher,
     pub limits: AgentLimits,
     model: String,
+    pub remote_vocal_enabled: bool,
 }
 
 impl AgentChat {
@@ -67,7 +68,21 @@ impl AgentChat {
             dispatcher,
             limits,
             model,
+            remote_vocal_enabled: false,
         }
+    }
+
+    pub fn with_remote_vocal_enabled(mut self, enabled: bool) -> Self {
+        self.remote_vocal_enabled = enabled;
+        self
+    }
+
+    pub fn set_remote_vocal_enabled(&mut self, enabled: bool) {
+        self.remote_vocal_enabled = enabled;
+    }
+
+    pub fn is_remote_vocal_enabled(&self) -> bool {
+        self.remote_vocal_enabled
     }
 
     pub async fn execute(&self, input: AgentChatInput) -> AgentChatOutput {
@@ -259,7 +274,7 @@ impl AgentChat {
                         .any(|tc| tc.name == "download_youtube_track");
 
                     if has_separate {
-                        let target = self.limits.separation_timeout.min(Duration::from_secs(600));
+                        let target = self.limits.separation_timeout;
                         if target > effective_budget {
                             effective_budget = target;
                             current_deadline = start_time + target;
@@ -333,6 +348,38 @@ impl AgentChat {
                         }
                     };
 
+                    if tc.name == "separate_vocals"
+                        && let Some(err_code) = res.get("error").and_then(|v| v.as_str())
+                    {
+                        if err_code == "wake_wait" {
+                            let msg = res.get("message").and_then(|v| v.as_str()).unwrap_or(
+                                    "Por favor, enciende la PC de Joshua; estaré esperando hasta que encienda y cuando lo haga haré el trabajo. Cuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo.",
+                                );
+                            return AgentChatOutput {
+                                message: msg.to_string(),
+                                actions_taken: turn_context.actions_taken,
+                                active_presentation_id: turn_context.active_presentation_id,
+                                staged_audio_id: turn_context.staged_audio_id,
+                                notice: Some(AgentNotice {
+                                    code: "wake_wait".to_string(),
+                                    retryable: true,
+                                }),
+                            };
+                        } else if err_code == "pc_wake_timeout" {
+                            let msg = "No pude conectarme con la PC de Joshua después de 10 minutos. Cuando esté encendida, vuelve a pedirme la separación.";
+                            return AgentChatOutput {
+                                message: msg.to_string(),
+                                actions_taken: turn_context.actions_taken,
+                                active_presentation_id: turn_context.active_presentation_id,
+                                staged_audio_id: turn_context.staged_audio_id,
+                                notice: Some(AgentNotice {
+                                    code: "pc_wake_timeout".to_string(),
+                                    retryable: true,
+                                }),
+                            };
+                        }
+                    }
+
                     conversation_messages.push(AgentMessage::Tool {
                         tool_call_id: tc.id,
                         content: res.to_string(),
@@ -360,7 +407,7 @@ impl AgentChat {
                     };
                 }
             } else {
-                let message = if turn_context.actions_taken.is_empty() {
+                let mut message = if turn_context.actions_taken.is_empty() {
                     let raw = response
                         .content
                         .unwrap_or_else(|| "No pude generar una respuesta.".to_string());
@@ -373,6 +420,15 @@ impl AgentChat {
                     )
                 };
 
+                if self.remote_vocal_enabled
+                    && turn_context
+                        .actions_taken
+                        .iter()
+                        .any(|a| a.tool == "separate_vocals" && a.status == "success")
+                {
+                    message.push_str("\n\nCuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo.");
+                }
+
                 return AgentChatOutput {
                     message,
                     actions_taken: turn_context.actions_taken,
@@ -383,12 +439,23 @@ impl AgentChat {
             }
         }
 
+        let mut message = compose_grounded_message(
+            &turn_context.actions_taken,
+            None,
+            turn_context.staged_audio_id.as_deref(),
+        );
+
+        if self.remote_vocal_enabled
+            && turn_context
+                .actions_taken
+                .iter()
+                .any(|a| a.tool == "separate_vocals" && a.status == "success")
+        {
+            message.push_str("\n\nCuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo.");
+        }
+
         AgentChatOutput {
-            message: compose_grounded_message(
-                &turn_context.actions_taken,
-                None,
-                turn_context.staged_audio_id.as_deref(),
-            ),
+            message,
             actions_taken: turn_context.actions_taken,
             active_presentation_id: turn_context.active_presentation_id,
             staged_audio_id: turn_context.staged_audio_id,

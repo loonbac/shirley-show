@@ -198,4 +198,31 @@ impl SshCommandBuilder {
         cmd.args([&self.target(), "rm", "-rf", remote_dir]);
         cmd
     }
+
+    pub fn build_cancel_shutdown(&self) -> Command {
+        let mut cmd = Command::new(&self.ssh_bin);
+        cmd.args(self.base_ssh_args());
+        cmd.args([
+            &self.target(),
+            "sudo",
+            "-n",
+            "/run/current-system/sw/bin/shutdown",
+            "-c",
+        ]);
+        cmd
+    }
+
+    pub fn build_schedule_shutdown(&self) -> Command {
+        let mut cmd = Command::new(&self.ssh_bin);
+        cmd.args(self.base_ssh_args());
+        cmd.args([
+            &self.target(),
+            "sudo",
+            "-n",
+            "/run/current-system/sw/bin/shutdown",
+            "+60",
+            "Shirley Show idle shutdown",
+        ]);
+        cmd
+    }
 }

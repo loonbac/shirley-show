@@ -727,6 +727,17 @@ impl AgentToolDispatcher {
                     }
                 }
 
+                if !self
+                    .separate_vocals
+                    .probe(std::time::Duration::from_secs(3))
+                    .await
+                {
+                    return json!({
+                        "error": "wake_wait",
+                        "message": "Por favor, enciende la PC de Joshua; estaré esperando hasta que encienda y cuando lo haga haré el trabajo. Cuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo."
+                    });
+                }
+
                 match self
                     .separate_vocals
                     .execute(SeparateVocalsInput { source, mode })
