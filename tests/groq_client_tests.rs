@@ -86,13 +86,13 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     let config = GroqConfig {
         api_key: Some("gsk_test_secret_key_12345".to_string()),
         base_url: format!("http://{}", addr),
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
     };
 
     let client = GroqClient::new(config).expect("client creation");
 
     let request = CompletionRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
         system_prompt: "Eres Ressy, asistente de escenario.".to_string(),
         messages: vec![
             AgentMessage::User {
@@ -136,7 +136,7 @@ async fn test_groq_client_request_serialization_and_auth_header() {
 
     // Check payload received by mock server
     let body = state.last_body.lock().await.clone().unwrap();
-    assert_eq!(body["model"], "llama-3.3-70b-versatile");
+    assert_eq!(body["model"], "openai/gpt-oss-120b");
     assert_eq!(body["tool_choice"], "auto");
 
     let messages = body["messages"].as_array().unwrap();
@@ -200,12 +200,12 @@ async fn test_groq_client_tool_call_response_parsing() {
     let config = GroqConfig {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
     };
 
     let client = GroqClient::new(config).unwrap();
     let request = CompletionRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
         system_prompt: "sys".to_string(),
         messages: vec![AgentMessage::User {
             content: "crea show".to_string(),
@@ -232,12 +232,12 @@ async fn test_groq_client_base_url_normalization() {
     let config = GroqConfig {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}///", addr),
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
     };
 
     let client = GroqClient::new(config).unwrap();
     let request = CompletionRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
         system_prompt: "sys".to_string(),
         messages: vec![AgentMessage::User {
             content: "ping".to_string(),
@@ -259,12 +259,12 @@ async fn test_groq_client_http_error_mappings() {
     let config = GroqConfig {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
     };
     let client = GroqClient::new(config).unwrap();
 
     let make_req = || CompletionRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
         system_prompt: "sys".to_string(),
         messages: vec![AgentMessage::User {
             content: "test".to_string(),
@@ -309,12 +309,12 @@ async fn test_groq_client_malformed_response() {
     let config = GroqConfig {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
     };
     let client = GroqClient::new(config).unwrap();
 
     let make_req = || CompletionRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
         system_prompt: "sys".to_string(),
         messages: vec![AgentMessage::User {
             content: "test".to_string(),
@@ -361,14 +361,14 @@ async fn test_groq_client_timeout_mapping() {
     let config = GroqConfig {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
     };
 
     // Build client with tiny timeout for test
     let client = GroqClient::with_timeout(config, Duration::from_millis(50)).unwrap();
 
     let req = CompletionRequest {
-        model: "llama-3.3-70b-versatile".to_string(),
+        model: "openai/gpt-oss-120b".to_string(),
         system_prompt: "sys".to_string(),
         messages: vec![AgentMessage::User {
             content: "test".to_string(),
@@ -387,13 +387,13 @@ fn test_groq_config_validation_and_trimming() {
     let mut config = GroqConfig {
         api_key: Some("   gsk_xyz123   ".to_string()),
         base_url: "https://api.groq.com/openai/v1/".to_string(),
-        model: "  llama-3.3-70b-versatile  ".to_string(),
+        model: "  openai/gpt-oss-120b  ".to_string(),
     };
     config.normalize();
 
     assert_eq!(config.api_key.as_deref(), Some("gsk_xyz123"));
     assert_eq!(config.base_url, "https://api.groq.com/openai/v1");
-    assert_eq!(config.model, "llama-3.3-70b-versatile");
+    assert_eq!(config.model, "openai/gpt-oss-120b");
 
     // Whitespace-only api_key becomes None
     let mut config2 = GroqConfig {

@@ -65,7 +65,7 @@ fn setup_app_with_provider(response: CompletionResponse) -> (axum::Router, AppSt
     let state = state.with_agent_provider(
         Some(provider),
         AgentLimits::default(),
-        "llama-3.3-70b-versatile".to_string(),
+        "openai/gpt-oss-120b".to_string(),
     );
     let app = create_router(state.clone());
     (app, state, tmp)
@@ -228,7 +228,7 @@ async fn test_chat_api_multipart_audio_upload_and_staging_lifecycle() {
     let state = state.with_agent_provider(
         Some(provider),
         AgentLimits::default(),
-        "llama-3.3-70b-versatile".to_string(),
+        "openai/gpt-oss-120b".to_string(),
     );
     let app = create_router(state.clone());
 
@@ -285,7 +285,7 @@ async fn test_chat_api_multipart_empty_text_defaults_with_audio() {
     let state = state.with_agent_provider(
         Some(provider),
         AgentLimits::default(),
-        "llama-3.3-70b-versatile".to_string(),
+        "openai/gpt-oss-120b".to_string(),
     );
     let app = create_router(state.clone());
 

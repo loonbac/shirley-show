@@ -127,7 +127,7 @@ async fn test_agent_chat_single_turn_informational() {
         Some(provider),
         dispatcher,
         AgentLimits::default(),
-        "llama-3.3-70b-versatile".to_string(),
+        "openai/gpt-oss-120b".to_string(),
     );
 
     let input = AgentChatInput {
@@ -224,7 +224,7 @@ async fn test_agent_chat_multi_iteration_tool_execution_chain() {
         })),
         dispatcher,
         AgentLimits::default(),
-        "llama-3.3-70b-versatile".to_string(),
+        "openai/gpt-oss-120b".to_string(),
     );
 
     let input = AgentChatInput {

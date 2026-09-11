@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 pub const DEFAULT_GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
-pub const DEFAULT_GROQ_MODEL: &str = "llama-3.3-70b-versatile";
+pub const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroqConfig {
