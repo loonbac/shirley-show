@@ -85,7 +85,12 @@ fn test_migration_idempotency_and_preservation_of_v1() {
     // v1 tables work normally
     conn.execute(
         "INSERT INTO presentations (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4);",
-        rusqlite::params!["p1", "Show Titulo", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"],
+        rusqlite::params![
+            "p1",
+            "Show Titulo",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z"
+        ],
     )
     .expect("insert presentation");
 }
@@ -106,7 +111,10 @@ fn test_foreign_keys_and_cascading_deletes() {
          VALUES ('g1', 'nonexistent', 'Transporte', 500, 'Taxi', '2026-10-10', '2026-10-10T00:00:00Z', '2026-10-10T00:00:00Z');",
         [],
     );
-    assert!(bad_expense.is_err(), "FK constraint must reject invalid evento_id");
+    assert!(
+        bad_expense.is_err(),
+        "FK constraint must reject invalid evento_id"
+    );
 
     // Insert valid event
     conn.execute(
@@ -135,11 +143,30 @@ fn test_foreign_keys_and_cascading_deletes() {
     ).expect("insert expense");
 
     // Deleting event cascades to all children
-    conn.execute("DELETE FROM eventos WHERE id = 'e1';", []).expect("delete event");
+    conn.execute("DELETE FROM eventos WHERE id = 'e1';", [])
+        .expect("delete event");
 
-    let leads_count: i32 = conn.query_row("SELECT count(*) FROM interesados WHERE evento_id = 'e1';", [], |r| r.get(0)).unwrap();
-    let tickets_count: i32 = conn.query_row("SELECT count(*) FROM entradas WHERE evento_id = 'e1';", [], |r| r.get(0)).unwrap();
-    let expenses_count: i32 = conn.query_row("SELECT count(*) FROM gastos WHERE evento_id = 'e1';", [], |r| r.get(0)).unwrap();
+    let leads_count: i32 = conn
+        .query_row(
+            "SELECT count(*) FROM interesados WHERE evento_id = 'e1';",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let tickets_count: i32 = conn
+        .query_row(
+            "SELECT count(*) FROM entradas WHERE evento_id = 'e1';",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let expenses_count: i32 = conn
+        .query_row(
+            "SELECT count(*) FROM gastos WHERE evento_id = 'e1';",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
 
     assert_eq!(leads_count, 0, "cascaded delete for interesados");
     assert_eq!(tickets_count, 0, "cascaded delete for entradas");
@@ -162,7 +189,10 @@ fn test_sqlite_checks_enforce_domain_invariants() {
          VALUES ('e_bad', 'Concierto', '2026-10-15T20:00:00Z', 'Teatro', 'invalid_json', 0, NULL, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');",
         [],
     );
-    assert!(bad_event.is_err(), "json_valid check must reject invalid JSON");
+    assert!(
+        bad_event.is_err(),
+        "json_valid check must reject invalid JSON"
+    );
 
     // Valid event
     conn.execute(
@@ -185,5 +215,8 @@ fn test_sqlite_checks_enforce_domain_invariants() {
          VALUES ('g_bad', 'e_chk', 'Inventada', 500, 'Desc', '2026-10-10', '2026-10-10T00:00:00Z', '2026-10-10T00:00:00Z');",
         [],
     );
-    assert!(bad_category.is_err(), "Expense category must be in closed set");
+    assert!(
+        bad_category.is_err(),
+        "Expense category must be in closed set"
+    );
 }

@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub struct Money {
     cents: i64,
 }

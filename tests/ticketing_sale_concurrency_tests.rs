@@ -4,8 +4,8 @@ use std::thread;
 use shirley_show::domain::ticketing::ticket::{CheckinStatus, PaymentMethod, PaymentStatus};
 use shirley_show::domain::ticketing::{Event, Money, TicketType};
 use shirley_show::infra::random_credentials::OsRandomCredentials;
-use shirley_show::infra::sqlite::{init_pool, migrate_pool};
 use shirley_show::infra::sqlite::ticketing_repository::SqliteTicketingRepository;
+use shirley_show::infra::sqlite::{init_pool, migrate_pool};
 use shirley_show::ports::ticketing::{EventRepository, SellTicketsInput, TicketRepository};
 use shirley_show::use_cases::ticketing::tickets::{
     ConfirmTicketPayment, GetPublicTicket, SellTickets,
@@ -44,11 +44,7 @@ fn test_multi_row_transactional_ticket_issuance_and_rollback() {
     let (repo, event_id, _temp) = setup_test_db();
     let credentials_gen = Arc::new(OsRandomCredentials::new());
 
-    let sell_tickets = SellTickets::new(
-        repo.clone(),
-        repo.clone(),
-        credentials_gen.clone(),
-    );
+    let sell_tickets = SellTickets::new(repo.clone(), repo.clone(), credentials_gen.clone());
 
     // 1. Successful sale of 3 General tickets
     let sale_input = SellTicketsInput {
@@ -62,7 +58,9 @@ fn test_multi_row_transactional_ticket_issuance_and_rollback() {
         estado_pago: PaymentStatus::Pagado,
     };
 
-    let issued = sell_tickets.execute(sale_input).expect("sale of 3 tickets should succeed");
+    let issued = sell_tickets
+        .execute(sale_input)
+        .expect("sale of 3 tickets should succeed");
     assert_eq!(issued.len(), 3);
 
     for ticket in &issued {
@@ -82,7 +80,8 @@ fn test_multi_row_transactional_ticket_issuance_and_rollback() {
     // Verify all 3 IDs, scan_tokens, and qr_secrets are distinct
     let ids: std::collections::HashSet<_> = issued.iter().map(|t| &t.id).collect();
     assert_eq!(ids.len(), 3);
-    let tokens: std::collections::HashSet<_> = issued.iter().map(|t| t.scan_token.as_str()).collect();
+    let tokens: std::collections::HashSet<_> =
+        issued.iter().map(|t| t.scan_token.as_str()).collect();
     assert_eq!(tokens.len(), 3);
     let qrs: std::collections::HashSet<_> = issued.iter().map(|t| t.codigo_qr.as_str()).collect();
     assert_eq!(qrs.len(), 3);
@@ -109,7 +108,11 @@ fn test_multi_row_transactional_ticket_issuance_and_rollback() {
 
     // CRITICAL: verify transactional rollback - exactly 3 rows remain, ZERO new rows inserted
     let tickets_after_fail = repo.list_tickets(&event_id, None, None, None).unwrap();
-    assert_eq!(tickets_after_fail.len(), 3, "rollback must leave database completely unaffected");
+    assert_eq!(
+        tickets_after_fail.len(),
+        3,
+        "rollback must leave database completely unaffected"
+    );
 
     // 3. Reject non-positive quantity
     let zero_sale = SellTicketsInput {
@@ -170,11 +173,20 @@ fn test_concurrent_ticket_sales_respect_capacity_ceiling() {
     }
 
     // Exactly 2 transactions can succeed (2 * 2 = 4 <= 5). The 3rd would be 6 > 5 so must fail.
-    assert_eq!(success_count, 2, "exactly two sales of 2 tickets can fit into capacity 5");
+    assert_eq!(
+        success_count, 2,
+        "exactly two sales of 2 tickets can fit into capacity 5"
+    );
     assert_eq!(fail_count, 3, "remaining 3 threads must be rejected");
 
-    let vip_tickets = repo.list_tickets(&event_id, None, None, Some("VIP")).unwrap();
-    assert_eq!(vip_tickets.len(), 4, "database must have exactly 4 tickets persisted");
+    let vip_tickets = repo
+        .list_tickets(&event_id, None, None, Some("VIP"))
+        .unwrap();
+    assert_eq!(
+        vip_tickets.len(),
+        4,
+        "database must have exactly 4 tickets persisted"
+    );
 }
 
 #[test]
@@ -182,11 +194,7 @@ fn test_triangulate_courtesy_invariants_and_public_ticket_concealment() {
     let (repo, event_id, _temp) = setup_test_db();
     let credentials_gen = Arc::new(OsRandomCredentials::new());
 
-    let sell_tickets = SellTickets::new(
-        repo.clone(),
-        repo.clone(),
-        credentials_gen,
-    );
+    let sell_tickets = SellTickets::new(repo.clone(), repo.clone(), credentials_gen);
 
     // 1. Courtesy forces price 0.0 and Pagado
     let cortesia_sale = SellTicketsInput {
@@ -200,11 +208,17 @@ fn test_triangulate_courtesy_invariants_and_public_ticket_concealment() {
         estado_pago: PaymentStatus::Pendiente, // Client passed Pendiente, must be forced to Pagado
     };
 
-    let courtesy_tickets = sell_tickets.execute(cortesia_sale).expect("courtesy sale should succeed");
+    let courtesy_tickets = sell_tickets
+        .execute(cortesia_sale)
+        .expect("courtesy sale should succeed");
     assert_eq!(courtesy_tickets.len(), 2);
     for t in &courtesy_tickets {
         assert_eq!(t.precio, Money::zero(), "courtesy must force price 0.0");
-        assert_eq!(t.estado_pago, PaymentStatus::Pagado, "courtesy must force Pagado");
+        assert_eq!(
+            t.estado_pago,
+            PaymentStatus::Pagado,
+            "courtesy must force Pagado"
+        );
         assert_eq!(t.medio_pago, PaymentMethod::Cortesia);
     }
 
@@ -235,11 +249,16 @@ fn test_triangulate_courtesy_invariants_and_public_ticket_concealment() {
     assert_eq!(public_pending.precio, 30.0);
     assert_eq!(public_pending.estado_pago, "Pendiente");
     assert_eq!(public_pending.estado_checkin, "No ingresó");
-    assert!(public_pending.qr_svg.is_none(), "pending public ticket must NEVER expose QR SVG");
+    assert!(
+        public_pending.qr_svg.is_none(),
+        "pending public ticket must NEVER expose QR SVG"
+    );
 
     // 3. Confirm Payment
     let confirm_payment = ConfirmTicketPayment::new(repo.clone());
-    let confirmed = confirm_payment.execute(&pending_ticket.id).expect("confirm payment");
+    let confirmed = confirm_payment
+        .execute(&pending_ticket.id)
+        .expect("confirm payment");
     assert_eq!(confirmed.estado_pago, PaymentStatus::Pagado);
     assert_eq!(confirmed.estado_checkin, CheckinStatus::NoIngreso);
 
@@ -249,15 +268,30 @@ fn test_triangulate_courtesy_invariants_and_public_ticket_concealment() {
         .expect("get public ticket paid");
 
     assert_eq!(public_paid.estado_pago, "Pagado");
-    assert!(public_paid.qr_svg.is_some(), "paid public ticket MUST expose QR SVG");
+    assert!(
+        public_paid.qr_svg.is_some(),
+        "paid public ticket MUST expose QR SVG"
+    );
     let svg = public_paid.qr_svg.as_ref().unwrap();
     assert!(svg.contains("<svg"));
     assert!(svg.ends_with("</svg>"));
 
     // Crucial security invariant: codigo_qr secret is NOT exposed in the JSON representation
     let json_val = serde_json::to_value(&public_paid).unwrap();
-    assert!(json_val.get("codigo_qr").is_none(), "codigo_qr secret must never be exposed publicly");
-    assert!(json_val.get("id").is_none(), "internal id must not be exposed");
-    assert!(json_val.get("evento_id").is_none(), "evento_id must not be exposed");
-    assert!(json_val.get("scan_token").is_none(), "scan_token must not be exposed in body");
+    assert!(
+        json_val.get("codigo_qr").is_none(),
+        "codigo_qr secret must never be exposed publicly"
+    );
+    assert!(
+        json_val.get("id").is_none(),
+        "internal id must not be exposed"
+    );
+    assert!(
+        json_val.get("evento_id").is_none(),
+        "evento_id must not be exposed"
+    );
+    assert!(
+        json_val.get("scan_token").is_none(),
+        "scan_token must not be exposed in body"
+    );
 }

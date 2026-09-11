@@ -28,7 +28,7 @@ fn test_event_use_cases_full_lifecycle() {
     let update_uc = UpdateEvent::new(repo.clone());
     let finalize_uc = FinalizeEvent::new(repo.clone());
     let reopen_uc = ReopenEvent::new(repo.clone());
-    let delete_uc = DeleteEvent::new(repo.clone());
+    let delete_uc = DeleteEvent::new_without_storage(repo.clone());
 
     // 1. Create
     let input = CreateEventInput {
@@ -59,7 +59,9 @@ fn test_event_use_cases_full_lifecycle() {
         nombre: "Festival de Primavera - Edición Especial".to_string(),
         fecha_hora: "2026-10-21T20:00:00Z".to_string(),
         lugar: "Auditorio Central".to_string(),
-        tipos_de_entrada: vec![TicketType::new("General", Money::from_soles(30.0).unwrap(), 180).unwrap()],
+        tipos_de_entrada: vec![
+            TicketType::new("General", Money::from_soles(30.0).unwrap(), 180).unwrap(),
+        ],
     };
     let updated = update_uc.execute(update_input).expect("update event");
     assert_eq!(updated.nombre, "Festival de Primavera - Edición Especial");
@@ -92,7 +94,9 @@ fn test_expense_and_summary_use_cases() {
             nombre: "Show Acústico".to_string(),
             fecha_hora: "2026-11-01T21:00:00Z".to_string(),
             lugar: "La Noche".to_string(),
-            tipos_de_entrada: vec![TicketType::new("General", Money::from_soles(20.0).unwrap(), 50).unwrap()],
+            tipos_de_entrada: vec![
+                TicketType::new("General", Money::from_soles(20.0).unwrap(), 50).unwrap(),
+            ],
         })
         .unwrap();
 

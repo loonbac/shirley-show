@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::agent::tool_dispatcher::AgentToolDispatcher;
 use crate::config::{Config, DEFAULT_GROQ_MODEL};
 use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
+use crate::infra::filesystem::local_poster_storage::LocalPosterStorage;
 use crate::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use crate::infra::sqlite::connect::DbPool;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
@@ -214,7 +215,9 @@ impl AppState {
         };
 
         let ticketing_repo = Arc::new(SqliteTicketingRepository::new(pool.clone()));
-        let ticketing = TicketingServices::new(ticketing_repo);
+        let posters_dir = config.data_dir.join("posters");
+        let poster_storage = Arc::new(LocalPosterStorage::new(posters_dir));
+        let ticketing = TicketingServices::new(ticketing_repo, poster_storage);
 
         Self {
             pool,

@@ -1,6 +1,6 @@
 use axum::Json;
-use axum::extract::{Path, State};
 use axum::extract::rejection::JsonRejection;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 

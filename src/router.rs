@@ -58,8 +58,17 @@ pub fn create_router(state: AppState) -> Router {
                 .patch(ticketing::events::update)
                 .delete(ticketing::events::delete),
         )
-        .route("/api/eventos/{id}/finalizar", post(ticketing::events::finalize))
+        .route(
+            "/api/eventos/{id}/finalizar",
+            post(ticketing::events::finalize),
+        )
         .route("/api/eventos/{id}/reabrir", post(ticketing::events::reopen))
+        .route(
+            "/api/eventos/{id}/imagen",
+            get(ticketing::events::get_poster)
+                .post(ticketing::events::upload_poster)
+                .layer(DefaultBodyLimit::max(11 * 1024 * 1024)),
+        )
         .route(
             "/api/eventos/{id}/gastos",
             get(ticketing::expenses::list).post(ticketing::expenses::create),
@@ -86,13 +95,24 @@ pub fn create_router(state: AppState) -> Router {
             "/api/entradas/{id}/confirmar-pago",
             post(ticketing::tickets::confirm_payment),
         )
-        .route(
-            "/api/entradas/checkin",
-            post(ticketing::tickets::check_in),
-        )
+        .route("/api/entradas/checkin", post(ticketing::tickets::check_in))
         .route(
             "/api/public/ticket/{scan_token}",
             get(ticketing::tickets::get_public_ticket),
+        )
+        .route(
+            "/api/eventos/{id}/interesados",
+            get(ticketing::interests::list).post(ticketing::interests::create),
+        )
+        .route(
+            "/api/interesados/{id}",
+            get(ticketing::interests::get)
+                .patch(ticketing::interests::update)
+                .delete(ticketing::interests::delete),
+        )
+        .route(
+            "/api/interesados/{id}/vender",
+            post(ticketing::interests::convert),
         )
         .with_state(state)
 }

@@ -4,13 +4,13 @@
 **Base branch:** `main`  
 **Store:** OpenSpec  
 **Execution mode:** auto  
-**Current Work Unit:** `tix-s2-tickets-qr-checkin` (Slice 2, PR 2 of 6 chained stacked PRs)  
-**Authority Token:** `sha256:6d379bb138d0c43abe5ee94b4157cd66604829736f9d65228f9be47db08453fe`  
-**Request:** `t2-acquire-003` (max budget: 3000 lines)  
+**Current Work Unit:** `tix-s3-leads-posters` (Slice 3, PR 3 of 6 chained stacked PRs)  
+**Authority Token:** `sha256:8a9c9fc7b96029e00661358792d3f2a4004341635ae67c417461aacab83d955c`  
+**Request:** `t3-acquire-002` (max budget: 3000 lines)  
 
 ---
 
-## 1. Cumulative Completed Tasks (19/50 total)
+## 1. Cumulative Completed Tasks (27/50 total)
 
 ### Slice 1: Esquema de base de datos, dominio y repositorios núcleo (10/10)
 - [x] RED: Escribir tests de migración SQLite `0002` que fallen por ausencia de tablas `eventos`, `interesados`, `entradas`, `gastos` y sus índices en `tests/ticketing_migration_tests.rs`. <!-- sdd-owner: implementation -->
@@ -35,83 +35,86 @@
 - [x] GREEN: Exponer endpoints de entradas, confirmación de pago, ticket público y check-in en `src/handlers/ticketing/tickets.rs` y conectarlos al router en `src/router.rs`. <!-- sdd-owner: implementation -->
 - [x] REFACTOR: Ejecutar `cargo test` y verificar que la venta atómica, generación de QR y check-in pasen con cero fallos de concurrencia. <!-- sdd-owner: implementation -->
 
+### Slice 3: Interesados, almacenamiento de afiches (posters 10MB) y endpoints de administración (8/8)
+- [x] RED: Escribir tests para CRUD de interesados y actualización del aforo proyectado en `tests/ticketing_interests_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implementar entidad `Interest` en `src/domain/ticketing/interest.rs`, repositorio en `src/infra/sqlite/ticketing_repository/interests.rs` y casos de uso en `src/use_cases/ticketing/interests.rs`. <!-- sdd-owner: implementation -->
+- [x] RED: Escribir test para `ConvertInterestToSale` verificando emisión transaccional, actualización a `Confirmado` con timestamp y rechazo a reconversión (409) en `tests/ticketing_interests_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implementar `TicketingTransactions::convert_interest` en `src/infra/sqlite/ticketing_repository/interests.rs` y caso de uso en `src/use_cases/ticketing/interests.rs`. <!-- sdd-owner: implementation -->
+- [x] RED: Escribir tests de almacenamiento de afiches (límite 10 MiB, detección por magic bytes JPEG/PNG/WebP, rechazo de ejecutables, reemplazo de archivo previo) en `tests/ticketing_poster_storage_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implementar `LocalPosterStorage` en `src/infra/filesystem/local_poster_storage.rs` y caso de uso `ReplaceEventPoster` en `src/use_cases/ticketing/posters.rs`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implementar handlers de administración (interesados CRUD, pase a venta, subida/servido de afiche, finalizar, reabrir, eliminar con cascada y limpieza) en `src/handlers/ticketing/events.rs`, `interests.rs` y router en `src/router.rs`. <!-- sdd-owner: implementation -->
+- [x] REFACTOR: Ejecutar `cargo test` validando aislamiento de paths de afiches y cascada completa de borrado de evento. <!-- sdd-owner: implementation -->
+
 ---
 
-## 2. TDD Cycle Evidence (Slice 2)
+## 2. TDD Cycle Evidence (Slice 3)
 
 | Phase | Target | Test File / Command | Result |
 |---|---|---|---|
-| RED | Credentials & QR SVG | `cargo test --test ticketing_credentials_tests` | FAILED (`unresolved import ticket, OsRandomCredentials, CredentialGenerator`) |
-| GREEN | Credentials & Domain | `cargo test --test ticketing_credentials_tests` | PASSED (`test_random_credentials_generation_format_and_uniqueness`, `test_ticket_domain_validation_and_courtesy_invariants`, `test_qr_svg_rendered_only_when_ticket_is_paid`) |
-| RED | Multi-row Sale & Rollback | `cargo test --test ticketing_sale_concurrency_tests` | FAILED (`unresolved imports TicketRepository, SellTickets, GetPublicTicket`) |
-| GREEN | Transactions & Tickets Use Cases | `cargo test --test ticketing_sale_concurrency_tests` | PASSED (`issue_sale` IMMEDIATE transaction, capacity ceiling guard, rollback on overflow) |
-| TRIANGULATE | Courtesy & Public Concealment | `cargo test --test ticketing_sale_concurrency_tests` | PASSED (Courtesy forces price 0.0 & Pagado; public ticket exposes SVG only if paid; never leaks `codigo_qr`, `id`, or `evento_id`) |
-| RED | Atomic Check-in Concurrency | `cargo test --test ticketing_door_concurrency_tests` | FAILED (`unresolved import CheckInTicket`) |
-| GREEN | Door Check-in 3 States | `cargo test --test ticketing_door_concurrency_tests` | PASSED (Atomic conditional write: exactly 1 `Valida` and 1 `Ya Usada` in concurrent race; rejection of `st_*`, cross-event, and pending) |
-| GREEN | HTTP Endpoints & Router | `cargo test --test ticketing_api_tests` | PASSED (Verified `/api/eventos/{id}/entradas`, `/api/entradas/{id}`, `/api/entradas/{id}/confirmar-pago`, `/api/entradas/checkin`, `/api/public/ticket/{scan_token}` with `no-store`) |
-| REFACTOR | Concurrency & Lints | `cargo test` + `cargo clippy --lib --test ticketing_credentials_tests --test ticketing_sale_concurrency_tests --test ticketing_door_concurrency_tests --test ticketing_api_tests -- -D warnings` | PASSED (All 33 test suites green, zero compiler warnings, zero clippy warnings) |
+| RED | Leads Domain & CRUD | `cargo test --test ticketing_interests_tests` | FAILED (`unresolved import interest, InterestRepository, interests`) |
+| GREEN | Leads Entity, Repo & Use Cases | `cargo test --test ticketing_interests_tests` | PASSED (`test_interest_domain_validations`, `test_interest_crud_and_projected_capacity`) |
+| RED | ConvertInterestToSale | `cargo test --test ticketing_interests_tests` | FAILED (`unresolved import ConvertInterestToSale, ConvertInterestInput`) |
+| GREEN | Atomic Conversion & Anti-duplicate | `cargo test --test ticketing_interests_tests` | PASSED (`test_convert_interest_to_sale_transactional_lifecycle_and_reconversion_rejection`: atomic ticket issuance, status transition to `Confirmado` with timestamp, capacity guard rollback, 409 Conflict on repeat) |
+| RED | Poster Storage & Validation | `cargo test --test ticketing_poster_storage_tests` | FAILED (`unresolved import local_poster_storage, PosterStorage, posters`) |
+| GREEN | LocalPosterStorage & ReplacePoster | `cargo test --test ticketing_poster_storage_tests` | PASSED (`test_image_format_magic_bytes_detection_and_rejection`, `test_poster_storage_10mib_limit_and_replacement_cleanup`, `test_event_deletion_cleans_up_poster_file`) |
+| GREEN | Admin HTTP Endpoints & Router | `cargo test --test ticketing_api_tests` | PASSED (`test_interests_and_posters_admin_endpoints`: CRUD interesados, pase a venta, multipart poster upload con límite 10 MiB, GET poster con `Content-Type`, `Cache-Control: public, max-age=300, must-revalidate` y `ETag`, y DELETE con cascada DB + filesystem) |
+| REFACTOR | Traversal Isolation & Full Verification | `cargo test --test ticketing_poster_storage_tests` + `cargo test` + `cargo clippy --lib --tests (ticketing suites) -- -D warnings` | PASSED (`test_poster_storage_path_traversal_resistance`, all 35 test suites green, zero compiler warnings, zero clippy warnings across ticketing domain/infra/use cases/handlers) |
 
 ---
 
 ## 3. Files Created and Modified (Cumulative)
 
-### Created in Slice 2
-- `src/domain/ticketing/ticket.rs` (Domain entity `Ticket`, `ScanToken`, `QrSecret`, `PaymentMethod`, `PaymentStatus`, `CheckinStatus`, SVG renderer)
-- `src/infra/random_credentials.rs` (`OsRandomCredentials` generating independent `st_` + 64 hex and 32 hex secrets via `OsRng`)
-- `src/infra/sqlite/ticketing_repository/tickets.rs` (`TicketRepository` queries/filters and `TicketingTransactions` with atomic `IMMEDIATE` sale and check-in)
-- `src/use_cases/ticketing/tickets.rs` (`SellTickets`, `ConfirmTicketPayment`, `GetPublicTicket`, `ListTickets`, `GetTicket`, `UpdateTicketContact`, `DeleteTicket`)
-- `src/use_cases/ticketing/checkin.rs` (`CheckInTicket` with 3 discrete outcomes: `Valida`, `Ya Usada`, `Invalida`)
-- `src/handlers/ticketing/tickets.rs` (Axum handlers for ticket sales, queries, public attendee view with `no-store`, and door check-in)
-- `tests/ticketing_credentials_tests.rs` (Unit tests for random credentials, SVG conditional rendering, and domain invariants)
-- `tests/ticketing_sale_concurrency_tests.rs` (Concurrency and property tests for multi-row issuance, capacity rollback, and secrecy)
-- `tests/ticketing_door_concurrency_tests.rs` (Concurrency race tests for atomic check-in and invalid reason classification)
+### Created in Slice 3
+- `src/domain/ticketing/interest.rs` (Domain entity `Interest`, enum `InterestStatus`, field trims and business invariants)
+- `src/infra/filesystem/local_poster_storage.rs` (`LocalPosterStorage` with 10 MiB cap, magic byte detection, UUID filenames, traversal protection, `.trash` cleanup)
+- `src/infra/sqlite/ticketing_repository/interests.rs` (`InterestRepository` CRUD and `convert_interest_impl` atomic transaction)
+- `src/use_cases/ticketing/interests.rs` (`CreateInterest`, `ListInterests`, `GetInterest`, `UpdateInterest`, `DeleteInterest`, `ConvertInterestToSale`)
+- `src/use_cases/ticketing/posters.rs` (`ReplaceEventPoster`, `GetEventPoster`)
+- `src/handlers/ticketing/interests.rs` (Axum handlers for leads CRUD and `POST /api/interesados/{id}/vender`)
+- `tests/ticketing_interests_tests.rs` (Tests for leads domain, CRUD, dynamic capacity calculation, atomic conversion, and anti-duplicate 409)
+- `tests/ticketing_poster_storage_tests.rs` (Tests for magic bytes detection, 10 MiB limit, old poster cleanup on replacement, cascade cleanup on event deletion, and path traversal resistance)
 
-### Modified in Slice 2
-- `Cargo.toml` & `Cargo.lock` (added `rand = "0.8"` and `qrcode = { version = "0.14", default-features = false, features = ["svg"] }`)
-- `src/domain/ticketing/mod.rs` (exposed `ticket` module and public types)
-- `src/ports/ticketing.rs` (added `CredentialGenerator`, `GeneratedCredentials`, `SellTicketsInput`, `CheckInOutcome`, `TicketRepository`, `TicketingTransactions`)
-- `src/infra/mod.rs` (exposed `random_credentials`)
-- `src/infra/sqlite/ticketing_repository/mod.rs` (exposed `tickets`)
-- `src/use_cases/ticketing/mod.rs` (exposed `tickets` and `checkin`)
-- `src/state/ticketing_services.rs` (wired `sell_tickets`, `list_tickets`, `get_ticket`, `update_ticket_contact`, `delete_ticket`, `confirm_ticket_payment`, `get_public_ticket`, `check_in_ticket`)
-- `src/handlers/ticketing/dto.rs` (added `TicketDto`, `SellTicketsRequest`, `SellTicketsResponse`, `ListTicketsResponse`, `TicketResponse`, `UpdateTicketContactRequest`, `CheckInRequest`)
-- `src/handlers/ticketing/mod.rs` (exposed `tickets`)
-- `src/router.rs` (registered `/api/eventos/{id}/entradas`, `/api/entradas/{id}`, `/api/entradas/{id}/confirmar-pago`, `/api/entradas/checkin`, `/api/public/ticket/{scan_token}`)
-- `tests/ticketing_api_tests.rs` (added end-to-end integration test `test_tickets_and_checkin_api_endpoints`)
-- `openspec/changes/shirley-show-ticketing/tasks.md` (checked 9/9 tasks for Slice 2, now 19/50 total)
+### Modified in Slice 3
+- `src/domain/ticketing/mod.rs` (exposed `interest` module, `Interest`, `InterestStatus`)
+- `src/ports/ticketing.rs` (added `ImageFormat`, `PosterStorage`, `NoopPosterStorage`, `InterestRepository`, and `convert_interest` to `TicketingTransactions`)
+- `src/infra/filesystem/mod.rs` (exposed `local_poster_storage`)
+- `src/infra/sqlite/ticketing_repository/mod.rs` (exposed `interests`)
+- `src/infra/sqlite/ticketing_repository/tickets.rs` (delegated `convert_interest` in `TicketingTransactions`)
+- `src/use_cases/ticketing/mod.rs` (exposed `interests` and `posters` use cases)
+- `src/use_cases/ticketing/events.rs` (updated `DeleteEvent` with poster storage coordination for disk cleanup)
+- `src/state/mod.rs` & `src/state/app_state.rs` (initialized `LocalPosterStorage` and wired to `TicketingServices`)
+- `src/state/ticketing_services.rs` (wired `create_interest`, `list_interests`, `get_interest`, `update_interest`, `delete_interest`, `convert_interest_to_sale`, `replace_poster`, `get_poster`, and updated `delete_event`)
+- `src/handlers/ticketing/dto.rs` (added `InterestDto`, `CreateInterestRequest`, `UpdateInterestRequest`, `ConvertInterestRequest`, `ListInterestsResponse`, `InterestResponse`, `UploadPosterResponse`)
+- `src/handlers/ticketing/events.rs` (added `upload_poster` and `get_poster` endpoints)
+- `src/handlers/ticketing/mod.rs` (exposed `interests`)
+- `src/router.rs` (registered `/api/eventos/{id}/interesados`, `/api/interesados/{id}`, `/api/interesados/{id}/vender`, `/api/eventos/{id}/imagen` with 11 MiB multipart limit)
+- `tests/ticketing_api_tests.rs` (added `test_interests_and_posters_admin_endpoints`)
+- `tests/ticketing_use_cases_tests.rs` (updated `DeleteEvent` invocation with storage decoupling)
+- `openspec/changes/shirley-show-ticketing/tasks.md` (marked 8/8 tasks for Slice 3 complete, now 27/50 total)
 
 ---
 
 ## 4. Deviations from Design
 
-None. The implementation followed `design.md`, `specs/entradas/spec.md`, `specs/checkin/spec.md`, and `specs/entrada-publica/spec.md` with absolute fidelity:
-- Dual-token model: `scan_token` (`st_` + 64 hex) exclusively for public view, `codigo_qr` (32 lowercase hex) exclusively for door check-in.
-- SVG QR generated via `qrcode` crate with `svg` feature only, omitting binary/image backends.
-- Strict QR concealment: Pending tickets produce `null` for `qr_svg`, while paid tickets deliver vector SVG markup.
-- Atomic conditional check-in write prevents duplicate concurrent entry registrations with zero race conditions.
-- `PublicTicketDto` strips internal IDs, `scan_token`, and the plaintext `codigo_qr` secret, and delivers `Cache-Control: no-store`.
+None. The implementation strictly adheres to `design.md`, `specs/interesados/spec.md`, and `specs/eventos/spec.md`:
+- Lead validation: trimmed strings, positive `personas` (>= 1), closed set `InterestStatus` (`Pendiente`, `Confirmado`, `Cancelado`).
+- Dynamic capacity projection: `aforo_proyectado = entradas_emitidas + sum(personas de confirmados)` is dynamically computed and updated whenever a lead is confirmed, cancelled, or updated.
+- Conversion to sale: atomic `IMMEDIATE` transaction checks `convertido_at IS NULL`, verifies event is active and has sufficient capacity, generates $N$ independent credentials, emits tickets, marks lead as `Confirmado` with timestamp, and rejects reconversion with HTTP 409 Conflict.
+- Posters: strictly limited to 10 MiB, detected by magic bytes (`image/jpeg`, `image/png`, `image/webp`), rejecting executables with 415, saved under UUID `{evento_id}_{uuid}.{ext}`, with previous asset cleanup on replace and full deletion on event delete.
 
 ---
 
 ## 5. Workload and PR Boundary
 
-- **Work unit:** `tix-s2-tickets-qr-checkin`
-- **Assigned slice:** Slice 2 (PR 2 of 6 chained stacked PRs)
-- **Review forecast vs Authored lines:** The implementation of credentials generation, dual-token security, transactional sale, atomic door check-in, use cases, Axum handlers, and concurrency test suites spans ~1,700 lines. Like Slice 1, this work unit cannot be partitioned further without breaking compile-time and transactional integrity across domain, ports, repositories, use cases, and HTTP routing. A `size:exception` applies to PR 2 as part of the authorized stacked review sequence.
-- **Authority token for settle:** `sha256:6d379bb138d0c43abe5ee94b4157cd66604829736f9d65228f9be47db08453fe`, request `t2-acquire-003`, max 3000. Settle was NOT executed per instruction ("Reporta para settle (NO settle)").
+- **Work unit:** `tix-s3-leads-posters`
+- **Assigned slice:** Slice 3 (PR 3 of 6 chained stacked PRs)
+- **Review forecast vs Authored lines:** The implementation of leads CRUD, dynamic capacity aggregation, transactional conversion, local poster filesystem storage with magic byte detection, Axum admin handlers, and test suites comprises ~1,350 lines. Like Slices 1 and 2, this work unit represents one cohesive functional slice that cannot be broken down further without losing compile-time cohesion across ports, domain, SQLite, filesystem, and HTTP router. A `size:exception` applies to PR 3 as part of the authorized stacked review sequence.
+- **Authority token for settle:** `sha256:8a9c9fc7b96029e00661358792d3f2a4004341635ae67c417461aacab83d955c`, request `t3-acquire-002`, max 3000. Settle was NOT executed per instruction ("Reporta para settle (NO settle)").
 
 ---
 
-## 6. Remaining Tasks (31 remaining across Slices 3–6)
+## 6. Remaining Tasks (23 remaining across Slices 4–6)
 
-- [ ] RED: Escribir tests para CRUD de interesados y actualización del aforo proyectado en `tests/ticketing_interests_tests.rs`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implementar entidad `Interest` en `src/domain/ticketing/interest.rs`, repositorio en `src/infra/sqlite/ticketing_repository/interests.rs` y casos de uso en `src/use_cases/ticketing/interests.rs`. <!-- sdd-owner: implementation -->
-- [ ] RED: Escribir test para `ConvertInterestToSale` verificando emisión transaccional, actualización a `Confirmado` con timestamp y rechazo a reconversión (409) en `tests/ticketing_interests_tests.rs`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implementar `TicketingTransactions::convert_interest` en `src/infra/sqlite/ticketing_repository/interests.rs` y caso de uso en `src/use_cases/ticketing/interests.rs`. <!-- sdd-owner: implementation -->
-- [ ] RED: Escribir tests de almacenamiento de afiches (límite 10 MiB, detección por magic bytes JPEG/PNG/WebP, rechazo de ejecutables, reemplazo de archivo previo) en `tests/ticketing_poster_storage_tests.rs`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implementar `LocalPosterStorage` en `src/infra/filesystem/local_poster_storage.rs` y caso de uso `ReplaceEventPoster` en `src/use_cases/ticketing/posters.rs`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implementar handlers de administración (interesados CRUD, pase a venta, subida/servido de afiche, finalizar, reabrir, eliminar con cascada y limpieza) en `src/handlers/ticketing/events.rs`, `interests.rs` y router en `src/router.rs`. <!-- sdd-owner: implementation -->
-- [ ] REFACTOR: Ejecutar `cargo test` validando aislamiento de paths de afiches y cascada completa de borrado de evento. <!-- sdd-owner: implementation -->
 - [ ] RED: Escribir tests que verifiquen exactamente 16 herramientas en `get_tool_definitions()`, incluyendo los nombres exactos de las 8 de ticketing y validación de schemas JSON en `tests/ticketing_ressy_tests.rs`. <!-- sdd-owner: implementation -->
 - [ ] GREEN: Registrar los schemas de `crear_evento`, `listar_eventos`, `vender_entradas`, `confirmar_pago_entrada`, `registrar_gasto`, `resumen_evento`, `registrar_interesado`, `checkin_entrada` en `src/agent/tool_schemas.rs`. <!-- sdd-owner: implementation -->
 - [ ] RED: Escribir tests de despacho donde Ressy invoque `vender_entradas`, `resumen_evento` y `checkin_entrada` mediante fakes de casos de uso y valide rechazo de `evento_id` inventado en `tests/ticketing_ressy_tests.rs`. <!-- sdd-owner: implementation -->

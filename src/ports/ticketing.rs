@@ -1,8 +1,70 @@
 use serde::{Deserialize, Serialize};
 
 use crate::domain::ticketing::ticket::{PaymentMethod, PaymentStatus, Ticket};
-use crate::domain::ticketing::{Event, EventSummary, Expense, QrSecret, ScanToken};
+use crate::domain::ticketing::{Event, EventSummary, Expense, Interest, QrSecret, ScanToken};
 use crate::error::AppError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageFormat {
+    Jpeg,
+    Png,
+    Webp,
+}
+
+impl ImageFormat {
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpg",
+            Self::Png => "png",
+            Self::Webp => "webp",
+        }
+    }
+
+    pub fn mime_type(&self) -> &'static str {
+        match self {
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+            Self::Webp => "image/webp",
+        }
+    }
+
+    pub fn detect(bytes: &[u8]) -> Result<Self, AppError> {
+        if bytes.len() >= 3 && bytes[0..3] == [0xFF, 0xD8, 0xFF] {
+            return Ok(Self::Jpeg);
+        }
+        if bytes.len() >= 8 && bytes[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
+            return Ok(Self::Png);
+        }
+        if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            return Ok(Self::Webp);
+        }
+        Err(AppError::unsupported_media_type(
+            "unsupported_image_format",
+            "Formato de imagen no soportado. Debe ser JPEG, PNG o WebP",
+        ))
+    }
+}
+
+pub trait PosterStorage: Send + Sync {
+    fn store_poster(&self, evento_id: &str, data: &[u8]) -> Result<String, AppError>;
+    fn get_poster(&self, filename: &str) -> Result<Option<(Vec<u8>, ImageFormat)>, AppError>;
+    fn delete_poster(&self, filename: &str) -> Result<bool, AppError>;
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct NoopPosterStorage;
+
+impl PosterStorage for NoopPosterStorage {
+    fn store_poster(&self, _evento_id: &str, _data: &[u8]) -> Result<String, AppError> {
+        Ok(String::new())
+    }
+    fn get_poster(&self, _filename: &str) -> Result<Option<(Vec<u8>, ImageFormat)>, AppError> {
+        Ok(None)
+    }
+    fn delete_poster(&self, _filename: &str) -> Result<bool, AppError> {
+        Ok(true)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GeneratedCredentials {
@@ -37,13 +99,9 @@ pub enum CheckInOutcome {
         hora_ingreso: String,
     },
     #[serde(rename = "Ya Usada")]
-    YaUsada {
-        hora_ingreso: String,
-    },
+    YaUsada { hora_ingreso: String },
     #[serde(rename = "Invalida")]
-    Invalida {
-        motivo: String,
-    },
+    Invalida { motivo: String },
 }
 
 pub trait TicketRepository: Send + Sync {
@@ -74,12 +132,34 @@ pub trait TicketingTransactions: Send + Sync {
         credentials: Vec<GeneratedCredentials>,
     ) -> Result<Vec<Ticket>, AppError>;
 
+    fn convert_interest(
+        &self,
+        interesado_id: &str,
+        tipo_entrada: &str,
+        cantidad: u32,
+        medio_pago: PaymentMethod,
+        estado_pago: PaymentStatus,
+        credentials: Vec<GeneratedCredentials>,
+    ) -> Result<Vec<Ticket>, AppError>;
+
     fn check_in(
         &self,
         evento_id: &str,
         codigo_qr: &str,
         now: &str,
     ) -> Result<CheckInOutcome, AppError>;
+}
+
+pub trait InterestRepository: Send + Sync {
+    fn create_interest(&self, interest: &Interest) -> Result<(), AppError>;
+    fn list_interests(
+        &self,
+        evento_id: &str,
+        estado: Option<&str>,
+    ) -> Result<Vec<Interest>, AppError>;
+    fn get_interest(&self, id: &str) -> Result<Option<Interest>, AppError>;
+    fn update_interest(&self, interest: &Interest) -> Result<(), AppError>;
+    fn delete_interest(&self, id: &str) -> Result<bool, AppError>;
 }
 
 pub trait EventRepository: Send + Sync {

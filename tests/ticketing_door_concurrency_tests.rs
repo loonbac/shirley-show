@@ -13,7 +13,12 @@ use shirley_show::use_cases::ticketing::checkin::CheckInTicket;
 use shirley_show::use_cases::ticketing::tickets::SellTickets;
 use tempfile::NamedTempFile;
 
-fn setup_door_test_db() -> (Arc<SqliteTicketingRepository>, String, String, NamedTempFile) {
+fn setup_door_test_db() -> (
+    Arc<SqliteTicketingRepository>,
+    String,
+    String,
+    NamedTempFile,
+) {
     let temp_file = NamedTempFile::new().unwrap();
     let pool = init_pool(temp_file.path().to_str().unwrap()).expect("pool creation failed");
     migrate_pool(&pool).expect("migrations failed");
@@ -105,14 +110,21 @@ fn test_checkin_validation_outcomes_and_security_rules() {
     let event2_ticket = &event2_tickets[0];
 
     // Case 1: Reject scan_token submitted as check-in credential
-    let res_scan_token = checkin.execute(&event1_id, paid_ticket.scan_token.as_str()).unwrap();
+    let res_scan_token = checkin
+        .execute(&event1_id, paid_ticket.scan_token.as_str())
+        .unwrap();
     match res_scan_token {
         CheckInOutcome::Invalida { .. } => {}
-        other => panic!("scan_token must be rejected with Invalida, got: {:?}", other),
+        other => panic!(
+            "scan_token must be rejected with Invalida, got: {:?}",
+            other
+        ),
     }
 
     // Case 2: Reject unknown or malformed code
-    let res_unknown = checkin.execute(&event1_id, "00001111222233334444555566667777").unwrap();
+    let res_unknown = checkin
+        .execute(&event1_id, "00001111222233334444555566667777")
+        .unwrap();
     match res_unknown {
         CheckInOutcome::Invalida { motivo } => {
             assert!(motivo.to_lowercase().contains("no encontrado"));
@@ -121,7 +133,9 @@ fn test_checkin_validation_outcomes_and_security_rules() {
     }
 
     // Case 3: Reject ticket from another event (cross-event)
-    let res_cross = checkin.execute(&event1_id, event2_ticket.codigo_qr.as_str()).unwrap();
+    let res_cross = checkin
+        .execute(&event1_id, event2_ticket.codigo_qr.as_str())
+        .unwrap();
     match res_cross {
         CheckInOutcome::Invalida { motivo } => {
             assert!(motivo.to_lowercase().contains("otro evento"));
@@ -130,7 +144,9 @@ fn test_checkin_validation_outcomes_and_security_rules() {
     }
 
     // Case 4: Reject pending payment ticket
-    let res_pending = checkin.execute(&event1_id, pending_ticket.codigo_qr.as_str()).unwrap();
+    let res_pending = checkin
+        .execute(&event1_id, pending_ticket.codigo_qr.as_str())
+        .unwrap();
     match res_pending {
         CheckInOutcome::Invalida { motivo } => {
             assert!(motivo.to_lowercase().contains("pendiente"));
@@ -139,7 +155,9 @@ fn test_checkin_validation_outcomes_and_security_rules() {
     }
 
     // Case 5: Valid check-in for paid ticket
-    let res_valid = checkin.execute(&event1_id, paid_ticket.codigo_qr.as_str()).unwrap();
+    let res_valid = checkin
+        .execute(&event1_id, paid_ticket.codigo_qr.as_str())
+        .unwrap();
     let first_entry_time = match res_valid {
         CheckInOutcome::Valida {
             nombre_comprador,
@@ -157,10 +175,15 @@ fn test_checkin_validation_outcomes_and_security_rules() {
     // Verify DB state
     let updated_ticket = repo.get_ticket(&paid_ticket.id).unwrap().unwrap();
     assert_eq!(updated_ticket.estado_checkin, CheckinStatus::Ingreso);
-    assert_eq!(updated_ticket.hora_ingreso.as_deref(), Some(first_entry_time.as_str()));
+    assert_eq!(
+        updated_ticket.hora_ingreso.as_deref(),
+        Some(first_entry_time.as_str())
+    );
 
     // Case 6: Re-scanning already used ticket returns Ya Usada
-    let res_already_used = checkin.execute(&event1_id, paid_ticket.codigo_qr.as_str()).unwrap();
+    let res_already_used = checkin
+        .execute(&event1_id, paid_ticket.codigo_qr.as_str())
+        .unwrap();
     match res_already_used {
         CheckInOutcome::YaUsada { hora_ingreso } => {
             assert_eq!(hora_ingreso, first_entry_time);
@@ -222,6 +245,12 @@ fn test_concurrent_door_checkin_produces_exactly_one_valid_and_one_used() {
         }
     }
 
-    assert_eq!(valida_count, 1, "exactly ONE concurrent scan must be Valida");
-    assert_eq!(ya_usada_count, 1, "the other concurrent scan must be Ya Usada");
+    assert_eq!(
+        valida_count, 1,
+        "exactly ONE concurrent scan must be Valida"
+    );
+    assert_eq!(
+        ya_usada_count, 1,
+        "the other concurrent scan must be Ya Usada"
+    );
 }

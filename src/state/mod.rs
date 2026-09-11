@@ -4,9 +4,9 @@ pub mod staged_audio_registry;
 pub mod ticketing_services;
 
 pub use app_state::AppState;
-pub use ticketing_services::TicketingServices;
 pub use staged_audio_lease_guard::StagedAudioLeaseGuard;
 pub use staged_audio_registry::{
     DEFAULT_STAGED_AUDIO_TTL, StagedAudioDescriptor, StagedAudioLease, StagedAudioRegistry,
     StagedAudioRegistryError, StagedAudioState,
 };
+pub use ticketing_services::TicketingServices;

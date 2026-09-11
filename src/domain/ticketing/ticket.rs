@@ -1,5 +1,5 @@
-use qrcode::render::svg;
 use qrcode::QrCode;
+use qrcode::render::svg;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::ticketing::Money;

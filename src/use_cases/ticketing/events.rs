@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use chrono::Utc;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::domain::ticketing::{Event, TicketType};
 use crate::error::AppError;
-use crate::ports::ticketing::EventRepository;
+use crate::ports::ticketing::{EventRepository, NoopPosterStorage, PosterStorage};
 
 #[derive(Debug, Clone)]
 pub struct CreateEventInput {
@@ -142,20 +142,46 @@ impl<R: EventRepository> ReopenEvent<R> {
     }
 }
 
-pub struct DeleteEvent<R: EventRepository> {
+pub struct DeleteEvent<R: EventRepository, P: PosterStorage = NoopPosterStorage> {
     repo: Arc<R>,
+    poster_storage: Arc<P>,
 }
 
-impl<R: EventRepository> DeleteEvent<R> {
-    pub fn new(repo: Arc<R>) -> Self {
-        Self { repo }
+impl<R: EventRepository> DeleteEvent<R, NoopPosterStorage> {
+    pub fn new_without_storage(repo: Arc<R>) -> Self {
+        Self {
+            repo,
+            poster_storage: Arc::new(NoopPosterStorage),
+        }
+    }
+}
+
+impl<R: EventRepository, P: PosterStorage> DeleteEvent<R, P> {
+    pub fn new(repo: Arc<R>, poster_storage: Arc<P>) -> Self {
+        Self {
+            repo,
+            poster_storage,
+        }
     }
 
     pub fn execute(&self, id: &str) -> Result<(), AppError> {
+        let event = self
+            .repo
+            .get_event(id)?
+            .ok_or_else(|| AppError::not_found("event_not_found", "Evento no encontrado"))?;
+
         let deleted = self.repo.delete_event(id)?;
         if !deleted {
-            return Err(AppError::not_found("event_not_found", "Evento no encontrado"));
+            return Err(AppError::not_found(
+                "event_not_found",
+                "Evento no encontrado",
+            ));
         }
+
+        if let Some(filename) = event.imagen {
+            let _ = self.poster_storage.delete_poster(&filename);
+        }
+
         Ok(())
     }
 }

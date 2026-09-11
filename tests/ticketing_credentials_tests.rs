@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
+use shirley_show::domain::ticketing::Money;
 use shirley_show::domain::ticketing::ticket::{
     CheckinStatus, PaymentMethod, PaymentStatus, Ticket,
 };
-use shirley_show::domain::ticketing::Money;
 use shirley_show::infra::random_credentials::OsRandomCredentials;
 use shirley_show::ports::ticketing::CredentialGenerator;
 
@@ -31,11 +31,13 @@ fn test_random_credentials_generation_format_and_uniqueness() {
 
         // codigo_qr must be 32 hex chars, lowercase
         assert_eq!(creds.qr_secret.as_str().len(), 32);
-        assert!(creds
-            .qr_secret
-            .as_str()
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(
+            creds
+                .qr_secret
+                .as_str()
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
         assert!(qr_secrets.insert(creds.qr_secret.as_str().to_string()));
 
         // scan_token and qr_secret must be uncorrelated
@@ -153,7 +155,10 @@ fn test_ticket_domain_validation_and_courtesy_invariants() {
         "2026-10-15T20:00:00Z".to_string(),
         "2026-10-15T20:00:00Z".to_string(),
     );
-    assert!(err.is_err(), "courtesy with non-zero price must be rejected");
+    assert!(
+        err.is_err(),
+        "courtesy with non-zero price must be rejected"
+    );
 
     // Reject Courtesy with pending status
     let err2 = Ticket::new(
@@ -173,7 +178,10 @@ fn test_ticket_domain_validation_and_courtesy_invariants() {
         "2026-10-15T20:00:00Z".to_string(),
         "2026-10-15T20:00:00Z".to_string(),
     );
-    assert!(err2.is_err(), "courtesy with pending status must be rejected");
+    assert!(
+        err2.is_err(),
+        "courtesy with pending status must be rejected"
+    );
 
     // Reject check-in mismatch (Ingresó without hora_ingreso, or NoIngreso with hora_ingreso)
     let err3 = Ticket::new(

@@ -14,7 +14,9 @@ impl EventSummaryReader for SqliteTicketingRepository {
         let capacidad_total = event.total_capacity();
 
         let conn = self.pool.get().map_err(|e| {
-            AppError::Database(format!("Failed to get connection for get_event_summary: {e}"))
+            AppError::Database(format!(
+                "Failed to get connection for get_event_summary: {e}"
+            ))
         })?;
 
         // 1. Entradas metrics
@@ -36,7 +38,9 @@ impl EventSummaryReader for SqliteTicketingRepository {
                 let count: u32 = row.get(2)?;
                 Ok((cobrado, pendiente, count))
             })
-            .map_err(|e| AppError::Database(format!("Failed to execute entradas summary query: {e}")))?
+            .map_err(|e| {
+                AppError::Database(format!("Failed to execute entradas summary query: {e}"))
+            })?
         };
 
         // Payment method breakdown
@@ -53,7 +57,9 @@ impl EventSummaryReader for SqliteTicketingRepository {
                      WHERE evento_id = ?1
                      GROUP BY medio_pago, estado_pago;",
                 )
-                .map_err(|e| AppError::Database(format!("Failed to prepare payment breakdown query: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to prepare payment breakdown query: {e}"))
+                })?;
 
             let rows = stmt
                 .query_map([evento_id], |row| {
@@ -63,11 +69,13 @@ impl EventSummaryReader for SqliteTicketingRepository {
                     let sum_cents: i64 = row.get(3)?;
                     Ok((medio, estado, count, sum_cents))
                 })
-                .map_err(|e| AppError::Database(format!("Failed to query payment breakdown: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query payment breakdown: {e}"))
+                })?;
 
             for row in rows {
-                let (medio, estado, count, sum_cents) =
-                    row.map_err(|e| AppError::Database(format!("Failed to read payment row: {e}")))?;
+                let (medio, estado, count, sum_cents) = row
+                    .map_err(|e| AppError::Database(format!("Failed to read payment row: {e}")))?;
 
                 match (medio.as_str(), estado.as_str()) {
                     ("Yape", "Pagado") => {
@@ -102,10 +110,13 @@ impl EventSummaryReader for SqliteTicketingRepository {
                      FROM interesados
                      WHERE evento_id = ?1 AND estado = 'Confirmado';",
                 )
-                .map_err(|e| AppError::Database(format!("Failed to prepare interesados summary query: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to prepare interesados summary query: {e}"))
+                })?;
 
-            stmt.query_row([evento_id], |row| row.get(0))
-                .map_err(|e| AppError::Database(format!("Failed to execute interesados summary query: {e}")))?
+            stmt.query_row([evento_id], |row| row.get(0)).map_err(|e| {
+                AppError::Database(format!("Failed to execute interesados summary query: {e}"))
+            })?
         };
 
         let aforo_proyectado = entradas_emitidas + personas_confirmadas;
@@ -118,10 +129,13 @@ impl EventSummaryReader for SqliteTicketingRepository {
                      FROM gastos
                      WHERE evento_id = ?1;",
                 )
-                .map_err(|e| AppError::Database(format!("Failed to prepare gastos summary query: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to prepare gastos summary query: {e}"))
+                })?;
 
-            stmt.query_row([evento_id], |row| row.get(0))
-                .map_err(|e| AppError::Database(format!("Failed to execute gastos summary query: {e}")))?
+            stmt.query_row([evento_id], |row| row.get(0)).map_err(|e| {
+                AppError::Database(format!("Failed to execute gastos summary query: {e}"))
+            })?
         };
 
         // Categorias gasto breakdown
@@ -134,7 +148,9 @@ impl EventSummaryReader for SqliteTicketingRepository {
                      WHERE evento_id = ?1
                      GROUP BY categoria;",
                 )
-                .map_err(|e| AppError::Database(format!("Failed to prepare gastos breakdown query: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to prepare gastos breakdown query: {e}"))
+                })?;
 
             let rows = stmt
                 .query_map([evento_id], |row| {
@@ -142,7 +158,9 @@ impl EventSummaryReader for SqliteTicketingRepository {
                     let sum_cents: i64 = row.get(1)?;
                     Ok((cat, sum_cents))
                 })
-                .map_err(|e| AppError::Database(format!("Failed to query gastos breakdown: {e}")))?;
+                .map_err(|e| {
+                    AppError::Database(format!("Failed to query gastos breakdown: {e}"))
+                })?;
 
             for row in rows {
                 let (cat_str, sum_cents) =

@@ -1,5 +1,5 @@
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use uuid::Uuid;
 
 use crate::domain::ticketing::{QrSecret, ScanToken};

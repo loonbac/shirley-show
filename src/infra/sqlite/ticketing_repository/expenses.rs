@@ -66,7 +66,9 @@ impl ExpenseRepository for SqliteTicketingRepository {
                     fecha_actualizacion,
                 ))
             })
-            .map_err(|e| AppError::Database(format!("Failed to execute list_expenses query: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to execute list_expenses query: {e}"))
+            })?;
 
         let mut expenses = Vec::new();
         for row in rows {
@@ -188,7 +190,10 @@ impl ExpenseRepository for SqliteTicketingRepository {
             .map_err(|e| AppError::Database(format!("Failed to update expense: {e}")))?;
 
         if rows == 0 {
-            return Err(AppError::not_found("expense_not_found", "Gasto no encontrado"));
+            return Err(AppError::not_found(
+                "expense_not_found",
+                "Gasto no encontrado",
+            ));
         }
 
         Ok(())

@@ -159,8 +159,10 @@ impl EventRepository for SqliteTicketingRepository {
                 fecha_creacion,
                 fecha_actualizacion,
             )) => {
-                let tipos_de_entrada: Vec<TicketType> = serde_json::from_str(&tipos_json)
-                    .map_err(|e| AppError::Database(format!("Corrupt tipos_de_entrada JSON: {e}")))?;
+                let tipos_de_entrada: Vec<TicketType> =
+                    serde_json::from_str(&tipos_json).map_err(|e| {
+                        AppError::Database(format!("Corrupt tipos_de_entrada JSON: {e}"))
+                    })?;
 
                 Ok(Some(Event {
                     id,
@@ -206,7 +208,10 @@ impl EventRepository for SqliteTicketingRepository {
             .map_err(|e| AppError::Database(format!("Failed to update event: {e}")))?;
 
         if rows == 0 {
-            return Err(AppError::not_found("event_not_found", "Evento no encontrado"));
+            return Err(AppError::not_found(
+                "event_not_found",
+                "Evento no encontrado",
+            ));
         }
 
         Ok(())
@@ -225,7 +230,10 @@ impl EventRepository for SqliteTicketingRepository {
             .map_err(|e| AppError::Database(format!("Failed to set_finalizado: {e}")))?;
 
         if rows == 0 {
-            return Err(AppError::not_found("event_not_found", "Evento no encontrado"));
+            return Err(AppError::not_found(
+                "event_not_found",
+                "Evento no encontrado",
+            ));
         }
 
         Ok(())

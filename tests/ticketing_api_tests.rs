@@ -300,10 +300,7 @@ async fn test_expenses_and_resumen_api() {
     let json = body_to_json(res.into_body()).await;
     assert_eq!(json["resumen"]["gastos"], 500.0);
     assert_eq!(json["resumen"]["ganancia_neta"], -500.0);
-    assert_eq!(
-        json["resumen"]["desglose_gastos"]["sonido_luces"],
-        500.0
-    );
+    assert_eq!(json["resumen"]["desglose_gastos"]["sonido_luces"], 500.0);
 
     // 7. DELETE /api/gastos/{id} -> 200
     let req = Request::builder()
@@ -368,7 +365,12 @@ async fn test_tickets_and_checkin_api_endpoints() {
     let ticket2_id = entradas[1]["id"].as_str().unwrap().to_string();
     assert_eq!(entradas[0]["precio"], 40.0);
     assert_eq!(entradas[0]["estado_pago"], "Pagado");
-    assert!(entradas[0]["ticket_path"].as_str().unwrap().starts_with("#/ticket/"));
+    assert!(
+        entradas[0]["ticket_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("#/ticket/")
+    );
     assert!(entradas[0]["qr_svg"].is_string());
 
     // 3. GET /api/eventos/{id}/entradas
@@ -409,7 +411,10 @@ async fn test_tickets_and_checkin_api_endpoints() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let updated_json = body_to_json(res.into_body()).await;
-    assert_eq!(updated_json["entrada"]["nombre_comprador"], "Juan Carlos Perez");
+    assert_eq!(
+        updated_json["entrada"]["nombre_comprador"],
+        "Juan Carlos Perez"
+    );
 
     // 6. POST /api/eventos/{id}/entradas -> sell 1 Pending ticket
     let req = Request::builder()
@@ -431,8 +436,14 @@ async fn test_tickets_and_checkin_api_endpoints() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
     let pending_sale = body_to_json(res.into_body()).await;
-    let pending_ticket_id = pending_sale["entradas"][0]["id"].as_str().unwrap().to_string();
-    let pending_scan_token = pending_sale["entradas"][0]["scan_token"].as_str().unwrap().to_string();
+    let pending_ticket_id = pending_sale["entradas"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let pending_scan_token = pending_sale["entradas"][0]["scan_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // 7. GET /api/public/ticket/{scan_token} for pending ticket -> no-store, qr_svg null
     let req = Request::builder()
@@ -496,4 +507,227 @@ async fn test_tickets_and_checkin_api_endpoints() {
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
+}
+
+fn build_poster_multipart_body(
+    boundary: &str,
+    filename: &str,
+    file_bytes: &[u8],
+    content_type: &str,
+) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("Content-Disposition: form-data; name=\"imagen\"; filename=\"{filename}\"\r\n")
+            .as_bytes(),
+    );
+    body.extend_from_slice(format!("Content-Type: {content_type}\r\n\r\n").as_bytes());
+    body.extend_from_slice(file_bytes);
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
+#[tokio::test]
+async fn test_interests_and_posters_admin_endpoints() {
+    let (app, _dir) = setup_app();
+
+    // 1. Create event
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/eventos")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre": "Festival Andino",
+                "fecha_hora": "2026-11-10T19:00:00Z",
+                "lugar": "Cusco",
+                "tipos_de_entrada": [
+                    { "nombre": "General", "precio": 40.0, "capacidad": 100 }
+                ]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let event_json = body_to_json(res.into_body()).await;
+    let event_id = event_json["evento"]["id"].as_str().unwrap().to_string();
+
+    // 2. POST /api/eventos/{id}/interesados -> 201 Created
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/interesados"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre": "Elena Gomez",
+                "contacto": "+51999888777",
+                "canal": "WhatsApp",
+                "promotora": "Shirley",
+                "personas": 4
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let lead_json = body_to_json(res.into_body()).await;
+    let lead_id = lead_json["interesado"]["id"].as_str().unwrap().to_string();
+    assert_eq!(lead_json["interesado"]["nombre"], "Elena Gomez");
+    assert_eq!(lead_json["interesado"]["estado"], "Pendiente");
+
+    // 3. GET /api/eventos/{id}/interesados -> 200 OK with 1 lead
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/eventos/{event_id}/interesados"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let list_json = body_to_json(res.into_body()).await;
+    assert_eq!(list_json["interesados"].as_array().unwrap().len(), 1);
+
+    // 4. GET /api/interesados/{id} -> 200 OK
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/interesados/{lead_id}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let get_json = body_to_json(res.into_body()).await;
+    assert_eq!(get_json["interesado"]["id"], lead_id);
+
+    // 5. PATCH /api/interesados/{id} -> 200 OK (update to Confirmado)
+    let req = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/interesados/{lead_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre": "Elena Gomez Sanchez",
+                "contacto": "+51999888777",
+                "canal": "WhatsApp",
+                "promotora": "Shirley",
+                "personas": 5,
+                "estado": "Confirmado"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let updated_json = body_to_json(res.into_body()).await;
+    assert_eq!(updated_json["interesado"]["estado"], "Confirmado");
+    assert_eq!(updated_json["interesado"]["personas"], 5);
+
+    // 6. POST /api/interesados/{id}/vender -> 201 Created (convert lead to sale)
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/interesados/{lead_id}/vender"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "tipo_entrada": "General",
+                "cantidad": 5,
+                "medio_pago": "Yape",
+                "estado_pago": "Pagado"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let sale_json = body_to_json(res.into_body()).await;
+    let tickets = sale_json["entradas"].as_array().unwrap();
+    assert_eq!(tickets.len(), 5);
+
+    // 7. POST /api/interesados/{id}/vender again -> 409 Conflict
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/interesados/{lead_id}/vender"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "tipo_entrada": "General",
+                "cantidad": 5,
+                "medio_pago": "Yape",
+                "estado_pago": "Pagado"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+
+    // 8. Upload poster via multipart POST /api/eventos/{id}/imagen -> 200 OK
+    let boundary = "----WebKitFormBoundaryXyZ123";
+    let sample_jpeg: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+    let body = build_poster_multipart_body(boundary, "poster.jpg", sample_jpeg, "image/jpeg");
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/imagen"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let poster_json = body_to_json(res.into_body()).await;
+    let imagen_filename = poster_json["imagen"].as_str().unwrap().to_string();
+    assert!(imagen_filename.ends_with(".jpg"));
+
+    // 9. GET /api/eventos/{id}/imagen -> 200 OK bytes with headers
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/eventos/{event_id}/imagen"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get(header::CONTENT_TYPE).unwrap(),
+        "image/jpeg"
+    );
+    assert!(
+        res.headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("public")
+    );
+    assert!(res.headers().contains_key(header::ETAG));
+    let img_bytes = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&img_bytes[..], sample_jpeg);
+
+    // 10. DELETE /api/eventos/{id} -> 200 OK (deletes event, cascades child records, and deletes poster)
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/eventos/{event_id}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Confirm GET /api/eventos/{id} is now 404
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/eventos/{event_id}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // Confirm GET /api/eventos/{id}/imagen is now 404
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/eventos/{event_id}/imagen"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

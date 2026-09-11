@@ -22,7 +22,10 @@ fn test_money_valid_creation_and_arithmetic() {
 fn test_money_rejection_of_invalid_inputs() {
     assert!(Money::from_soles(-10.0).is_err(), "Negative soles rejected");
     assert!(Money::from_soles(f64::NAN).is_err(), "NaN rejected");
-    assert!(Money::from_soles(f64::INFINITY).is_err(), "Infinity rejected");
+    assert!(
+        Money::from_soles(f64::INFINITY).is_err(),
+        "Infinity rejected"
+    );
     assert!(
         Money::from_soles(10.555).is_err(),
         "More than 2 decimals rejected"
@@ -185,7 +188,10 @@ fn test_triangulate_edge_cases() {
         "2026-10-01T00:00:00Z".to_string(),
         "2026-10-01T00:00:00Z".to_string(),
     );
-    assert!(dup_event.is_err(), "Case-insensitive duplicate ticket type name must be rejected");
+    assert!(
+        dup_event.is_err(),
+        "Case-insensitive duplicate ticket type name must be rejected"
+    );
 
     // 3. Negative net profit (Gastos > Cobrado)
     let cobrado = Money::from_soles(200.0).unwrap();

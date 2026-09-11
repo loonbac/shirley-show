@@ -1,13 +1,9 @@
 use tempfile::NamedTempFile;
 
-use shirley_show::domain::ticketing::{
-    Event, Expense, ExpenseCategory, Money, TicketType,
-};
+use shirley_show::domain::ticketing::{Event, Expense, ExpenseCategory, Money, TicketType};
 use shirley_show::infra::sqlite::ticketing_repository::SqliteTicketingRepository;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
-use shirley_show::ports::ticketing::{
-    EventRepository, EventSummaryReader, ExpenseRepository,
-};
+use shirley_show::ports::ticketing::{EventRepository, EventSummaryReader, ExpenseRepository};
 
 #[test]
 fn test_event_repository_crud_and_status_toggle() {
@@ -161,27 +157,35 @@ fn test_event_summary_reader() {
     assert_eq!(empty_sum.aforo_proyectado, 0);
 
     // Add expenses
-    repo.create_expense(&Expense::new(
-        "g1".to_string(),
-        "evt-sum".to_string(),
-        ExpenseCategory::LocalAlquiler,
-        Money::from_soles(500.0).unwrap(),
-        "Alquiler sala".to_string(),
-        "2026-10-10".to_string(),
-        "2026-10-01T00:00:00Z".to_string(),
-        "2026-10-01T00:00:00Z".to_string(),
-    ).unwrap()).unwrap();
+    repo.create_expense(
+        &Expense::new(
+            "g1".to_string(),
+            "evt-sum".to_string(),
+            ExpenseCategory::LocalAlquiler,
+            Money::from_soles(500.0).unwrap(),
+            "Alquiler sala".to_string(),
+            "2026-10-10".to_string(),
+            "2026-10-01T00:00:00Z".to_string(),
+            "2026-10-01T00:00:00Z".to_string(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
 
-    repo.create_expense(&Expense::new(
-        "g2".to_string(),
-        "evt-sum".to_string(),
-        ExpenseCategory::SonidoLuces,
-        Money::from_soles(300.0).unwrap(),
-        "Luces".to_string(),
-        "2026-10-11".to_string(),
-        "2026-10-01T00:00:00Z".to_string(),
-        "2026-10-01T00:00:00Z".to_string(),
-    ).unwrap()).unwrap();
+    repo.create_expense(
+        &Expense::new(
+            "g2".to_string(),
+            "evt-sum".to_string(),
+            ExpenseCategory::SonidoLuces,
+            Money::from_soles(300.0).unwrap(),
+            "Luces".to_string(),
+            "2026-10-11".to_string(),
+            "2026-10-01T00:00:00Z".to_string(),
+            "2026-10-01T00:00:00Z".to_string(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
 
     // Insert entries into entradas and interesados directly via conn to simulate sales and leads
     let conn = pool.get().unwrap();
@@ -225,7 +229,9 @@ fn test_event_summary_reader() {
         [],
     ).unwrap();
 
-    let sum = repo.get_event_summary("evt-sum").expect("populated summary");
+    let sum = repo
+        .get_event_summary("evt-sum")
+        .expect("populated summary");
     assert_eq!(sum.cobrado.to_soles(), 60.0);
     assert_eq!(sum.pendiente.to_soles(), 50.0);
     assert_eq!(sum.total_proyectado.to_soles(), 110.0);

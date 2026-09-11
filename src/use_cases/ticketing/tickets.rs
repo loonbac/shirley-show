@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::domain::ticketing::ticket::Ticket;
 use crate::error::AppError;
@@ -53,7 +53,10 @@ impl<R: TicketRepository> ConfirmTicketPayment<R> {
     pub fn execute(&self, id: &str) -> Result<Ticket, AppError> {
         match self.ticket_repo.confirm_ticket_payment(id)? {
             Some(ticket) => Ok(ticket),
-            None => Err(AppError::not_found("ticket_not_found", "Entrada no encontrada")),
+            None => Err(AppError::not_found(
+                "ticket_not_found",
+                "Entrada no encontrada",
+            )),
         }
     }
 }
@@ -88,12 +91,22 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
     pub fn execute(&self, scan_token: &str) -> Result<PublicTicketDto, AppError> {
         let ticket = match self.ticket_repo.get_ticket_by_scan_token(scan_token)? {
             Some(t) => t,
-            None => return Err(AppError::not_found("ticket_not_found", "Entrada no encontrada")),
+            None => {
+                return Err(AppError::not_found(
+                    "ticket_not_found",
+                    "Entrada no encontrada",
+                ));
+            }
         };
 
         let event = match self.event_repo.get_event(&ticket.evento_id)? {
             Some(e) => e,
-            None => return Err(AppError::not_found("event_not_found", "Evento no encontrado")),
+            None => {
+                return Err(AppError::not_found(
+                    "event_not_found",
+                    "Evento no encontrado",
+                ));
+            }
         };
 
         let qr_svg = ticket.render_qr_svg();
@@ -129,7 +142,8 @@ impl<R: TicketRepository> ListTickets<R> {
         estado_pago: Option<&str>,
         tipo_entrada: Option<&str>,
     ) -> Result<Vec<Ticket>, AppError> {
-        self.ticket_repo.list_tickets(evento_id, q, estado_pago, tipo_entrada)
+        self.ticket_repo
+            .list_tickets(evento_id, q, estado_pago, tipo_entrada)
     }
 }
 
@@ -146,7 +160,10 @@ impl<R: TicketRepository> GetTicket<R> {
     pub fn execute(&self, id: &str) -> Result<Ticket, AppError> {
         match self.ticket_repo.get_ticket(id)? {
             Some(t) => Ok(t),
-            None => Err(AppError::not_found("ticket_not_found", "Entrada no encontrada")),
+            None => Err(AppError::not_found(
+                "ticket_not_found",
+                "Entrada no encontrada",
+            )),
         }
     }
 }
@@ -162,9 +179,15 @@ impl<R: TicketRepository> UpdateTicketContact<R> {
     }
 
     pub fn execute(&self, id: &str, nombre: &str, contacto: &str) -> Result<Ticket, AppError> {
-        match self.ticket_repo.update_ticket_contact(id, nombre, contacto)? {
+        match self
+            .ticket_repo
+            .update_ticket_contact(id, nombre, contacto)?
+        {
             Some(t) => Ok(t),
-            None => Err(AppError::not_found("ticket_not_found", "Entrada no encontrada")),
+            None => Err(AppError::not_found(
+                "ticket_not_found",
+                "Entrada no encontrada",
+            )),
         }
     }
 }
@@ -182,7 +205,10 @@ impl<R: TicketRepository> DeleteTicket<R> {
     pub fn execute(&self, id: &str) -> Result<(), AppError> {
         let deleted = self.ticket_repo.delete_ticket(id)?;
         if !deleted {
-            return Err(AppError::not_found("ticket_not_found", "Entrada no encontrada"));
+            return Err(AppError::not_found(
+                "ticket_not_found",
+                "Entrada no encontrada",
+            ));
         }
         Ok(())
     }

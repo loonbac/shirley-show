@@ -1,7 +1,7 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::header::CACHE_CONTROL;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::Json;
 use serde::Deserialize;
 
 use crate::domain::ticketing::ticket::{PaymentMethod, PaymentStatus};
@@ -84,10 +84,11 @@ pub async fn update_contact(
     Path(id): Path<String>,
     Json(payload): Json<UpdateTicketContactRequest>,
 ) -> Result<Json<TicketResponse>, AppError> {
-    let ticket = state
-        .ticketing
-        .update_ticket_contact
-        .execute(&id, &payload.nombre_comprador, &payload.contacto)?;
+    let ticket = state.ticketing.update_ticket_contact.execute(
+        &id,
+        &payload.nombre_comprador,
+        &payload.contacto,
+    )?;
 
     Ok(Json(TicketResponse {
         entrada: TicketDto::from_domain(&ticket, false),
@@ -128,10 +129,7 @@ pub async fn get_public_ticket(
     State(state): State<AppState>,
     Path(scan_token): Path<String>,
 ) -> Result<(HeaderMap, Json<PublicTicketDto>), AppError> {
-    let ticket = state
-        .ticketing
-        .get_public_ticket
-        .execute(&scan_token)?;
+    let ticket = state.ticketing.get_public_ticket.execute(&scan_token)?;
 
     let mut headers = HeaderMap::new();
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));

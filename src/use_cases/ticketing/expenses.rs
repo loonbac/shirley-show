@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use chrono::Utc;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::domain::ticketing::{Expense, ExpenseCategory, Money};
@@ -125,7 +125,10 @@ impl<R: ExpenseRepository> DeleteExpense<R> {
     pub fn execute(&self, id: &str) -> Result<(), AppError> {
         let deleted = self.repo.delete_expense(id)?;
         if !deleted {
-            return Err(AppError::not_found("expense_not_found", "Gasto no encontrado"));
+            return Err(AppError::not_found(
+                "expense_not_found",
+                "Gasto no encontrado",
+            ));
         }
         Ok(())
     }

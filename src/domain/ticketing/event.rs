@@ -1,6 +1,6 @@
-use std::collections::HashSet;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::domain::ticketing::money::Money;
 use crate::error::AppError;
@@ -13,11 +13,7 @@ pub struct TicketType {
 }
 
 impl TicketType {
-    pub fn new(
-        nombre: impl Into<String>,
-        precio: Money,
-        capacidad: u32,
-    ) -> Result<Self, AppError> {
+    pub fn new(nombre: impl Into<String>, precio: Money, capacidad: u32) -> Result<Self, AppError> {
         let trimmed = nombre.into().trim().to_string();
         if trimmed.is_empty() {
             return Err(AppError::validation(

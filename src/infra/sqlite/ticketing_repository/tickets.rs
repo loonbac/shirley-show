@@ -90,7 +90,8 @@ impl TicketRepository for SqliteTicketingRepository {
             "SELECT {} FROM entradas WHERE evento_id = ?1",
             TICKET_SELECT_COLUMNS
         );
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(evento_id.to_string())];
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(evento_id.to_string())];
 
         if let Some(query) = q {
             let trimmed = query.trim();
@@ -305,7 +306,7 @@ impl TicketingTransactions for SqliteTicketingRepository {
                 return Err(AppError::not_found(
                     "event_not_found",
                     "El evento especificado no existe",
-                ))
+                ));
             }
         };
 
@@ -332,7 +333,7 @@ impl TicketingTransactions for SqliteTicketingRepository {
                         input.tipo_entrada
                     ),
                     "tipo_entrada",
-                ))
+                ));
             }
         };
 
@@ -424,6 +425,26 @@ impl TicketingTransactions for SqliteTicketingRepository {
 
         tx.commit().map_err(db_err)?;
         Ok(created_tickets)
+    }
+
+    fn convert_interest(
+        &self,
+        interesado_id: &str,
+        tipo_entrada: &str,
+        cantidad: u32,
+        medio_pago: PaymentMethod,
+        estado_pago: PaymentStatus,
+        credentials: Vec<GeneratedCredentials>,
+    ) -> Result<Vec<Ticket>, AppError> {
+        super::interests::convert_interest_impl(
+            &self.pool,
+            interesado_id,
+            tipo_entrada,
+            cantidad,
+            medio_pago,
+            estado_pago,
+            credentials,
+        )
     }
 
     fn check_in(

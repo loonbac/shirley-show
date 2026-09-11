@@ -49,7 +49,11 @@ impl EventDto {
             nombre: e.nombre.clone(),
             fecha_hora: e.fecha_hora.clone(),
             lugar: e.lugar.clone(),
-            tipos_de_entrada: e.tipos_de_entrada.iter().map(TicketTypeDto::from_domain).collect(),
+            tipos_de_entrada: e
+                .tipos_de_entrada
+                .iter()
+                .map(TicketTypeDto::from_domain)
+                .collect(),
             finalizado: e.finalizado,
             imagen: e.imagen.clone(),
             fecha_creacion: e.fecha_creacion.clone(),
@@ -245,11 +249,7 @@ pub struct TicketDto {
 
 impl TicketDto {
     pub fn from_domain(t: &Ticket, include_qr: bool) -> Self {
-        let qr_svg = if include_qr {
-            t.render_qr_svg()
-        } else {
-            None
-        };
+        let qr_svg = if include_qr { t.render_qr_svg() } else { None };
         let ticket_path = format!("#/ticket/{}", t.scan_token.as_str());
 
         Self {
@@ -308,4 +308,81 @@ pub struct UpdateTicketContactRequest {
 pub struct CheckInRequest {
     pub evento_id: String,
     pub codigo: String,
+}
+
+use crate::domain::ticketing::interest::Interest;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterestDto {
+    pub id: String,
+    pub evento_id: String,
+    pub nombre: String,
+    pub contacto: String,
+    pub canal: String,
+    pub promotora: String,
+    pub personas: u32,
+    pub estado: String,
+    pub convertido_at: Option<String>,
+    pub fecha_creacion: String,
+    pub fecha_actualizacion: String,
+}
+
+impl InterestDto {
+    pub fn from_domain(i: &Interest) -> Self {
+        Self {
+            id: i.id.clone(),
+            evento_id: i.evento_id.clone(),
+            nombre: i.nombre.clone(),
+            contacto: i.contacto.clone(),
+            canal: i.canal.clone(),
+            promotora: i.promotora.clone(),
+            personas: i.personas,
+            estado: i.estado.as_str().to_string(),
+            convertido_at: i.convertido_at.clone(),
+            fecha_creacion: i.fecha_creacion.clone(),
+            fecha_actualizacion: i.fecha_actualizacion.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateInterestRequest {
+    pub nombre: String,
+    pub contacto: String,
+    pub canal: String,
+    pub promotora: String,
+    pub personas: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateInterestRequest {
+    pub nombre: String,
+    pub contacto: String,
+    pub canal: String,
+    pub promotora: String,
+    pub personas: u32,
+    pub estado: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConvertInterestRequest {
+    pub tipo_entrada: String,
+    pub cantidad: Option<u32>,
+    pub medio_pago: String,
+    pub estado_pago: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ListInterestsResponse {
+    pub interesados: Vec<InterestDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InterestResponse {
+    pub interesado: InterestDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UploadPosterResponse {
+    pub imagen: String,
 }
