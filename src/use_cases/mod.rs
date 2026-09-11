@@ -11,6 +11,7 @@ pub mod open_track_audio;
 pub mod rename_presentation;
 pub mod reorder_item;
 pub mod separate_vocals;
+pub mod ticketing;
 pub mod update_show_item;
 pub mod upload_track;
 

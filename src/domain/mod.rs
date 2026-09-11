@@ -7,6 +7,7 @@ pub mod presentation_summary;
 pub mod show_item;
 pub mod show_item_kind;
 pub mod show_item_update;
+pub mod ticketing;
 pub mod vocal_separation_mode;
 pub mod youtube_url;
 

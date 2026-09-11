@@ -9,6 +9,7 @@ use crate::infra::sqlite::connect::DbPool;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
+use crate::infra::sqlite::ticketing_repository::SqliteTicketingRepository;
 use crate::infra::vocal::{
     ProcessVocalSeparator, ProcessVocalSeparatorConfig, SshVocalSeparator, SshVocalSeparatorConfig,
 };
@@ -17,6 +18,7 @@ use crate::ports::chat_completion_provider::ChatCompletionProvider;
 use crate::ports::vocal_separator::VocalSeparator;
 use crate::ports::youtube_downloader::YoutubeDownloader;
 use crate::state::staged_audio_registry::StagedAudioRegistry;
+use crate::state::ticketing_services::TicketingServices;
 use crate::use_cases::add_lyrics::AddLyrics;
 use crate::use_cases::add_note::AddNote;
 use crate::use_cases::agent_chat::{AgentChat, AgentLimits};
@@ -67,6 +69,7 @@ pub struct AppState {
     pub separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>,
     pub agent_runtime: AgentRuntime,
     pub agent_chat: Arc<AgentChat>,
+    pub ticketing: TicketingServices,
 }
 
 impl AppState {
@@ -210,6 +213,9 @@ impl AppState {
             limits,
         };
 
+        let ticketing_repo = Arc::new(SqliteTicketingRepository::new(pool.clone()));
+        let ticketing = TicketingServices::new(ticketing_repo);
+
         Self {
             pool,
             storage,
@@ -237,6 +243,7 @@ impl AppState {
             separate_vocals,
             agent_runtime,
             agent_chat,
+            ticketing,
         }
     }
 

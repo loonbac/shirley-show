@@ -3,7 +3,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post};
 use tower_http::services::ServeDir;
 
-use crate::handlers::{agent, audio, items, presentations, static_assets};
+use crate::handlers::{agent, audio, items, presentations, static_assets, ticketing};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
@@ -48,5 +48,29 @@ pub fn create_router(state: AppState) -> Router {
             post(agent::chat).layer(DefaultBodyLimit::max(101 * 1024 * 1024)),
         )
         .route("/api/agent/gpu-status", get(agent::gpu_status))
+        .route(
+            "/api/eventos",
+            get(ticketing::events::list).post(ticketing::events::create),
+        )
+        .route(
+            "/api/eventos/{id}",
+            get(ticketing::events::get)
+                .patch(ticketing::events::update)
+                .delete(ticketing::events::delete),
+        )
+        .route("/api/eventos/{id}/finalizar", post(ticketing::events::finalize))
+        .route("/api/eventos/{id}/reabrir", post(ticketing::events::reopen))
+        .route(
+            "/api/eventos/{id}/gastos",
+            get(ticketing::expenses::list).post(ticketing::expenses::create),
+        )
+        .route(
+            "/api/gastos/{id}",
+            patch(ticketing::expenses::update).delete(ticketing::expenses::delete),
+        )
+        .route(
+            "/api/eventos/{id}/resumen",
+            get(ticketing::summary::get_summary),
+        )
         .with_state(state)
 }

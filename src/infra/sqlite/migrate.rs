@@ -5,6 +5,7 @@ use crate::error::AppError;
 use crate::infra::sqlite::connect::DbPool;
 
 const MIGRATION_0001: &str = include_str!("../../../migrations/0001_shirley_show_core.sql");
+const MIGRATION_0002: &str = include_str!("../../../migrations/0002_ticketing.sql");
 
 pub fn migrate_db(conn: &mut Connection) -> Result<(), AppError> {
     conn.execute_batch(
@@ -15,31 +16,38 @@ pub fn migrate_db(conn: &mut Connection) -> Result<(), AppError> {
     )
     .map_err(|e| AppError::Database(format!("Failed to create schema_migrations table: {e}")))?;
 
-    let applied: i32 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM schema_migrations WHERE version = 1;",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| AppError::Database(format!("Failed to query schema_migrations: {e}")))?;
+    let migrations: &[(i32, &str)] = &[
+        (1, MIGRATION_0001),
+        (2, MIGRATION_0002),
+    ];
 
-    if applied == 0 {
-        let tx = conn.transaction().map_err(|e| {
-            AppError::Database(format!("Failed to begin transaction for migration: {e}"))
-        })?;
+    for (version, sql) in migrations {
+        let applied: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = ?1;",
+                [version],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Database(format!("Failed to query schema_migrations: {e}")))?;
 
-        tx.execute_batch(MIGRATION_0001)
-            .map_err(|e| AppError::Database(format!("Failed to apply migration 0001: {e}")))?;
+        if applied == 0 {
+            let tx = conn.transaction().map_err(|e| {
+                AppError::Database(format!("Failed to begin transaction for migration {version}: {e}"))
+            })?;
 
-        tx.execute(
-            "INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?1);",
-            [Utc::now().to_rfc3339()],
-        )
-        .map_err(|e| AppError::Database(format!("Failed to record migration version 1: {e}")))?;
+            tx.execute_batch(sql)
+                .map_err(|e| AppError::Database(format!("Failed to apply migration {version}: {e}")))?;
 
-        tx.commit().map_err(|e| {
-            AppError::Database(format!("Failed to commit migration transaction: {e}"))
-        })?;
+            tx.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2);",
+                rusqlite::params![version, Utc::now().to_rfc3339()],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to record migration version {version}: {e}")))?;
+
+            tx.commit().map_err(|e| {
+                AppError::Database(format!("Failed to commit migration transaction {version}: {e}"))
+            })?;
+        }
     }
 
     Ok(())
