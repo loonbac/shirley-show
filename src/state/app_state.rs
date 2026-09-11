@@ -1,14 +1,18 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::agent::tool_dispatcher::AgentToolDispatcher;
+use crate::config::DEFAULT_GROQ_MODEL;
 use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use crate::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use crate::infra::sqlite::connect::DbPool;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
+use crate::ports::chat_completion_provider::ChatCompletionProvider;
 use crate::use_cases::add_lyrics::AddLyrics;
 use crate::use_cases::add_note::AddNote;
+use crate::use_cases::agent_chat::{AgentChat, AgentLimits};
 use crate::use_cases::create_presentation::CreatePresentation;
 use crate::use_cases::delete_item::DeleteItem;
 use crate::use_cases::delete_presentation::DeletePresentation;
@@ -19,6 +23,12 @@ use crate::use_cases::rename_presentation::RenamePresentation;
 use crate::use_cases::reorder_item::ReorderItem;
 use crate::use_cases::update_show_item::UpdateShowItem;
 use crate::use_cases::upload_track::UploadTrack;
+
+#[derive(Clone)]
+pub struct AgentRuntime {
+    pub agent_chat: Arc<AgentChat>,
+    pub limits: AgentLimits,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -40,6 +50,8 @@ pub struct AppState {
     pub update_show_item: Arc<UpdateShowItem<SqliteShowItemRepository, SqliteShowItemRepository>>,
     pub delete_item: Arc<DeleteItem<SqliteShowItemRepository, SqliteCleanupRepository>>,
     pub open_track_audio: Arc<OpenTrackAudio<SqliteShowItemRepository>>,
+    pub agent_runtime: AgentRuntime,
+    pub agent_chat: Arc<AgentChat>,
 }
 
 impl AppState {
@@ -56,29 +68,83 @@ impl AppState {
         let item_repo = Arc::new(SqliteShowItemRepository::new(pool.clone()));
         let cleanup_repo = Arc::new(SqliteCleanupRepository::new(pool.clone()));
 
+        let list_presentations = Arc::new(ListPresentations::new(summary_repo.clone()));
+        let create_presentation = Arc::new(CreatePresentation::new(pres_repo.clone()));
+        let get_presentation = Arc::new(GetPresentation::new(pres_repo.clone()));
+        let rename_presentation = Arc::new(RenamePresentation::new(pres_repo.clone()));
+        let delete_presentation = Arc::new(DeletePresentation::new(pres_repo));
+        let add_lyrics = Arc::new(AddLyrics::new(item_repo.clone()));
+        let add_note = Arc::new(AddNote::new(item_repo.clone()));
+        let upload_track = Arc::new(UploadTrack::new(item_repo.clone(), storage.clone()));
+        let reorder_item = Arc::new(ReorderItem::new(item_repo.clone()));
+        let update_show_item = Arc::new(UpdateShowItem::new(item_repo.clone(), item_repo.clone()));
+        let delete_item = Arc::new(DeleteItem::new(
+            item_repo.clone(),
+            storage.clone(),
+            cleanup_repo.clone(),
+        ));
+        let open_track_audio = Arc::new(OpenTrackAudio::new(item_repo.clone(), storage.clone()));
+
+        let dispatcher = AgentToolDispatcher::from_components(
+            create_presentation.clone(),
+            list_presentations.clone(),
+            get_presentation.clone(),
+            add_lyrics.clone(),
+            add_note.clone(),
+            upload_track.clone(),
+            item_repo.clone(),
+        );
+
+        let limits = AgentLimits::default();
+        let agent_chat = Arc::new(AgentChat::new(
+            None,
+            dispatcher,
+            limits.clone(),
+            DEFAULT_GROQ_MODEL.to_string(),
+        ));
+
+        let agent_runtime = AgentRuntime {
+            agent_chat: agent_chat.clone(),
+            limits,
+        };
+
         Self {
             pool,
-            storage: storage.clone(),
+            storage,
             frontend_dir: PathBuf::from("frontend"),
-            item_repo: item_repo.clone(),
-            summary_repo: summary_repo.clone(),
-            cleanup_repo: cleanup_repo.clone(),
-            list_presentations: Arc::new(ListPresentations::new(summary_repo)),
-            create_presentation: Arc::new(CreatePresentation::new(pres_repo.clone())),
-            get_presentation: Arc::new(GetPresentation::new(pres_repo.clone())),
-            rename_presentation: Arc::new(RenamePresentation::new(pres_repo.clone())),
-            delete_presentation: Arc::new(DeletePresentation::new(pres_repo)),
-            add_lyrics: Arc::new(AddLyrics::new(item_repo.clone())),
-            add_note: Arc::new(AddNote::new(item_repo.clone())),
-            upload_track: Arc::new(UploadTrack::new(item_repo.clone(), storage.clone())),
-            reorder_item: Arc::new(ReorderItem::new(item_repo.clone())),
-            update_show_item: Arc::new(UpdateShowItem::new(item_repo.clone(), item_repo.clone())),
-            delete_item: Arc::new(DeleteItem::new(
-                item_repo.clone(),
-                storage.clone(),
-                cleanup_repo,
-            )),
-            open_track_audio: Arc::new(OpenTrackAudio::new(item_repo, storage)),
+            item_repo,
+            summary_repo,
+            cleanup_repo,
+            list_presentations,
+            create_presentation,
+            get_presentation,
+            rename_presentation,
+            delete_presentation,
+            add_lyrics,
+            add_note,
+            upload_track,
+            reorder_item,
+            update_show_item,
+            delete_item,
+            open_track_audio,
+            agent_runtime,
+            agent_chat,
         }
+    }
+
+    pub fn with_agent_provider(
+        mut self,
+        provider: Option<Arc<dyn ChatCompletionProvider>>,
+        limits: AgentLimits,
+        model: String,
+    ) -> Self {
+        let dispatcher = AgentToolDispatcher::from_state(&self);
+        let agent_chat = Arc::new(AgentChat::new(provider, dispatcher, limits.clone(), model));
+        self.agent_runtime = AgentRuntime {
+            agent_chat: agent_chat.clone(),
+            limits,
+        };
+        self.agent_chat = agent_chat;
+        self
     }
 }

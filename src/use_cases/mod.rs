@@ -1,5 +1,6 @@
 pub mod add_lyrics;
 pub mod add_note;
+pub mod agent_chat;
 pub mod create_presentation;
 pub mod delete_item;
 pub mod delete_presentation;
@@ -13,6 +14,7 @@ pub mod upload_track;
 
 pub use add_lyrics::AddLyrics;
 pub use add_note::AddNote;
+pub use agent_chat::{AgentChat, AgentChatInput, AgentChatOutput, AgentLimits};
 pub use create_presentation::CreatePresentation;
 pub use delete_item::{DeleteItem, DeleteItemOutput};
 pub use delete_presentation::DeletePresentation;

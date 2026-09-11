@@ -2,11 +2,76 @@ use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+pub const DEFAULT_GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
+pub const DEFAULT_GROQ_MODEL: &str = "llama-3.3-70b-versatile";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroqConfig {
+    pub api_key: Option<String>,
+    pub base_url: String,
+    pub model: String,
+}
+
+impl Default for GroqConfig {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            base_url: DEFAULT_GROQ_BASE_URL.to_string(),
+            model: DEFAULT_GROQ_MODEL.to_string(),
+        }
+    }
+}
+
+impl GroqConfig {
+    pub fn normalize(&mut self) {
+        self.api_key = self.api_key.take().and_then(|k| {
+            let trimmed = k.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+
+        let mut trimmed_url = self.base_url.trim();
+        while trimmed_url.ends_with('/') {
+            trimmed_url = &trimmed_url[..trimmed_url.len() - 1];
+        }
+        if trimmed_url.is_empty() {
+            self.base_url = DEFAULT_GROQ_BASE_URL.to_string();
+        } else {
+            self.base_url = trimmed_url.to_string();
+        }
+
+        let trimmed_model = self.model.trim();
+        if trimmed_model.is_empty() {
+            self.model = DEFAULT_GROQ_MODEL.to_string();
+        } else {
+            self.model = trimmed_model.to_string();
+        }
+    }
+
+    pub fn from_env() -> Self {
+        let api_key = env::var("GROQ_API_KEY").ok();
+        let base_url = env::var("GROQ_BASE_URL").unwrap_or_else(|_| DEFAULT_GROQ_BASE_URL.to_string());
+        let model = env::var("GROQ_MODEL").unwrap_or_else(|_| DEFAULT_GROQ_MODEL.to_string());
+
+        let mut config = Self {
+            api_key,
+            base_url,
+            model,
+        };
+        config.normalize();
+        config
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bind_addr: SocketAddr,
     pub data_dir: PathBuf,
     pub frontend_dir: PathBuf,
+    pub groq: GroqConfig,
 }
 
 impl Config {
@@ -24,10 +89,13 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("frontend"));
 
+        let groq = GroqConfig::from_env();
+
         Ok(Self {
             bind_addr,
             data_dir,
             frontend_dir,
+            groq,
         })
     }
 }

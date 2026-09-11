@@ -3,7 +3,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post};
 use tower_http::services::ServeDir;
 
-use crate::handlers::{audio, items, presentations, static_assets};
+use crate::handlers::{agent, audio, items, presentations, static_assets};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
@@ -42,6 +42,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/tracks/{id}/audio",
             get(audio::stream::stream).head(audio::stream::stream),
+        )
+        .route(
+            "/api/agent/chat",
+            post(agent::chat).layer(DefaultBodyLimit::max(101 * 1024 * 1024)),
         )
         .with_state(state)
 }

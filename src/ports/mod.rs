@@ -1,3 +1,4 @@
+pub mod chat_completion_provider;
 pub mod cleanup_queue;
 pub mod presentation_reader;
 pub mod presentation_summary_reader;
@@ -5,6 +6,7 @@ pub mod presentation_writer;
 pub mod show_item_reader;
 pub mod show_item_writer;
 
+pub use chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
 pub use cleanup_queue::CleanupQueue;
 pub use presentation_reader::PresentationReader;
 pub use presentation_summary_reader::PresentationSummaryReader;

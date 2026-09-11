@@ -1,3 +1,5 @@
+pub mod agent_message;
+pub mod agent_tool;
 pub mod audio_format;
 pub mod move_direction;
 pub mod presentation;
@@ -6,6 +8,8 @@ pub mod show_item;
 pub mod show_item_kind;
 pub mod show_item_update;
 
+pub use agent_message::{AgentMessage, CompletionResponse, HistoryMessage};
+pub use agent_tool::{AgentNotice, ToolAction, ToolCall, ToolDefinition};
 pub use audio_format::AudioFormat;
 pub use move_direction::MoveDirection;
 pub use presentation::Presentation;

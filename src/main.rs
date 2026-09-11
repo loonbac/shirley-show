@@ -4,13 +4,16 @@ use std::sync::Arc;
 use shirley_show::config::Config;
 use shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use shirley_show::infra::filesystem::reconcile_audio_files::reconcile_audio_files;
+use shirley_show::infra::groq::client::GroqClient;
 use shirley_show::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
 use shirley_show::router::create_router;
 use shirley_show::state::AppState;
+use shirley_show::use_cases::agent_chat::AgentLimits;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenvy::dotenv().ok();
     let config = Config::from_env().map_err(|e| format!("Config error: {e}"))?;
 
     eprintln!("====================================================================");
@@ -44,6 +47,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = AppState::new_with_items(pool, storage);
     state.frontend_dir = config.frontend_dir;
+
+    if config.groq.api_key.is_some() {
+        match GroqClient::new(config.groq.clone()) {
+            Ok(client) => {
+                state = state.with_agent_provider(
+                    Some(Arc::new(client)),
+                    AgentLimits::default(),
+                    config.groq.model.clone(),
+                );
+                println!("Asistente Shirley configurada con modelo {}", config.groq.model);
+            }
+            Err(e) => {
+                eprintln!("Aviso: No se pudo inicializar el cliente de Groq: {e}");
+            }
+        }
+    } else {
+        println!("Asistente Shirley en modo no configurado (GROQ_API_KEY no detectada).");
+    }
 
     let app = create_router(state);
 
