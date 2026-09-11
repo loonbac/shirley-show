@@ -5,9 +5,12 @@ import { createIcon } from '../atoms/icon.js';
  * Creates the golden typing indicator displayed during active in-flight requests.
  * Complies with aria-live polite region accessibility requirements.
  *
- * @returns {{ el: HTMLElement }}
+ * @param {{ label?: string }} [options]
+ * @returns {{ el: HTMLElement, setLabel: (newLabel: string) => void }}
  */
-export function createAgentTypingIndicator() {
+export function createAgentTypingIndicator(options = {}) {
+  const initialLabel = options.label || 'Ressy está pensando...';
+
   const avatar = createElement('div', { class: 'agent-message-avatar' }, [
     createIcon({ name: 'sparkles', size: 'sm' }),
   ]);
@@ -22,7 +25,7 @@ export function createAgentTypingIndicator() {
     dot3,
   ]);
 
-  const textLabel = createElement('span', { class: 'agent-typing-label' }, ['Ressy está pensando...']);
+  const textLabel = createElement('span', { class: 'agent-typing-label' }, [initialLabel]);
 
   const bubble = createElement('div', { class: 'agent-typing-bubble' }, [
     dotsContainer,
@@ -35,10 +38,16 @@ export function createAgentTypingIndicator() {
       class: 'agent-typing-indicator',
       role: 'status',
       'aria-live': 'polite',
-      'aria-label': 'Ressy está pensando...',
+      'aria-label': initialLabel,
     },
     [avatar, bubble]
   );
 
-  return { el };
+  function setLabel(newLabel) {
+    if (!newLabel || typeof newLabel !== 'string') return;
+    textLabel.textContent = newLabel;
+    el.setAttribute('aria-label', newLabel);
+  }
+
+  return { el, setLabel };
 }

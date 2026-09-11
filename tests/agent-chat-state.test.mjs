@@ -20,6 +20,12 @@ const { formatBytes } = await import(pathToFileURL(bytesFormatModulePath).href);
 const agentApiModulePath = resolve(process.cwd(), 'frontend/js/data/agent-chat-api.js');
 const { sendAgentChatMessage, validateAudioAttachment } = await import(pathToFileURL(agentApiModulePath).href);
 
+const ytUrlModulePath = resolve(process.cwd(), 'frontend/js/utils/validation/contains-youtube-url.js');
+const { containsYouTubeUrl } = await import(pathToFileURL(ytUrlModulePath).href);
+
+const unrelatedModulePath = resolve(process.cwd(), 'frontend/js/utils/validation/is-staged-audio-unrelated.js');
+const { isStagedAudioUnrelated } = await import(pathToFileURL(unrelatedModulePath).href);
+
 console.log('Running Agent Chat State and API Client Unit Tests...');
 
 // 1. Format bytes utility
@@ -322,6 +328,134 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
     assert.equal(state.get().notice.code, code);
   }
   console.log('✓ 9. resolveTurn preserves draft on provider notices (provider_auth, rate_limited, unavailable, timeout)');
+}
+
+// 10. containsYouTubeUrl pure utility
+{
+  assert.equal(containsYouTubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), true);
+  assert.equal(containsYouTubeUrl('Mira este video: http://youtu.be/dQw4w9WgXcQ y agrégalo'), true);
+  assert.equal(containsYouTubeUrl('https://m.youtube.com/shorts/dQw4w9WgXcQ'), true);
+  assert.equal(containsYouTubeUrl('https://youtube.com/watch?v=12345678901&list=PL123'), true);
+
+  // Negative cases: hosts parecidos, scheme inválido o simple mención
+  assert.equal(containsYouTubeUrl('https://notyoutube.com/watch?v=dQw4w9WgXcQ'), false);
+  assert.equal(containsYouTubeUrl('https://youtube.com.attacker.com/watch?v=dQw4w9WgXcQ'), false);
+  assert.equal(containsYouTubeUrl('Me gusta ver videos en youtube pero no tengo url'), false);
+  assert.equal(containsYouTubeUrl('ftp://youtube.com/watch?v=dQw4w9WgXcQ'), false);
+  assert.equal(containsYouTubeUrl(''), false);
+  assert.equal(containsYouTubeUrl(null), false);
+  console.log('✓ 10. containsYouTubeUrl detects authentic YouTube URLs and rejects spoofed hosts');
+}
+
+// 11. isStagedAudioUnrelated pure utility
+{
+  // Related messages (preserve stagedAudioId)
+  assert.equal(isStagedAudioUnrelated('Agrégalo a Peña del Viernes', null), false);
+  assert.equal(isStagedAudioUnrelated('Ponlo en el show acústico', null), false);
+  assert.equal(isStagedAudioUnrelated('añádelo', null), false);
+  assert.equal(isStagedAudioUnrelated('sí, como pista del show 1', null), false);
+
+  // Unrelated messages (clear stagedAudioId)
+  assert.equal(isStagedAudioUnrelated('Agrégalo', { name: 'otro.mp3' }), true, 'New attachment clears staged');
+  assert.equal(isStagedAudioUnrelated('Descarga https://www.youtube.com/watch?v=dQw4w9WgXcQ', null), true, 'New YT URL clears staged');
+  assert.equal(isStagedAudioUnrelated('Crea una nueva presentación para mañana', null), true, 'Creating presentation clears staged');
+  assert.equal(isStagedAudioUnrelated('Lista mis presentaciones disponibles', null), true, 'Listing presentations clears staged');
+  assert.equal(isStagedAudioUnrelated('Agrega la nota afinar en Mi al show', null), true, 'Add note clears staged');
+  assert.equal(isStagedAudioUnrelated('Agrega la letra estribillo al show', null), true, 'Add lyrics clears staged');
+  console.log('✓ 11. isStagedAudioUnrelated classifies follow-ups vs explicit unrelated actions');
+}
+
+// 12. stagedAudioId lifecycle in createChatState (ephemeral memory, zero localStorage)
+{
+  const state = createChatState();
+  assert.equal(state.get().stagedAudioId, null);
+
+  // Response with staged_audio_id sets it in memory
+  state.resolveTurn({
+    generationId: 0, // initial turn
+    response: {
+      message: 'Audio descargado y listo. ¿A qué show lo agrego?',
+      actions_taken: [{ tool: 'download_youtube_track', status: 'success' }],
+      staged_audio_id: 'staged-yt-abc-123',
+    },
+  });
+  assert.equal(state.get().stagedAudioId, 'staged-yt-abc-123');
+
+  // Ephemeral verification: localStorage must NEVER be touched
+  assert.equal(typeof globalThis.localStorage, 'undefined', 'localStorage must not be used');
+
+  // beginTurn with related message keeps stagedAudioId
+  state.beginTurn({ message: 'Agrégalo al show Acústico' });
+  assert.equal(state.get().stagedAudioId, 'staged-yt-abc-123', 'stagedAudioId preserved across related turn');
+
+  // Resolving with add_track_from_staged success clears stagedAudioId
+  const turnAdd = state.beginTurn({ message: 'Agrégalo' });
+  state.resolveTurn({
+    generationId: turnAdd.generationId,
+    response: {
+      message: 'Pista agregada al show.',
+      actions_taken: [{ tool: 'add_track_from_staged', status: 'success' }],
+      staged_audio_id: null,
+    },
+  });
+  assert.equal(state.get().stagedAudioId, null, 'stagedAudioId cleared after add_track_from_staged');
+
+  // Starting an unrelated command also clears stagedAudioId
+  const turn3 = state.beginTurn({ message: 'Descarga otro video' });
+  state.resolveTurn({
+    generationId: turn3.generationId,
+    response: {
+      message: 'Audio listo.',
+      actions_taken: [{ tool: 'download_youtube_track', status: 'success' }],
+      staged_audio_id: 'staged-yt-def-456',
+    },
+  });
+  assert.equal(state.get().stagedAudioId, 'staged-yt-def-456');
+
+  state.beginTurn({ message: 'Crea una presentación para el sábado' });
+  assert.equal(state.get().stagedAudioId, null, 'Unrelated message clears pending stagedAudioId');
+  console.log('✓ 12. stagedAudioId lifecycle (ephemeral memory, retained across turns, cleared on consume or unrelated)');
+}
+
+// 13. sendAgentChatMessage includes staged_audio_id in JSON and FormData
+{
+  let lastFetchUrl = null;
+  let lastFetchOpts = null;
+  globalThis.fetch = async (url, opts) => {
+    lastFetchUrl = url;
+    lastFetchOpts = opts;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({
+        message: 'OK',
+        actions_taken: [],
+        active_presentation_id: null,
+        staged_audio_id: 'staged-yt-test',
+      }),
+    };
+  };
+
+  // JSON request
+  await sendAgentChatMessage({
+    message: 'Agrégalo',
+    stagedAudioId: 'staged-yt-test-json',
+  });
+  const parsedBody = JSON.parse(lastFetchOpts.body);
+  assert.equal(parsedBody.staged_audio_id, 'staged-yt-test-json');
+
+  // FormData request
+  const dummyAttachment = { name: 'audio.mp3', size: 1024 };
+  await sendAgentChatMessage({
+    message: 'Con attachment',
+    attachment: dummyAttachment,
+    stagedAudioId: 'staged-yt-test-multipart',
+  });
+  assert.ok(lastFetchOpts.body instanceof FormData);
+  assert.equal(lastFetchOpts.body.get('staged_audio_id'), 'staged-yt-test-multipart');
+
+  console.log('✓ 13. sendAgentChatMessage propagates staged_audio_id in JSON and FormData');
 }
 
 console.log('All Agent Chat State and API Client unit tests passed!');

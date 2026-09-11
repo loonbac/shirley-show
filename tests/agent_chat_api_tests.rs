@@ -1,4 +1,6 @@
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -6,6 +8,8 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
+
+use shirley_show::config::Config;
 
 use shirley_show::domain::agent_message::CompletionResponse;
 use shirley_show::domain::agent_tool::ToolCall;
@@ -521,4 +525,248 @@ async fn test_chat_api_multipart_attachment_exceeding_100_mib_rejected_400() {
         remaining_staging, 0,
         "Staging files must be purged after 100 MiB rejection"
     );
+}
+
+static CONFIG_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn test_config_reads_yt_dlp_bin_and_agent_timeout_secs() {
+    let _guard = CONFIG_ENV_MUTEX.lock().unwrap();
+
+    unsafe {
+        // 1. Defaults when unset
+        std::env::remove_var("YT_DLP_BIN");
+        std::env::remove_var("SHIRLEY_AGENT_TIMEOUT_SECS");
+        let cfg = Config::from_env().expect("config should load with defaults");
+        assert_eq!(cfg.yt_dlp_bin, None);
+        assert_eq!(cfg.agent_timeout_secs, 120);
+
+        // 2. Custom values with trimming
+        std::env::set_var("YT_DLP_BIN", "  /custom/bin/yt-dlp  ");
+        std::env::set_var("SHIRLEY_AGENT_TIMEOUT_SECS", " 90 ");
+        let cfg2 = Config::from_env().expect("config should load with custom env");
+        assert_eq!(cfg2.yt_dlp_bin, Some(PathBuf::from("/custom/bin/yt-dlp")));
+        assert_eq!(cfg2.agent_timeout_secs, 90);
+
+        // 3. Empty string for YT_DLP_BIN falls back to None (PATH search)
+        std::env::set_var("YT_DLP_BIN", "   ");
+        let cfg3 = Config::from_env().expect("empty yt_dlp_bin should parse as None");
+        assert_eq!(cfg3.yt_dlp_bin, None);
+
+        // 4. Invalid SHIRLEY_AGENT_TIMEOUT_SECS values rejected
+        std::env::set_var("SHIRLEY_AGENT_TIMEOUT_SECS", "0");
+        assert!(Config::from_env().is_err(), "0 seconds timeout must be rejected");
+
+        std::env::set_var("SHIRLEY_AGENT_TIMEOUT_SECS", "-5");
+        assert!(Config::from_env().is_err(), "negative timeout must be rejected");
+
+        std::env::set_var("SHIRLEY_AGENT_TIMEOUT_SECS", "invalid_number");
+        assert!(Config::from_env().is_err(), "non-numeric timeout must be rejected");
+
+        // Clean up
+        std::env::remove_var("YT_DLP_BIN");
+        std::env::remove_var("SHIRLEY_AGENT_TIMEOUT_SECS");
+    }
+}
+
+#[tokio::test]
+async fn test_chat_api_json_accepts_and_roundtrips_staged_audio_id() {
+    let (app, _state, _tmp) = setup_app_with_provider(CompletionResponse {
+        content: Some("¿A qué presentación deseas agregarlo?".to_string()),
+        tool_calls: vec![],
+    });
+
+    // Valid staged_audio_id forwarded and preserved in output
+    let payload = json!({
+        "message": "Audio listo sin destino",
+        "staged_audio_id": "staged-yt-12345",
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["staged_audio_id"], "staged-yt-12345");
+
+    // staged_audio_id exceeding 128 characters rejected 400
+    let oversized_staged_id = "s".repeat(129);
+    let invalid_payload = json!({
+        "message": "Hola",
+        "staged_audio_id": oversized_staged_id,
+    });
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&invalid_payload).unwrap()))
+        .unwrap();
+
+    let res2 = app.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::BAD_REQUEST);
+    let body2 = res2.into_body().collect().await.unwrap().to_bytes();
+    let json2: Value = serde_json::from_slice(&body2).unwrap();
+    assert_eq!(json2["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_accepts_and_roundtrips_staged_audio_id() {
+    let (app, _state, _tmp) = setup_app_with_provider(CompletionResponse {
+        content: Some("Audio staged recibido en multipart".to_string()),
+        tool_calls: vec![],
+    });
+
+    let boundary = "----WebKitFormBoundaryStagedAudio";
+    let body_bytes = build_multipart(
+        boundary,
+        &[
+            ("message", "¿En qué show lo pongo?"),
+            ("staged_audio_id", "staged-multipart-uuid-777"),
+        ],
+        &[],
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["staged_audio_id"], "staged-multipart-uuid-777");
+
+    // Oversized staged_audio_id in multipart rejected 400
+    let oversized_staged_id = "m".repeat(129);
+    let invalid_bytes = build_multipart(
+        boundary,
+        &[
+            ("message", "Hola"),
+            ("staged_audio_id", &oversized_staged_id),
+        ],
+        &[],
+    );
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(invalid_bytes))
+        .unwrap();
+
+    let res2 = app.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::BAD_REQUEST);
+}
+
+struct DelayedChainedProvider {
+    call_count: std::sync::atomic::AtomicUsize,
+}
+
+impl ChatCompletionProvider for DelayedChainedProvider {
+    fn complete(
+        &self,
+        _request: CompletionRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        CompletionResponse,
+                        shirley_show::infra::groq::error::ProviderError,
+                    >,
+                > + Send,
+        >,
+    > {
+        let count = self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Box::pin(async move {
+            if count == 0 {
+                // Turn 1: create presentation
+                Ok(CompletionResponse {
+                    content: None,
+                    tool_calls: vec![ToolCall {
+                        id: "call_create_1".to_string(),
+                        name: "create_presentation".to_string(),
+                        arguments: json!({ "name": "Show Deadline Test" }).to_string(),
+                    }],
+                })
+            } else {
+                // Turn 2: sleep longer than deadline
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                Ok(CompletionResponse {
+                    content: Some("Respuesta tardía que no debe llegar".to_string()),
+                    tool_calls: vec![],
+                })
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_chat_api_unified_deadline_preserves_actions_and_returns_200_on_timeout() {
+    let (_app, state, _tmp) = setup_test_app();
+    let provider = Arc::new(DelayedChainedProvider {
+        call_count: std::sync::atomic::AtomicUsize::new(0),
+    });
+
+    // Configure a 150ms timeout: enough time for iteration 0 tool execution,
+    // but timing out during iteration 1 (600ms sleep)
+    let limits = AgentLimits {
+        max_iterations: 5,
+        request_timeout: Duration::from_millis(150),
+    };
+    let state = state.with_agent_provider(
+        Some(provider),
+        limits,
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state);
+
+    let payload = json!({
+        "message": "Crea el show Show Deadline Test y haz algo lento",
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "Timeout must return HTTP 200");
+
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    // 1. Notice with code agent_timeout and retryable
+    assert_eq!(json["notice"]["code"], "agent_timeout");
+    assert_eq!(json["notice"]["retryable"], true);
+
+    // 2. Actions committed before timeout MUST be preserved!
+    let actions = json["actions_taken"].as_array().expect("actions_taken array");
+    assert_eq!(actions.len(), 1, "create_presentation must be preserved in actions_taken");
+    assert_eq!(actions[0]["tool"], "create_presentation");
+
+    // 3. Message reports committed actions and timeout notice without hardcoded "(30 s)"
+    let message = json["message"].as_str().expect("message string");
+    assert!(
+        message.contains("Show Deadline Test") || message.contains("creada") || message.contains("creé"),
+        "Message must reflect committed action"
+    );
+    assert!(!message.contains("(30 s)"), "Message must not hardcode (30 s)");
 }

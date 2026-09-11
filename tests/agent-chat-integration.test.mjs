@@ -20,6 +20,15 @@ const { createPresentationsController } = await import(pathToFileURL(presCtrlMod
 const detailCtrlModulePath = resolve(process.cwd(), 'frontend/js/controllers/presentation-detail-controller.js');
 const { createPresentationDetailController } = await import(pathToFileURL(detailCtrlModulePath).href);
 
+const chatStateModulePath = resolve(process.cwd(), 'frontend/js/core/state/chat-state.js');
+const { createChatState } = await import(pathToFileURL(chatStateModulePath).href);
+
+const chatControllerModulePath = resolve(process.cwd(), 'frontend/js/controllers/agent-chat-controller.js');
+const { createAgentChatController } = await import(pathToFileURL(chatControllerModulePath).href);
+
+const chatPanelModulePath = resolve(process.cwd(), 'frontend/js/components/organisms/agent-chat-panel.js');
+const { createAgentChatPanel } = await import(pathToFileURL(chatPanelModulePath).href);
+
 console.log('Running Agent Chat Route and Composition Integration Tests...');
 
 // 1. Catalog route publishing and reactive refresh subscription
@@ -159,6 +168,84 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   stageModeSignal.set(false);
   assert.equal(stageModeSignal.get(), false);
   console.log('✓ 3. Stage mode signal toggles correctly');
+}
+
+// 4. TRIANGULATE: Network error preserves stagedAudioId for retry
+{
+  const state = createChatState({
+    stagedAudioId: 'staged-yt-preserve-123',
+  });
+
+  let attemptedPayload = null;
+  globalThis.fetch = async (url, opts) => {
+    attemptedPayload = JSON.parse(opts.body);
+    throw new Error('Failed to fetch'); // Network error simulation
+  };
+
+  const ctrl = createAgentChatController({ chatState: state });
+  state.open();
+  state.setDraft('Reintentar agregar pista');
+
+  // Send fails
+  await ctrl.sendAndOpen('Reintentar agregar pista');
+
+  // 1. Pending is cleared
+  assert.equal(state.get().pending, false);
+  // 2. stagedAudioId MUST be preserved for safe retry!
+  assert.equal(
+    state.get().stagedAudioId,
+    'staged-yt-preserve-123',
+    'stagedAudioId must be preserved across network errors'
+  );
+  // 3. Sent payload forwarded the staged_audio_id
+  assert.equal(attemptedPayload.staged_audio_id, 'staged-yt-preserve-123');
+
+  ctrl.destroy();
+  console.log('✓ 4. Network error preserves stagedAudioId for retry');
+}
+
+// 5. TRIANGULATE: Teardown clears typing indicator and restores composer
+{
+  const panel = createAgentChatPanel({
+    isOpen: true,
+    activeContext: null,
+    messages: [{ role: 'user', content: 'Descarga https://www.youtube.com/watch?v=dQw4w9WgXcQ' }],
+    pending: true,
+    pendingLabel: 'Ressy está descargando el audio…',
+    draft: 'Borrador',
+    onClose: () => {},
+    onSend: () => {},
+  });
+
+  // While pending: indicator present and textarea disabled
+  assert.ok(panel.transcriptEl.querySelector('.agent-typing-indicator') !== null);
+  assert.equal(panel.composer.textareaEl.hasAttribute('disabled'), true);
+
+  // Teardown / completion removes indicator and restores composer
+  panel.update({ pending: false });
+  assert.equal(panel.transcriptEl.querySelector('.agent-typing-indicator'), null);
+  assert.equal(panel.composer.textareaEl.hasAttribute('disabled'), false);
+
+  panel.destroy();
+  console.log('✓ 5. Teardown clears typing indicator and restores composer');
+}
+
+// 6. TRIANGULATE: Spoofed or similar host (notyoutube.com) retains general label
+{
+  const state = createChatState();
+  const turn = state.beginTurn({
+    message: 'Descarga https://notyoutube.com/watch?v=fake1234567',
+  });
+
+  // General thinking label must be retained, NOT "descargando el audio…"
+  assert.notEqual(state.get().pendingLabel, 'Ressy está descargando el audio…');
+  assert.ok(
+    state.get().pendingLabel.includes('pensando'),
+    'Messages with similar or non-youtube hosts must keep general thinking label'
+  );
+
+  state.cancelTurn();
+  console.log('✓ 6. Spoofed or non-youtube host retains general thinking label');
 }
 
 console.log('All Agent Chat Route and Composition integration tests passed!');

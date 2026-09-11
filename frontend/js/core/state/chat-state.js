@@ -1,3 +1,6 @@
+import { containsYouTubeUrl } from '../../utils/validation/contains-youtube-url.js';
+import { isStagedAudioUnrelated } from '../../utils/validation/is-staged-audio-unrelated.js';
+
 /**
  * Creates the in-memory chat state manager for Shirley Show AI Agent.
  * Completely decoupled from DOM nodes.
@@ -9,8 +12,10 @@ export function createChatState(initialState = {}) {
   let state = {
     isOpen: false,
     pending: false,
+    pendingLabel: 'Ressy está pensando...',
     draft: '',
     attachment: null,
+    stagedAudioId: null,
     messages: [],
     activeContext: null,
     notice: null,
@@ -69,6 +74,16 @@ export function createChatState(initialState = {}) {
     notify();
   }
 
+  function setStagedAudioId(id) {
+    state = { ...state, stagedAudioId: typeof id === 'string' ? id : null };
+    notify();
+  }
+
+  function clearStagedAudioId() {
+    state = { ...state, stagedAudioId: null };
+    notify();
+  }
+
   function setRouteContext(context) {
     state = {
       ...state,
@@ -77,7 +92,7 @@ export function createChatState(initialState = {}) {
     notify();
   }
 
-  function beginTurn({ message, attachment = null }) {
+  function beginTurn({ message, attachment = null, pendingLabel = null }) {
     if (state.pending && currentAbortController) {
       currentAbortController.abort();
     }
@@ -85,6 +100,20 @@ export function createChatState(initialState = {}) {
     currentGenerationId += 1;
     const generationId = currentGenerationId;
     currentAbortController = new AbortController();
+
+    let activeStagedAudioId = state.stagedAudioId;
+    if (activeStagedAudioId && isStagedAudioUnrelated(message, attachment)) {
+      activeStagedAudioId = null;
+    }
+
+    let turnPendingLabel = pendingLabel;
+    if (!turnPendingLabel) {
+      if (containsYouTubeUrl(message)) {
+        turnPendingLabel = 'Ressy está descargando el audio…';
+      } else {
+        turnPendingLabel = 'Ressy está pensando...';
+      }
+    }
 
     const userMessage = {
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `msg-${Date.now()}-${Math.random()}`,
@@ -97,6 +126,8 @@ export function createChatState(initialState = {}) {
     state = {
       ...state,
       pending: true,
+      pendingLabel: turnPendingLabel,
+      stagedAudioId: activeStagedAudioId,
       notice: null,
       messages: [...state.messages, userMessage],
     };
@@ -116,6 +147,14 @@ export function createChatState(initialState = {}) {
 
     const actions = (response && response.actions_taken) || [];
     const hasConsumedTrack = actions.some((act) => act.tool === 'add_track_from_staged' && act.status === 'success');
+
+    let nextStagedAudioId = state.stagedAudioId;
+    if (response && response.staged_audio_id !== undefined) {
+      nextStagedAudioId = response.staged_audio_id;
+    }
+    if (hasConsumedTrack) {
+      nextStagedAudioId = null;
+    }
 
     const assistantMessage = {
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `msg-${Date.now()}-${Math.random()}`,
@@ -152,6 +191,8 @@ export function createChatState(initialState = {}) {
     state = {
       ...state,
       pending: false,
+      pendingLabel: 'Ressy está pensando...',
+      stagedAudioId: nextStagedAudioId,
       draft: isProviderNotice ? state.draft : '',
       attachment: hasConsumedTrack ? null : state.attachment,
       activeContext: updatedContext,
@@ -176,6 +217,7 @@ export function createChatState(initialState = {}) {
     state = {
       ...state,
       pending: false,
+      pendingLabel: 'Ressy está pensando...',
       notice,
       // Draft and attachment are strictly preserved
     };
@@ -190,7 +232,7 @@ export function createChatState(initialState = {}) {
     }
     currentGenerationId += 1;
     if (state.pending) {
-      state = { ...state, pending: false };
+      state = { ...state, pending: false, pendingLabel: 'Ressy está pensando...' };
       notify();
     }
   }
@@ -203,6 +245,8 @@ export function createChatState(initialState = {}) {
     setDraft,
     setAttachment,
     clearAttachment,
+    setStagedAudioId,
+    clearStagedAudioId,
     setRouteContext,
     beginTurn,
     resolveTurn,

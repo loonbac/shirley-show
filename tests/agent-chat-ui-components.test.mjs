@@ -496,4 +496,42 @@ console.log('Running Agent Chat UI Components and Behaviors Test Harness...');
   console.log('✓ 13. Notice rendered from notice.code fallback with actionable retry button');
 }
 
+// 14. Typing indicator dynamic label and setLabel method
+{
+  const customIndicator = createAgentTypingIndicator({ label: 'Ressy está descargando el audio…' });
+  assert.equal(customIndicator.el.getAttribute('aria-live'), 'polite');
+  assert.equal(customIndicator.el.getAttribute('aria-label'), 'Ressy está descargando el audio…');
+  assert.ok(customIndicator.el.textContent.includes('Ressy está descargando el audio…'));
+
+  // Test setLabel method
+  assert.equal(typeof customIndicator.setLabel, 'function', 'createAgentTypingIndicator must expose setLabel');
+  customIndicator.setLabel('Ressy está pensando...');
+  assert.equal(customIndicator.el.getAttribute('aria-label'), 'Ressy está pensando...');
+  assert.ok(customIndicator.el.textContent.includes('Ressy está pensando...'));
+
+  // Test panel rendering dynamic label
+  const panel = createAgentChatPanel({
+    isOpen: true,
+    activeContext: null,
+    messages: [],
+    pending: true,
+    pendingLabel: 'Ressy está descargando el audio…',
+    onClose: () => {},
+    onSend: () => {},
+  });
+
+  const typingEl = panel.transcriptEl.querySelector('.agent-typing-indicator');
+  assert.ok(typingEl !== null);
+  assert.equal(typingEl.getAttribute('aria-live'), 'polite');
+  assert.equal(typingEl.getAttribute('aria-label'), 'Ressy está descargando el audio…');
+  assert.ok(typingEl.textContent.includes('Ressy está descargando el audio…'));
+
+  // Panel update to dismiss indicator
+  panel.update({ pending: false });
+  assert.equal(panel.transcriptEl.querySelector('.agent-typing-indicator'), null, 'Typing indicator must be removed when pending is false');
+
+  panel.destroy();
+  console.log('✓ 14. Typing indicator supports dynamic label, setLabel, and panel propagation');
+}
+
 console.log('All Agent Chat UI Components and Behaviors tests passed!');

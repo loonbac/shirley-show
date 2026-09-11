@@ -21,7 +21,7 @@ impl Default for AgentLimits {
     fn default() -> Self {
         Self {
             max_iterations: 5,
-            request_timeout: Duration::from_secs(30),
+            request_timeout: Duration::from_secs(120),
         }
     }
 }
@@ -77,6 +77,15 @@ impl AgentChat {
         &self,
         input: AgentChatInput,
         timeout_duration: Duration,
+    ) -> AgentChatOutput {
+        let deadline = tokio::time::Instant::now() + timeout_duration;
+        self.execute_until(input, deadline).await
+    }
+
+    pub async fn execute_until(
+        &self,
+        input: AgentChatInput,
+        deadline: tokio::time::Instant,
     ) -> AgentChatOutput {
         let provider = match self.provider.as_ref() {
             Some(p) => p.clone(),
@@ -135,7 +144,7 @@ impl AgentChat {
             Some(tracker),
         );
 
-        let timeout_result = tokio::time::timeout(timeout_duration, async {
+        let timeout_result = tokio::time::timeout_at(deadline, async {
             for iter in 0..self.limits.max_iterations {
                 let req = CompletionRequest {
                     model: self.model.clone(),
@@ -244,10 +253,14 @@ impl AgentChat {
             Ok(output) => output,
             Err(_) => {
                 let committed = tracker_for_timeout.lock().unwrap();
+                let timeout_secs = self.limits.request_timeout.as_secs();
+                let timeout_msg = format!(
+                    "La solicitud tardó más del límite de tiempo ({timeout_secs} s) y fue cancelada."
+                );
                 AgentChatOutput {
                     message: compose_grounded_message(
                         &committed.actions_taken,
-                        Some("La solicitud tardó más del límite de tiempo (30 s) y fue cancelada."),
+                        Some(&timeout_msg),
                         committed.staged_audio_id.as_deref(),
                     ),
                     actions_taken: committed.actions_taken.clone(),

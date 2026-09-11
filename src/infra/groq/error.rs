@@ -38,7 +38,7 @@ impl ProviderError {
                 "No se pudo autenticar con el proveedor de IA. Por favor, verifica la clave de API configurada en el servidor."
             }
             Self::RateLimited => {
-                "Shirley está experimentando una alta demanda en este momento. Por favor, intenta de nuevo en unos instantes o utiliza los controles directos."
+                "Ressy está experimentando una alta demanda en este momento. Por favor, intenta de nuevo en unos instantes o utiliza los controles directos."
             }
             Self::Unavailable => {
                 "El proveedor de IA no está disponible temporalmente. Por favor, intenta de nuevo más tarde."

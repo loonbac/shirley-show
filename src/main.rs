@@ -7,8 +7,10 @@ use shirley_show::infra::filesystem::reconcile_audio_files::reconcile_audio_file
 use shirley_show::infra::groq::client::GroqClient;
 use shirley_show::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
+use shirley_show::infra::youtube::{ProcessYoutubeDownloader, ProcessYoutubeDownloaderConfig};
+use shirley_show::ports::youtube_downloader::YoutubeDownloader;
 use shirley_show::router::create_router;
-use shirley_show::state::AppState;
+use shirley_show::state::{AppState, StagedAudioRegistry};
 use shirley_show::use_cases::agent_chat::AgentLimits;
 
 #[tokio::main]
@@ -45,15 +47,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut state = AppState::new_with_items(pool, storage);
+    let staged_audio_registry = Arc::new(StagedAudioRegistry::new());
+    let youtube_downloader: Arc<dyn YoutubeDownloader> = Arc::new(ProcessYoutubeDownloader::new(
+        ProcessYoutubeDownloaderConfig {
+            yt_dlp_bin: config.yt_dlp_bin.clone(),
+            timeout: std::time::Duration::from_secs(90),
+        },
+    ));
+
+    let mut state = AppState::new_with_all_components(
+        pool,
+        storage,
+        staged_audio_registry,
+        youtube_downloader,
+    );
     state.frontend_dir = config.frontend_dir;
+
+    let agent_limits = AgentLimits {
+        max_iterations: 5,
+        request_timeout: std::time::Duration::from_secs(config.agent_timeout_secs),
+    };
 
     if config.groq.api_key.is_some() {
         match GroqClient::new(config.groq.clone()) {
             Ok(client) => {
                 state = state.with_agent_provider(
                     Some(Arc::new(client)),
-                    AgentLimits::default(),
+                    agent_limits,
                     config.groq.model.clone(),
                 );
                 println!(
@@ -66,6 +86,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
+        state = state.with_agent_provider(
+            None,
+            agent_limits,
+            config.groq.model.clone(),
+        );
         println!("Asistente Ressy en modo no configurado (GROQ_API_KEY no detectada).");
     }
 

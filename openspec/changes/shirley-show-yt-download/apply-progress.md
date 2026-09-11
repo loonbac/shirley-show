@@ -1,12 +1,12 @@
 # Progreso de aplicación: `shirley-show-yt-download`
 
 **Fecha:** 2026-09-11  
-**Slice activo:** Slice 3 (`yt-s3-tool-agent`)  
-**Estrategia de entrega:** 4 PRs encadenados stacked-to-main (PR 1 = Slice 1, PR 2 = Slice 2, PR 3 = Slice 3)  
+**Slice activo:** Slice 4 (`yt-s4-timeout-frontend`) — ¡Último slice completado!  
+**Estrategia de entrega:** 4 PRs encadenados stacked-to-main (PR 1 = Slice 1, PR 2 = Slice 2, PR 3 = Slice 3, PR 4 = Slice 4)  
 **Attempt authority:**
-- Token: `sha256:c924dd1728579bfe9507ceab24e3b99ab57be1e4b9c2c2b1768864314142e70d`
-- Work-unit: `"yt-s3-tool-agent"`
-- Request: `y3-acquire-001`
+- Token: `sha256:40914e4af5ccd4e1e55dcf2cb87e731a51d76ba70bc7a401417594dda489803e`
+- Work-unit: `"yt-s4-timeout-frontend"`
+- Request: `y4-acquire-001`
 - Max budget: 3000 líneas (Reportado para settle, NO settle ejecutado)
 
 ---
@@ -44,65 +44,100 @@
 
 ---
 
-## Archivos modificados y creados en Slice 3
+## Tareas completadas en Slice 4
 
-### Modificados
-- `src/domain/agent_tool.rs`: `ToolAction.presentation_id` actualizado a `Option<String>` con `#[serde(skip_serializing_if = "Option::is_none")]` para permitir acciones de staging de audio desacopladas de un show específico sin fabricar IDs fantasmas.
-- `src/agent/tool_schemas.rs`: Allowlist extendida a exactamente 7 herramientas. Añadido el schema estricto de `download_youtube_track` (`url` requerida, `title` opcional, `additionalProperties: false`) y añadida la propiedad opcional `staged_audio_id` en `add_track_from_staged`.
-- `src/agent/turn_context.rs`: `TurnToolContext` extendido con `staged_audio_id: Option<String>`, conjunto `known_staged_audio_ids: HashSet<String>`, constructores `with_staged_audio_id` / `with_full_context`, y réplica atómica en `CommittedTurnState` para conservación de estado ante timeouts.
-- `src/agent/tool_dispatcher.rs`: `AgentToolDispatcher::dispatch` transformado a función asíncrona; incorporada ejecución de `download_youtube_audio` con registro de capability y acción auditada `Audio «título» preparado temporalmente` con payload `{status, title, byte_size, format}`, deduplicación por ID y firma canónica; y actualización de `add_track_from_staged` para resolver de forma prioritaria el `staged_audio_id` del registro (con lease transaccional, commit y limpieza de capability) o recurrir al adjunto request-scoped.
-- `src/agent/system_prompt.rs`: Incorporadas directrices conversacionales para Ressy en español: encadenamiento en el mismo turno con show activo, detención y consulta de show destino tras preparar audio sin show, resolución directa en segundo turno sin re-descarga y diferenciación estricta entre audio preparado y pista agregada.
-- `src/use_cases/agent_chat.rs`: Bucle conversacional actualizado para esperar el despacho asíncrono de herramientas; `AgentChatInput` y `AgentChatOutput` enriquecidos con `staged_audio_id: Option<String>`; `compose_grounded_message` extendido para adjuntar la pregunta de destino ante audio preparado pendiente; y añadido filtro de supresión de afirmaciones falsas del modelo sin respaldo de ledger en `actions_taken`.
-- `src/state/app_state.rs`: Inyectados `download_youtube_audio` y `staged_audio_registry` en `AgentToolDispatcher::from_components`.
-- `src/handlers/agent/json_request.rs`: Inicializado `staged_audio_id: None` en `AgentChatInput`.
-- `src/handlers/agent/multipart_request.rs`: Inicializado `staged_audio_id: None` en `AgentChatInput`.
-- `src/handlers/agent/chat.rs`: Añadido `staged_audio_id: None` en el envelope de timeout controlado.
-- `tests/agent_tools_tests.rs`: Pruebas exhaustivas para la allowlist de 7 herramientas, schemas exactos, deduplicación de mutaciones, despacho asíncrono, capability `staged_audio_id` y aislamiento ante IDs no autorizados o consumidos.
-- `tests/agent_chat_tests.rs`: Pruebas de integración del bucle conversacional con `StubChatProvider`, encadenamiento en el mismo turno, emisión de `staged_audio_id` sin destino, segundo turno con consumo estructurado, aclaración ante nombres ambiguos, y supresión de alucinaciones mediante grounding.
-- `openspec/changes/shirley-show-yt-download/tasks.md`: Marcadas tareas 3.1 a 3.6 completadas `[x]`.
+- [x] 4.1 RED: Escribir pruebas de API HTTP en `tests/agent_chat_api_tests.rs` validando la lectura de `YT_DLP_BIN` y `SHIRLEY_AGENT_TIMEOUT_SECS` en `Config`, la aceptación y round-trip de `staged_audio_id` en peticiones JSON y multipart, y la respuesta HTTP 200 con deadline unificado de 120 s ante timeout global reportando acciones confirmadas. <!-- sdd-owner: implementation -->
+- [x] 4.2 GREEN: Actualizar `src/config.rs` y `.env.example` con las nuevas variables, ajustar `src/main.rs`, actualizar los parsers de solicitud en `src/handlers/agent/json_request.rs` y `src/handlers/agent/multipart_request.rs`, e implementar el deadline absoluto unificado en `src/handlers/agent/chat.rs`. <!-- sdd-owner: implementation -->
+- [x] 4.3 RED: Escribir pruebas unitarias de frontend en `tests/agent-chat-state.test.mjs` y `tests/agent-chat-ui-components.test.mjs` para validar la detección de URLs de YouTube, la visualización del label "descargando el audio…" con `aria-live="polite"`, la retención de `staged_audio_id` en `chat-state.js` solo en memoria efímera (cero `localStorage`), su inclusión en la siguiente llamada API, y su limpieza tras agregar pista o ante comandos no relacionados. <!-- sdd-owner: implementation -->
+- [x] 4.4 GREEN: Implementar las micro-utilidades puras `frontend/js/utils/validation/contains-youtube-url.js` e `is-staged-audio-unrelated.js`, actualizar la molécula `frontend/js/components/molecules/agent-typing-indicator.js` para recibir `label` dinámico, actualizar el panel en `frontend/js/components/organisms/agent-chat-panel.js`, extender `frontend/js/core/state/chat-state.js` con el ciclo de vida de `stagedAudioId`, y cablear el transporte en `frontend/js/data/agent-chat-api.js` y `frontend/js/controllers/agent-chat-controller.js`. <!-- sdd-owner: implementation -->
+- [x] 4.5 TRIANGULATE: Añadir pruebas de integración en frontend verificando que errores de red preservan el `stagedAudioId` para reintentos, que desmontar el panel restaura el composer y elimina el indicador de actividad, y que mensajes con hosts parecidos (`notyoutube.com`) conservan el label general "Shirley está pensando...". <!-- sdd-owner: implementation -->
+- [x] 4.6 REFACTOR: Ejecutar la suite completa de pruebas con `cargo test` (incluyendo los harnesses Node de chat UI) para verificar que no existen regresiones en subida manual de audio, streaming con Range HTTP, CRUD de presentaciones ni Stage Mode. <!-- sdd-owner: implementation -->
 
 ---
 
-## Evidencia de Ciclo TDD Estricto (Slice 3)
+## Archivos modificados y creados en Slice 4
+
+### Nuevos
+- `frontend/js/utils/validation/contains-youtube-url.js`: Micro-utilidad pura (1 función = 1 archivo) que analiza cadenas en busca de URLs con protocolo `http:` o `https:` y host exacto en `['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be']`. Rechaza dominios falsificados como `notyoutube.com` o texto plano que solo mencione la palabra youtube.
+- `frontend/js/utils/validation/is-staged-audio-unrelated.js`: Micro-utilidad pura que clasifica conservadoramente comandos explícitamente no relacionados con el audio preparado (como creación/listado de presentaciones, agregado de notas/letras sin referencia a audio/pista, o nueva URL/adjunto), preservando la capability ante mensajes ambiguos o de seguimiento.
+
+### Modificados
+- `src/config.rs`: Incorporadas variables `YT_DLP_BIN` (opcional, trim y sin fallback silencioso) y `SHIRLEY_AGENT_TIMEOUT_SECS` (entero positivo con default de 120 segundos).
+- `.env.example`: Documentadas las variables opcionales `YT_DLP_BIN` y `SHIRLEY_AGENT_TIMEOUT_SECS`.
+- `src/main.rs`: Inyectada la configuración de `YT_DLP_BIN` en `ProcessYoutubeDownloaderConfig` y `agent_timeout_secs` en `AgentLimits` de `AppState`.
+- `src/handlers/agent/json_request.rs`: Añadido el parsing y validación estricta de `staged_audio_id` (trim, longitud máxima de 128 caracteres) en el payload JSON.
+- `src/handlers/agent/multipart_request.rs`: Añadido el parsing y validación estricta de `staged_audio_id` (campo multipart, máximo 128 caracteres) en solicitudes con o sin archivo adjunto.
+- `src/use_cases/agent_chat.rs`: Actualizado `AgentLimits::default().request_timeout` a 120 segundos, implementado el método `execute_until(input, deadline)` cubriendo bucle y tools sin competir con timeouts externos, y actualizado el copy del mensaje de timeout de "30 s" a formato dinámico basado en la configuración real (120 s).
+- `src/handlers/agent/chat.rs`: Reemplazado el doble timeout exterior por el patrón de deadline unificado absoluto: `tokio::time::timeout_at(deadline, parse_request)` cubre lectura de body/multipart, y `AgentChat::execute_until(input, deadline)` ejecuta el agente garantizando que si se alcanza el deadline, todas las mutaciones comprometidas en `actions_taken` son reportadas en HTTP 200 con `agent_timeout`.
+- `frontend/js/components/molecules/agent-typing-indicator.js`: Actualizada la molécula para aceptar opción `label` (por defecto `'Ressy está pensando...'`) y exponer el método `setLabel(newLabel)` para actualizar texto y `aria-label` dinámicamente manteniendo `aria-live="polite"`.
+- `frontend/js/components/organisms/agent-chat-panel.js`: Acepta `pendingLabel` dinámico, pasa el label a la molécula de indicador, actualiza el mensaje de notice de timeout a "120 s", y sincroniza actualizaciones reactivas de label.
+- `frontend/js/core/state/chat-state.js`: Incorporado `stagedAudioId: null` y `pendingLabel` en el estado efímero en memoria (cero `localStorage`/`sessionStorage`). Limpieza automática ante consumo exitoso (`add_track_from_staged`) o comandos no relacionados (`isStagedAudioUnrelated`). Preservación en fallos de red/proveedor para reintentos.
+- `frontend/js/data/agent-chat-api.js`: Cableado `stagedAudioId` tanto en solicitudes JSON (`jsonBody.staged_audio_id`) como multipart (`formData.append('staged_audio_id', ...)`).
+- `frontend/js/controllers/agent-chat-controller.js`: Sincronización de `pendingLabel` con el panel, propagación de `stagedAudioId` en llamadas API, temporizador de 3 segundos para retroalimentación cualitativa ante esperas prolongadas, y retorno de promesas en `open` y `sendAndOpen`.
+- `tests/agent_chat_api_tests.rs`: Pruebas de configuración de `YT_DLP_BIN` y timeout de 120 s, round-trip y validación de `staged_audio_id` en JSON y multipart, y prueba de deadline unificado que preserva acciones comprometidas ante timeout devolviendo HTTP 200.
+- `tests/agent-chat-state.test.mjs`: Pruebas para `containsYouTubeUrl`, `isStagedAudioUnrelated`, ciclo de vida de `stagedAudioId` y propagación de API.
+- `tests/agent-chat-ui-components.test.mjs`: Pruebas para el indicador de escritura dinámico y `setLabel`.
+- `tests/agent-chat-integration.test.mjs`: Pruebas de triangulación para preservación de `stagedAudioId` ante errores de red, desmontaje de panel y hosts parecidos.
+- `openspec/changes/shirley-show-yt-download/tasks.md`: Marcadas tareas 4.1 a 4.6 completadas `[x]`.
+
+---
+
+## Evidencia de Ciclo TDD Estricto (Slice 4)
 
 | Tarea | Fase | Acción realizada | Resultado / Comando |
 |---|---|---|---|
-| 3.1 | RED | Creación de pruebas unitarias y de dispatcher en `tests/agent_tools_tests.rs` (allowlist de 7 herramientas, schemas exactos, despacho async, deduplicación y consumo de staging) | `cargo test --test agent_tools_tests` falló con 38 errores de compilación (`Value is not a future`, `staged_audio_id unknown`, etc.) |
-| 3.2 | GREEN | Schemas de 7 tools en `tool_schemas.rs`, extensión de `TurnToolContext` con capability `staged_audio_id`, despacho asíncrono en `AgentToolDispatcher` con leases transaccionales de `StagedAudioRegistry` | `cargo test --test agent_tools_tests` pasó limpiamente (12 tests ok) |
-| 3.3 | RED | Pruebas de bucle y grounding en `tests/agent_chat_tests.rs` con `StubChatProvider` (encadenamiento mismo turno, detención con pregunta de destino y staged_audio_id, segundo turno estructurado y ambigüedad de nombres) | `cargo test --test agent_chat_tests` falló por campos faltantes en `AgentChatInput`/`AgentChatOutput` |
-| 3.4 | GREEN | Directrices conversacionales en `system_prompt.rs`, despacho async y prompt de contexto en `agent_chat.rs`, `staged_audio_id` en DTOs de chat, y grounding determinista con pregunta de destino | `cargo test --test agent_chat_tests` pasó (12 tests ok) |
-| 3.5 | TRIANGULATE | Pruebas de robustez para supresión de alucinaciones del modelo sin llamadas a tools (`sanitize_ungrounded_claims`), y respuestas amables ante errores de configuración y timeout sin trazas técnicas | `cargo test --test agent_chat_tests` pasó (15 tests ok) |
-| 3.6 | REFACTOR | Verificación integral de cero exposición de rutas de proceso y saneamiento de salidas. Ejecución de suite completa de pruebas | `cargo test` suite completa: 24 suites ok, 0 fallos |
+| 4.1 | RED | Añadir pruebas de API en `tests/agent_chat_api_tests.rs` (lectura de config `YT_DLP_BIN` y `SHIRLEY_AGENT_TIMEOUT_SECS`, round-trip y validación de 128 chars de `staged_audio_id` en JSON y multipart, y preservación de mutaciones ante deadline absoluto unificado en HTTP 200) | `cargo test --test agent_chat_api_tests` falló con 5 errores de compilación (`no field yt_dlp_bin on type Config`, etc.) |
+| 4.2 | GREEN | Campos en `Config`, defaults y validación en `config.rs`, variables en `.env.example`, inyección en `main.rs`, parsers en `json_request.rs` y `multipart_request.rs`, `AgentLimits` a 120 s con `execute_until` en `agent_chat.rs`, y deadline unificado absoluto en `chat.rs` | `cargo test --test agent_chat_api_tests` pasó limpiamente (17 tests ok) |
+| 4.3 | RED | Añadir pruebas de frontend en `tests/agent-chat-state.test.mjs` y `tests/agent-chat-ui-components.test.mjs` (`containsYouTubeUrl`, `isStagedAudioUnrelated`, ciclo de vida de `stagedAudioId` en memoria efímera sin `localStorage`, inclusión en API JSON/multipart, `label` dinámico y `setLabel` en indicador de actividad) | `node tests/agent-chat-state.test.mjs` falló con `ERR_MODULE_NOT_FOUND`, `node tests/agent-chat-ui-components.test.mjs` falló por discrepancia de label |
+| 4.4 | GREEN | Implementación de `contains-youtube-url.js` e `is-staged-audio-unrelated.js`, actualización de `agent-typing-indicator.js` con `setLabel`, panel con `pendingLabel`, `chat-state.js` con ciclo de vida de `stagedAudioId`, y transporte en `agent-chat-api.js` y `agent-chat-controller.js` | `node tests/agent-chat-state.test.mjs` y `node tests/agent-chat-ui-components.test.mjs` pasaron limpiamente (100% ok) |
+| 4.5 | TRIANGULATE | Pruebas de integración en `tests/agent-chat-integration.test.mjs` verificando que errores de red preservan `stagedAudioId` para reintentos seguros, que desmontar el panel elimina el indicador y restaura el composer, y que hosts parecidos (`notyoutube.com`) conservan el label general | `node tests/agent-chat-integration.test.mjs` pasó limpiamente (6 tests ok) |
+| 4.6 | REFACTOR | Ejecución de suite completa de pruebas herméticas de Rust y harnesses Node. Verificación de cero regresiones en subidas manuales, Range HTTP, streaming, Stage Mode y CRUD | `cargo test` suite completa: 24 test suites ok, 0 fallos |
+
+---
+
+## Validación Manual E2E en Vivo (`:3100`)
+
+Se ejecutó la validación manual de extremo a extremo con el servidor real en ejecución en `http://127.0.0.1:3100`:
+1. **Creación de presentación de prueba:** `POST /api/presentations` -> Creado show `Test Presentacion E2E` con ID `3f85054d-bfd0-4a63-95e9-e7d9592ea015`.
+2. **Descarga y encadenamiento en el mismo turno:** Solicitud conversacional con URL de YouTube real (`https://www.youtube.com/watch?v=jNQXAC9IVRw` - "Me at the zoo", 19 s). Ressy ejecutó `download_youtube_track` y `add_track_from_staged` en el mismo turno.
+3. **Verificación de audio físico:**
+   - Ubicación: `.run/data/audio/files/36b6de94-4199-4727-a445-03d5ec19f139.mp3`
+   - Tamaño: `762.285 bytes`
+   - Verificación con `ffprobe`: `codec_name: "mp3"`, `bit_rate: "320000"` (MP3 a 320 kbps innegociable, confirmado).
+4. **Flujo de 2 turnos sin presentación activa:** Solicitud con `https://www.youtube.com/watch?v=jNQXAC9IVRw` sin show activo -> Ressy devolvió `staged_audio_id: "staged-a5391de0-4981-4b09-8b8a-8443bb878766"`, estado de staging activo con TTL de 15 minutos, y preguntó deterministamente a qué presentación agregarlo.
+5. **Limpieza integral:** Se eliminó la presentación y pista de prueba vía `DELETE /api/presentations/{id}` (cascada confirmada) y se purgó el staging temporal. Se verificó que la lista de presentaciones y los directorios quedaron en estado inicial limpio.
 
 ---
 
 ## Comandos de verificación ejecutados
 
 - `cargo check --tests`: 0 errores, 0 warnings.
-- `cargo test --test agent_tools_tests`: 12 tests ok.
-- `cargo test --test agent_chat_tests`: 15 tests ok.
-- `cargo test --test agent_tools_tests --test agent_chat_tests`: 27 tests ok.
-- `cargo test`: 24 test suites ok (incluyendo API HTTP, SQLite migrations, audio streaming y harnesses UI).
+- `cargo test --test agent_chat_api_tests`: 17 tests ok.
+- `cargo test --test agent_chat_ui_tests`: 3 tests ok (cubriendo harnesses Node de state, UI components y route integration).
+- `node tests/agent-chat-state.test.mjs`: 13 suites ok.
+- `node tests/agent-chat-ui-components.test.mjs`: 14 suites ok.
+- `node tests/agent-chat-integration.test.mjs`: 6 suites ok.
+- `cargo test`: 24 test suites ok al 100%, 0 fallos.
 
 ---
 
 ## Desviaciones de diseño
 
-Ninguna. La implementación se ajusta fielmente a `design.md`, `specs/agent-tools/spec.md` y `specs/agent-chat/spec.md`:
-- Allowlist de exactamente 7 herramientas locales.
-- Capability de `staged_audio_id` vinculada estrictamente al turno conversacional (`TurnToolContext`), impidiendo que el modelo consulte o consuma identificadores arbitrarios sin autorización previa.
-- Grounding server-side estricto que gobierna el mensaje final tras cualquier mutación y suprime afirmaciones falsas del modelo sin ejecución real de herramientas.
-- `ToolAction.presentation_id` como `Option<String>` con serialización limpia (omitido si es `None`), evitando fabricar identificadores para descargas que aún no tienen presentación asignada.
+Ninguna. La implementación de Slice 4 sigue al 100% las especificaciones de `design.md` y `specs/agent-chat/spec.md`:
+- Deadline HTTP absoluto y unificado (`tokio::time::timeout_at`) que protege la lectura del cuerpo y el bucle del agente sin condiciones de carrera.
+- Configuración transparente de `YT_DLP_BIN` y `SHIRLEY_AGENT_TIMEOUT_SECS` con valor por defecto de 120 segundos.
+- Micro-modularidad estricta en frontend con micro-utilidades puras para validación de URL y clasificación de comandos ajenos.
+- Indicador de actividad cualitativo con `aria-live="polite"` y método `setLabel` dinámico.
+- Memoria efímera estricta para `stagedAudioId` (cero persistencia en `localStorage`).
 
 ---
 
-## Tareas restantes (Slice 4 intacto)
+## Tareas restantes
 
-```markdown
-- [ ] 4.1 RED: Escribir pruebas de API HTTP en `tests/agent_chat_api_tests.rs` validando la lectura de `YT_DLP_BIN` y `SHIRLEY_AGENT_TIMEOUT_SECS` en `Config`, la aceptación y round-trip de `staged_audio_id` en peticiones JSON y multipart, y la respuesta HTTP 200 con deadline unificado de 120 s ante timeout global reportando acciones confirmadas. <!-- sdd-owner: implementation -->
-- [ ] 4.2 GREEN: Actualizar `src/config.rs` y `.env.example` con las nuevas variables, ajustar `src/main.rs`, actualizar los parsers de solicitud en `src/handlers/agent/json_request.rs` y `src/handlers/agent/multipart_request.rs`, e implementar el deadline absoluto unificado en `src/handlers/agent/chat.rs`. <!-- sdd-owner: implementation -->
-- [ ] 4.3 RED: Escribir pruebas unitarias de frontend en `tests/agent-chat-state.test.mjs` y `tests/agent-chat-ui-components.test.mjs` para validar la detección de URLs de YouTube, la visualización del label "descargando el audio…" con `aria-live="polite"`, la retención de `staged_audio_id` en `chat-state.js` solo en memoria efímera (cero `localStorage`), su inclusión en la siguiente llamada API, y su limpieza tras agregar pista o ante comandos no relacionados. <!-- sdd-owner: implementation -->
-- [ ] 4.4 GREEN: Implementar las micro-utilidades puras `frontend/js/utils/validation/contains-youtube-url.js` e `is-staged-audio-unrelated.js`, actualizar la molécula `frontend/js/components/molecules/agent-typing-indicator.js` para recibir `label` dinámico, actualizar el panel en `frontend/js/components/organisms/agent-chat-panel.js`, extender `frontend/js/core/state/chat-state.js` con el ciclo de vida de `stagedAudioId`, y cablear el transporte en `frontend/js/data/agent-chat-api.js` y `frontend/js/controllers/agent-chat-controller.js`. <!-- sdd-owner: implementation -->
-- [ ] 4.5 TRIANGULATE: Añadir pruebas de integración en frontend verificando que errores de red preservan el `stagedAudioId` para reintentos, que desmontar el panel restaura el composer y elimina el indicador de actividad, y que mensajes con hosts parecidos (`notyoutube.com`) conservan el label general "Shirley está pensando...". <!-- sdd-owner: implementation -->
-- [ ] 4.6 REFACTOR: Ejecutar la suite completa de pruebas con `cargo test` (incluyendo los harnesses Node de chat UI) para verificar que no existen regresiones en subida manual de audio, streaming con Range HTTP, CRUD de presentaciones ni Stage Mode. <!-- sdd-owner: implementation -->
-```
+**Ninguna.** Las 24 tareas de los 4 slices han sido completadas, verificadas y testeadas rigurosamente.
+
+- Slice 1 (Dominio e Infraestructura): 6/6 completadas.
+- Slice 2 (Caso de uso y Registro TTL): 6/6 completadas.
+- Slice 3 (Herramientas y Agente): 6/6 completadas.
+- Slice 4 (Deadline HTTP y Frontend): 6/6 completadas.
+- **Total:** 24/24 completadas (100%).

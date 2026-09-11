@@ -44,6 +44,7 @@ export function createAgentChatController(deps) {
     activeContext: chatState.get().activeContext,
     messages: chatState.get().messages,
     pending: chatState.get().pending,
+    pendingLabel: chatState.get().pendingLabel,
     draft: chatState.get().draft,
     attachment: chatState.get().attachment,
     notice: chatState.get().notice,
@@ -74,6 +75,7 @@ export function createAgentChatController(deps) {
       activeContext: newState.activeContext,
       messages: newState.messages,
       pending: newState.pending,
+      pendingLabel: newState.pendingLabel,
       draft: newState.draft,
       attachment: newState.attachment,
       notice: newState.notice,
@@ -84,6 +86,7 @@ export function createAgentChatController(deps) {
     const currentState = chatState.get();
     if (currentState.pending) return;
 
+    const stagedAudioId = currentState.stagedAudioId;
     const attachment = currentState.attachment;
     const turn = chatState.beginTurn({
       message: userMessage,
@@ -97,11 +100,19 @@ export function createAgentChatController(deps) {
 
     const presentationId = currentState.activeContext ? currentState.activeContext.id : null;
 
+    // >3s wait timer: update typing indicator label if request takes >3s
+    const waitTimer = setTimeout(() => {
+      if (chatState.get().pending) {
+        panel.update({ pendingLabel: 'Ressy está descargando el audio…' });
+      }
+    }, 3000);
+
     try {
       const response = await sendAgentChatMessage({
         message: userMessage,
         history,
         presentationId,
+        stagedAudioId,
         attachment,
         signal: turn.abortController.signal,
       });
@@ -135,6 +146,8 @@ export function createAgentChatController(deps) {
         generationId: turn.generationId,
         error: err,
       });
+    } finally {
+      clearTimeout(waitTimer);
     }
   }
 
@@ -148,7 +161,7 @@ export function createAgentChatController(deps) {
   function open(initialMessage) {
     chatState.open();
     if (initialMessage && typeof initialMessage === 'string' && initialMessage.trim()) {
-      handleSend(initialMessage.trim());
+      return handleSend(initialMessage.trim());
     }
   }
 
@@ -165,7 +178,7 @@ export function createAgentChatController(deps) {
   }
 
   function sendAndOpen(message) {
-    open(message);
+    return open(message);
   }
 
   function destroy() {

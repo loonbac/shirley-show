@@ -44,6 +44,7 @@ export function createAgentChatPanel(props) {
     activeContext = null,
     messages = [],
     pending = false,
+    pendingLabel = 'Ressy está pensando...',
     draft = '',
     attachment = null,
     notice = null,
@@ -180,7 +181,7 @@ export function createAgentChatPanel(props) {
     }
 
     if (pending) {
-      const typing = createAgentTypingIndicator();
+      const typing = createAgentTypingIndicator({ label: pendingLabel });
       transcriptEl.appendChild(typing.el);
     }
 
@@ -197,7 +198,7 @@ export function createAgentChatPanel(props) {
       case 'provider_unavailable':
         return 'El proveedor de IA no está disponible temporalmente. Por favor, intenta de nuevo más tarde.';
       case 'agent_timeout':
-        return 'La solicitud tardó más del límite de tiempo (30 s) y fue cancelada.';
+        return 'La solicitud tardó más del límite de tiempo (120 s) y fue cancelada.';
       case 'iteration_limit':
         return 'Se alcanzó el límite de pasos permitidos para este turno. Si necesitas continuar, indícalo en un nuevo mensaje.';
       default:
@@ -277,6 +278,13 @@ export function createAgentChatPanel(props) {
       pending = nextProps.pending;
       composer.update({ pending });
       transcriptNeedsUpdate = true;
+    }
+
+    if (nextProps.pendingLabel !== undefined && nextProps.pendingLabel !== pendingLabel) {
+      pendingLabel = nextProps.pendingLabel;
+      if (pending) {
+        transcriptNeedsUpdate = true;
+      }
     }
 
     if (nextProps.draft !== undefined) {

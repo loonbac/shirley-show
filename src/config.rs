@@ -73,6 +73,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub frontend_dir: PathBuf,
     pub groq: GroqConfig,
+    pub yt_dlp_bin: Option<PathBuf>,
+    pub agent_timeout_secs: u64,
 }
 
 impl Config {
@@ -92,11 +94,40 @@ impl Config {
 
         let groq = GroqConfig::from_env();
 
+        let yt_dlp_bin = env::var("YT_DLP_BIN").ok().and_then(|val| {
+            let trimmed = val.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(trimmed))
+            }
+        });
+
+        let agent_timeout_secs = match env::var("SHIRLEY_AGENT_TIMEOUT_SECS") {
+            Ok(val) => {
+                let trimmed = val.trim();
+                if trimmed.is_empty() {
+                    120
+                } else {
+                    let parsed: u64 = trimmed
+                        .parse()
+                        .map_err(|e| format!("Invalid SHIRLEY_AGENT_TIMEOUT_SECS '{trimmed}': {e}"))?;
+                    if parsed == 0 {
+                        return Err("SHIRLEY_AGENT_TIMEOUT_SECS must be strictly positive".to_string());
+                    }
+                    parsed
+                }
+            }
+            Err(_) => 120,
+        };
+
         Ok(Self {
             bind_addr,
             data_dir,
             frontend_dir,
             groq,
+            yt_dlp_bin,
+            agent_timeout_secs,
         })
     }
 }
