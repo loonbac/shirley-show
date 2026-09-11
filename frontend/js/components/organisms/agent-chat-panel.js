@@ -188,10 +188,28 @@ export function createAgentChatPanel(props) {
     stickToBottom.scrollToBottom(pending);
   }
 
+  function getNoticeMessage(code) {
+    switch (code) {
+      case 'provider_auth':
+        return 'No se pudo autenticar con el proveedor de IA. Por favor, verifica la clave de API configurada en el servidor.';
+      case 'provider_rate_limited':
+        return 'Shirley está experimentando una alta demanda en este momento. Por favor, intenta de nuevo en unos instantes o utiliza los controles directos.';
+      case 'provider_unavailable':
+        return 'El proveedor de IA no está disponible temporalmente. Por favor, intenta de nuevo más tarde.';
+      case 'agent_timeout':
+        return 'La solicitud tardó más del límite de tiempo (30 s) y fue cancelada.';
+      case 'iteration_limit':
+        return 'Se alcanzó el límite de pasos permitidos para este turno. Si necesitas continuar, indícalo en un nuevo mensaje.';
+      default:
+        return 'Ocurrió un error al procesar la solicitud con el asistente de IA.';
+    }
+  }
+
   function renderNotice() {
     noticeBannerEl.innerHTML = '';
-    if (notice && notice.message) {
-      const noticeText = createElement('span', { class: 'agent-chat-notice-text' }, [notice.message]);
+    if (notice && (notice.message || notice.code)) {
+      const text = notice.message || getNoticeMessage(notice.code);
+      const noticeText = createElement('span', { class: 'agent-chat-notice-text' }, [text]);
       const children = [noticeText];
 
       // Safe retry rule: offer retry button ONLY if retryable and last message has no confirmed actions

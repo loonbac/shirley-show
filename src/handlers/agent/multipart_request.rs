@@ -8,9 +8,7 @@ use crate::agent::turn_context::StagedAudioHandle;
 use crate::domain::agent_message::HistoryMessage;
 use crate::domain::show_item::MAX_AUDIO_BYTE_SIZE;
 use crate::error::AppError;
-use crate::handlers::agent::json_request::{
-    MAX_MESSAGE_CHAR_LENGTH, MAX_PRESENTATION_ID_LENGTH,
-};
+use crate::handlers::agent::json_request::{MAX_MESSAGE_CHAR_LENGTH, MAX_PRESENTATION_ID_LENGTH};
 use crate::infra::filesystem::detect_audio_format::detect_audio_format;
 use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use crate::infra::filesystem::staging_guard::StagingFileGuard;
@@ -91,9 +89,8 @@ pub async fn parse_and_validate_multipart_request(
 
                 let (stage_id, stage_path) = storage.create_staging_file()?;
                 let guard = StagingFileGuard::new(storage.clone(), stage_id, stage_path.clone());
-                let mut file = std::fs::File::create(guard.path()).map_err(|e| {
-                    AppError::Internal(format!("Failed to open staging file: {e}"))
-                })?;
+                let mut file = std::fs::File::create(guard.path())
+                    .map_err(|e| AppError::Internal(format!("Failed to open staging file: {e}")))?;
 
                 let mut header_buf = Vec::new();
 

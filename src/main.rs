@@ -56,7 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     AgentLimits::default(),
                     config.groq.model.clone(),
                 );
-                println!("Asistente Shirley configurada con modelo {}", config.groq.model);
+                println!(
+                    "Asistente Shirley configurada con modelo {}",
+                    config.groq.model
+                );
             }
             Err(e) => {
                 eprintln!("Aviso: No se pudo inicializar el cliente de Groq: {e}");

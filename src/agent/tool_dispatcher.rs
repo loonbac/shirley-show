@@ -20,22 +20,26 @@ use crate::use_cases::list_presentations::ListPresentations;
 use crate::use_cases::upload_track::UploadTrack;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CreatePresentationArgs {
     name: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PresentationIdArgs {
     presentation_id: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AddItemTextArgs {
     presentation_id: String,
     text: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AddTrackArgs {
     presentation_id: String,
     title: String,
@@ -175,38 +179,36 @@ impl AgentToolDispatcher {
                 }
             }
 
-            "list_presentations" => {
-                match self.list_presentations.execute() {
-                    Ok(summaries) => {
-                        for s in &summaries {
-                            context.known_presentation_ids.insert(s.id.clone());
-                        }
+            "list_presentations" => match self.list_presentations.execute() {
+                Ok(summaries) => {
+                    for s in &summaries {
+                        context.known_presentation_ids.insert(s.id.clone());
+                    }
 
-                        let res: Value = json!(
-                            summaries
-                                .into_iter()
-                                .map(|s| {
-                                    json!({
-                                        "id": s.id,
-                                        "title": s.title,
-                                        "total_items": s.total_items,
-                                        "tracks_count": s.tracks_count,
-                                        "lyrics_count": s.lyrics_count,
-                                        "notes_count": s.notes_count,
-                                    })
+                    let res: Value = json!(
+                        summaries
+                            .into_iter()
+                            .map(|s| {
+                                json!({
+                                    "id": s.id,
+                                    "title": s.title,
+                                    "total_items": s.total_items,
+                                    "tracks_count": s.tracks_count,
+                                    "lyrics_count": s.lyrics_count,
+                                    "notes_count": s.notes_count,
                                 })
-                                .collect::<Vec<_>>()
-                        );
+                            })
+                            .collect::<Vec<_>>()
+                    );
 
-                        context.executed_call_ids.insert(call.id.clone());
-                        context.executed_signatures.insert(signature, res.clone());
-                        res
-                    }
-                    Err(e) => {
-                        json!({ "error": "domain_error", "message": e.to_string() })
-                    }
+                    context.executed_call_ids.insert(call.id.clone());
+                    context.executed_signatures.insert(signature, res.clone());
+                    res
                 }
-            }
+                Err(e) => {
+                    json!({ "error": "domain_error", "message": e.to_string() })
+                }
+            },
 
             "get_presentation" => {
                 let args: PresentationIdArgs = match serde_json::from_str(&call.arguments) {
@@ -444,7 +446,10 @@ impl AgentToolDispatcher {
                                 context.record_action(ToolAction {
                                     tool: "add_track_from_staged".to_string(),
                                     presentation_id: pres_id.to_string(),
-                                    summary: format!("Pista “{}” añadida a la presentación", trimmed_title),
+                                    summary: format!(
+                                        "Pista “{}” añadida a la presentación",
+                                        trimmed_title
+                                    ),
                                     status: "success".to_string(),
                                     details: Some(res.clone()),
                                 });

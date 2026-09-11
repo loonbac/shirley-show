@@ -140,13 +140,22 @@ export function createChatState(initialState = {}) {
       }
     }
 
+    const notice = (response && response.notice) || null;
+    const isProviderNotice = notice && (
+      notice.code === 'provider_auth' ||
+      notice.code === 'provider_rate_limited' ||
+      notice.code === 'provider_unavailable' ||
+      notice.code === 'agent_timeout' ||
+      notice.code === 'provider_error'
+    );
+
     state = {
       ...state,
       pending: false,
-      draft: '',
+      draft: isProviderNotice ? state.draft : '',
       attachment: hasConsumedTrack ? null : state.attachment,
       activeContext: updatedContext,
-      notice: (response && response.notice) || null,
+      notice,
       messages: [...state.messages, assistantMessage],
     };
     currentAbortController = null;

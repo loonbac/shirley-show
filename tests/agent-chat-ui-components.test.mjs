@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { setupDomEnvironment } from './fake-dom.mjs';
@@ -371,6 +372,128 @@ console.log('Running Agent Chat UI Components and Behaviors Test Harness...');
   assert.equal(scrollToCall.behavior, 'smooth', 'Behavior must be "smooth" when prefers-reduced-motion is false');
 
   console.log('✓ 10. Triangulation edge cases (long filenames, lyrics multiline, pending lock, reduced motion)');
+}
+
+// 11. Escape key dismissal and focus restoration
+{
+  let closeTriggered = false;
+  const triggerBtn = document.createElement('button');
+  triggerBtn.setAttribute('id', 'origin-trigger');
+  document.body.appendChild(triggerBtn);
+  triggerBtn.focus();
+  assert.equal(document.activeElement, triggerBtn);
+
+  const panel = createAgentChatPanel({
+    isOpen: true,
+    activeContext: null,
+    messages: [],
+    pending: false,
+    draft: '',
+    attachment: null,
+    onClose: () => {
+      closeTriggered = true;
+    },
+    onSend: () => {},
+    onChangeDraft: () => {},
+    onAttachClick: () => {},
+    onRemoveAttachment: () => {},
+  });
+  document.body.appendChild(panel.el);
+
+  // Focus was moved to composer textarea
+  assert.equal(document.activeElement.tagName.toLowerCase(), 'textarea');
+
+  // Dispatch Escape keydown event on window
+  const escapeEv = new Event('keydown');
+  escapeEv.key = 'Escape';
+  escapeEv.preventDefault = () => {};
+  window.dispatchEvent(escapeEv);
+  assert.equal(closeTriggered, true, 'Escape key on window must invoke onClose callback');
+
+  // Closing panel deactivates trap and restores focus
+  panel.update({ isOpen: false });
+  assert.equal(document.activeElement, triggerBtn, 'Focus must be restored to previous active element on panel close');
+
+  panel.destroy();
+  console.log('✓ 11. Escape key closes panel and restores focus to previous active element');
+}
+
+// 12. Layout constraints: 580px desktop, 100vw x 100dvh mobile, safe-area insets
+{
+  const cssPath = resolve(process.cwd(), 'frontend/styles/organisms/agent-chat-panel.css');
+  const cssContent = readFileSync(cssPath, 'utf-8');
+
+  // Desktop 580px constraint
+  assert.ok(
+    cssContent.includes('@media (min-width: 769px)') && cssContent.includes('width: 580px'),
+    'Desktop CSS must enforce exactly 580px panel width'
+  );
+
+  // Mobile 100vw x 100dvh constraint
+  assert.ok(
+    cssContent.includes('@media (max-width: 768px)') &&
+      cssContent.includes('width: 100vw') &&
+      cssContent.includes('height: 100dvh'),
+    'Mobile CSS must enforce 100vw and 100dvh fullscreen overlay'
+  );
+
+  // Safe area insets
+  assert.ok(
+    cssContent.includes('safe-area-inset-top') && cssContent.includes('safe-area-inset-bottom'),
+    'Mobile CSS must account for safe-area insets'
+  );
+
+  console.log('✓ 12. Responsive layout verified (580px desktop, 100vw x 100dvh mobile, safe-area insets)');
+}
+
+// 13. Notice rendering with code fallback and retry button
+{
+  let retryClicked = false;
+  const panel = createAgentChatPanel({
+    isOpen: true,
+    activeContext: null,
+    messages: [
+      {
+        id: 'msg-u1',
+        role: 'user',
+        content: 'Crear show acústico',
+      },
+    ],
+    pending: false,
+    draft: 'Crear show acústico',
+    attachment: null,
+    notice: {
+      code: 'provider_unavailable',
+      retryable: true,
+      // note: notice.message is missing!
+    },
+    onClose: () => {},
+    onSend: () => {},
+    onChangeDraft: () => {},
+    onAttachClick: () => {},
+    onRemoveAttachment: () => {},
+    onRetry: () => {
+      retryClicked = true;
+    },
+  });
+
+  const noticeBanner = panel.el.querySelector('.agent-chat-notice-banner');
+  assert.ok(noticeBanner !== null);
+  assert.equal(noticeBanner.style.display, 'flex');
+
+  const noticeText = panel.el.querySelector('.agent-chat-notice-text');
+  assert.ok(noticeText !== null);
+  assert.ok(
+    noticeText.textContent.includes('proveedor de IA no está disponible'),
+    'Notice text must be derived from notice.code when notice.message is absent'
+  );
+
+  const retryBtn = panel.el.querySelector('.agent-chat-retry-btn');
+  assert.ok(retryBtn !== null, 'Actionable retry button must be rendered');
+  retryBtn.dispatchEvent(new Event('click'));
+  assert.equal(retryClicked, true, 'Clicking retry button must trigger onRetry callback');
+
+  console.log('✓ 13. Notice rendered from notice.code fallback with actionable retry button');
 }
 
 console.log('All Agent Chat UI Components and Behaviors tests passed!');

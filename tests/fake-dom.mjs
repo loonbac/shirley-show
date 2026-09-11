@@ -181,6 +181,13 @@ export class FakeElement extends FakeNode {
 }
 
 function matchesSelector(el, selector) {
+  if (selector.includes(',')) {
+    return selector.split(',').some((s) => matchesSelector(el, s.trim()));
+  }
+  if (selector.endsWith(':not([disabled])')) {
+    const base = selector.slice(0, -':not([disabled])'.length);
+    return matchesSelector(el, base) && !el.hasAttribute('disabled');
+  }
   if (selector.startsWith('.')) {
     return el.classList.contains(selector.slice(1));
   }

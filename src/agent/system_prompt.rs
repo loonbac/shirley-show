@@ -24,10 +24,15 @@ pub fn build_context_system_prompt(
                 id.trim()
             ));
         } else {
-            parts.push("Contexto activo: Modo catálogo (sin presentación activa seleccionada).".to_string());
+            parts.push(
+                "Contexto activo: Modo catálogo (sin presentación activa seleccionada)."
+                    .to_string(),
+            );
         }
     } else {
-        parts.push("Contexto activo: Modo catálogo (sin presentación activa seleccionada).".to_string());
+        parts.push(
+            "Contexto activo: Modo catálogo (sin presentación activa seleccionada).".to_string(),
+        );
     }
 
     if has_staged_audio {

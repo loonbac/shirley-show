@@ -46,7 +46,7 @@ pub struct AgentChatOutput {
 pub struct AgentChat {
     provider: Option<Arc<dyn ChatCompletionProvider>>,
     dispatcher: AgentToolDispatcher,
-    limits: AgentLimits,
+    pub limits: AgentLimits,
     model: String,
 }
 
@@ -66,6 +66,15 @@ impl AgentChat {
     }
 
     pub async fn execute(&self, input: AgentChatInput) -> AgentChatOutput {
+        self.execute_with_timeout(input, self.limits.request_timeout)
+            .await
+    }
+
+    pub async fn execute_with_timeout(
+        &self,
+        input: AgentChatInput,
+        timeout_duration: Duration,
+    ) -> AgentChatOutput {
         let provider = match self.provider.as_ref() {
             Some(p) => p.clone(),
             None => {
@@ -97,7 +106,7 @@ impl AgentChat {
         if was_pruned {
             conversation_messages.insert(
                 0,
-                AgentMessage::User {
+                AgentMessage::System {
                     content: "[Nota del sistema: Mensajes anteriores de la conversación fueron podados para respetar el límite de contexto]"
                         .to_string(),
                 },
@@ -119,7 +128,7 @@ impl AgentChat {
             Some(tracker),
         );
 
-        let timeout_result = tokio::time::timeout(self.limits.request_timeout, async {
+        let timeout_result = tokio::time::timeout(timeout_duration, async {
             for iter in 0..self.limits.max_iterations {
                 let req = CompletionRequest {
                     model: self.model.clone(),
@@ -231,6 +240,7 @@ impl AgentChat {
 }
 
 fn prune_history(history: Vec<HistoryMessage>) -> (Vec<AgentMessage>, bool) {
+    let history_len = history.len();
     let mut valid_messages = Vec::new();
     for msg in history {
         match msg.role.to_lowercase().as_str() {
@@ -251,14 +261,14 @@ fn prune_history(history: Vec<HistoryMessage>) -> (Vec<AgentMessage>, bool) {
 
     for msg in valid_messages.into_iter().rev() {
         let len = match &msg {
-            AgentMessage::User { content } => content.len(),
+            AgentMessage::User { content } => content.chars().count(),
             AgentMessage::Assistant { content, .. } => {
-                content.as_ref().map(|c| c.len()).unwrap_or(0)
+                content.as_ref().map(|c| c.chars().count()).unwrap_or(0)
             }
             _ => 0,
         };
 
-        if selected_rev.len() >= 20 || (char_count + len > 32_000 && !selected_rev.is_empty()) {
+        if selected_rev.len() >= 20 || char_count + len > 32_000 {
             pruned = true;
             break;
         }
@@ -268,7 +278,8 @@ fn prune_history(history: Vec<HistoryMessage>) -> (Vec<AgentMessage>, bool) {
     }
 
     selected_rev.reverse();
-    (selected_rev, pruned)
+    let was_pruned = pruned || selected_rev.len() < history_len;
+    (selected_rev, was_pruned)
 }
 
 fn compose_grounded_message(actions_taken: &[ToolAction], extra_notice: Option<&str>) -> String {

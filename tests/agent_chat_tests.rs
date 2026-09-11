@@ -9,7 +9,7 @@ use tempfile::TempDir;
 use tokio::sync::Mutex;
 
 use shirley_show::agent::tool_dispatcher::AgentToolDispatcher;
-use shirley_show::domain::agent_message::{AgentMessage, CompletionResponse};
+use shirley_show::domain::agent_message::{AgentMessage, CompletionResponse, HistoryMessage};
 use shirley_show::domain::agent_tool::ToolCall;
 use shirley_show::infra::filesystem::LocalAudioStorage;
 use shirley_show::infra::groq::error::ProviderError;
@@ -88,7 +88,12 @@ fn setup_test_state() -> (AppState, TempDir) {
 async fn test_agent_chat_unconfigured_provider() {
     let (state, _tmp) = setup_test_state();
     let dispatcher = AgentToolDispatcher::new(state);
-    let agent_chat = AgentChat::new(None, dispatcher, AgentLimits::default(), "model".to_string());
+    let agent_chat = AgentChat::new(
+        None,
+        dispatcher,
+        AgentLimits::default(),
+        "model".to_string(),
+    );
 
     let input = AgentChatInput {
         message: "Hola Shirley".to_string(),
@@ -157,7 +162,8 @@ async fn test_agent_chat_multi_iteration_tool_execution_chain() {
         fn complete(
             &self,
             request: CompletionRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>> {
+        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>>
+        {
             let iter = self.iter.clone();
             Box::pin(async move {
                 let mut i = iter.lock().await;
@@ -189,12 +195,16 @@ async fn test_agent_chat_multi_iteration_tool_execution_chain() {
                             ToolCall {
                                 id: "call_n1".to_string(),
                                 name: "add_note".to_string(),
-                                arguments: json!({ "presentation_id": created_id, "text": "Afinar en Re" }).to_string(),
+                                arguments:
+                                    json!({ "presentation_id": created_id, "text": "Afinar en Re" })
+                                        .to_string(),
                             },
                             ToolCall {
                                 id: "call_l1".to_string(),
                                 name: "add_lyrics".to_string(),
-                                arguments: json!({ "presentation_id": created_id, "text": "Estrofa 1" }).to_string(),
+                                arguments:
+                                    json!({ "presentation_id": created_id, "text": "Estrofa 1" })
+                                        .to_string(),
                             },
                         ],
                     })
@@ -232,7 +242,11 @@ async fn test_agent_chat_multi_iteration_tool_execution_chain() {
     assert_eq!(output.actions_taken[2].tool, "add_lyrics");
     assert!(output.active_presentation_id.is_some());
     // Grounding: message reflects confirmed actions
-    assert!(output.message.contains("Presentación “Show Acústico” creada"));
+    assert!(
+        output
+            .message
+            .contains("Presentación “Show Acústico” creada")
+    );
 }
 
 #[tokio::test]
@@ -246,7 +260,8 @@ async fn test_agent_chat_iteration_limit_5() {
         fn complete(
             &self,
             _req: CompletionRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>> {
+        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>>
+        {
             Box::pin(async {
                 Ok(CompletionResponse {
                     content: None,
@@ -355,5 +370,60 @@ async fn test_agent_chat_partial_success_preserved_on_provider_error() {
     assert!(output.notice.is_some());
     assert_eq!(output.notice.unwrap().code, "provider_unavailable");
     // Committed action is preserved in message summary
-    assert!(output.message.contains("Presentación “Show Permanente” creada"));
+    assert!(
+        output
+            .message
+            .contains("Presentación “Show Permanente” creada")
+    );
+}
+
+#[tokio::test]
+async fn test_agent_chat_history_truncation_strict_char_cap_and_system_note() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let provider = Arc::new(StubChatProvider::new(vec![Ok(CompletionResponse {
+        content: Some("Respuesta".to_string()),
+        tool_calls: vec![],
+    })]));
+
+    let agent_chat = AgentChat::new(
+        Some(provider.clone()),
+        dispatcher,
+        AgentLimits::default(),
+        "model".to_string(),
+    );
+
+    let huge_content = "á".repeat(33_000);
+    let input_huge = AgentChatInput {
+        message: "Hola".to_string(),
+        history: vec![HistoryMessage {
+            role: "user".to_string(),
+            content: huge_content,
+        }],
+        presentation_id: None,
+        staged_audio: None,
+        staged_filename: None,
+    };
+
+    let _ = agent_chat.execute(input_huge).await;
+    let requests = provider.recorded_requests.lock().await;
+    let msgs = &requests[0].messages;
+
+    assert_eq!(msgs.len(), 2);
+    match &msgs[0] {
+        AgentMessage::System { content } => {
+            assert!(content.contains("fueron podados"));
+        }
+        other => panic!(
+            "Expected AgentMessage::System for pruning note, got {:?}",
+            other
+        ),
+    }
+    match &msgs[1] {
+        AgentMessage::User { content } => {
+            assert_eq!(content, "Hola");
+        }
+        other => panic!("Expected current user message, got {:?}", other),
+    }
 }

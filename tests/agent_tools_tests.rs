@@ -114,7 +114,8 @@ async fn test_dispatcher_enforces_presentation_id_integrity() {
         arguments: json!({
             "presentation_id": "pres-invented-999",
             "text": "Nota fantasma"
-        }).to_string(),
+        })
+        .to_string(),
     };
     let result = dispatcher.dispatch(&bad_call, &mut context);
     assert_eq!(result["error"], "unauthorized_presentation_id");
@@ -127,7 +128,8 @@ async fn test_dispatcher_enforces_presentation_id_integrity() {
         arguments: json!({
             "presentation_id": pres.id,
             "text": "Nota autorizada"
-        }).to_string(),
+        })
+        .to_string(),
     };
     let result_good = dispatcher.dispatch(&good_call, &mut context);
     assert_eq!(result_good["kind"], "note");
@@ -150,7 +152,8 @@ async fn test_dispatcher_deduplication_mutation_and_read_cache() {
         arguments: json!({
             "presentation_id": pres.id,
             "text": "Coro: Alabanza"
-        }).to_string(),
+        })
+        .to_string(),
     };
     let res1 = dispatcher.dispatch(&call1, &mut context);
     assert_eq!(res1["kind"], "lyrics");
@@ -160,7 +163,11 @@ async fn test_dispatcher_deduplication_mutation_and_read_cache() {
     // Duplicate call with SAME call_id
     let res_dup_id = dispatcher.dispatch(&call1, &mut context);
     assert_eq!(res_dup_id["warning"], "duplicate_call_ignored");
-    assert_eq!(context.actions_taken.len(), 1, "Must not append duplicate action");
+    assert_eq!(
+        context.actions_taken.len(),
+        1,
+        "Must not append duplicate action"
+    );
 
     // Duplicate call with DIFFERENT call_id but EQUIVALENT arguments (whitespace/key order invariant)
     let call2_equiv = ToolCall {
@@ -218,7 +225,8 @@ async fn test_dispatcher_chained_presentation_creation_and_item_addition() {
         arguments: json!({
             "presentation_id": new_id,
             "text": "Comenzar en Mi menor"
-        }).to_string(),
+        })
+        .to_string(),
     };
     let note_res = dispatcher.dispatch(&note_call, &mut context);
     assert_eq!(note_res["kind"], "note");
@@ -232,7 +240,8 @@ async fn test_dispatcher_chained_presentation_creation_and_item_addition() {
         arguments: json!({
             "presentation_id": new_id,
             "text": "Estrofa 1..."
-        }).to_string(),
+        })
+        .to_string(),
     };
     let lyrics_res = dispatcher.dispatch(&lyrics_call, &mut context);
     assert_eq!(lyrics_res["kind"], "lyrics");
@@ -248,7 +257,11 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
     // Create a real staged file
     let (stage_id, stage_path) = state.storage.create_staging_file().unwrap();
     // Write valid MP3 dummy bytes (with sync frame)
-    std::fs::write(&stage_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    std::fs::write(
+        &stage_path,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
     let guard = StagingFileGuard::new(state.storage.clone(), stage_id.clone(), stage_path.clone());
     let staged_audio = StagedAudioHandle::Available {
         guard,
@@ -266,7 +279,8 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
         arguments: json!({
             "presentation_id": pres.id,
             "title": "Pista 1 Guitarra"
-        }).to_string(),
+        })
+        .to_string(),
     };
     let res = dispatcher.dispatch(&track_call, &mut context);
     assert_eq!(res["kind"], "track");
@@ -274,7 +288,10 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
     assert_eq!(res["position"], 0);
 
     // Staged audio should now be Consumed
-    assert!(matches!(context.staged_audio, Some(StagedAudioHandle::Consumed)));
+    assert!(matches!(
+        context.staged_audio,
+        Some(StagedAudioHandle::Consumed)
+    ));
 
     // 2. Calling add_track_from_staged again in same turn should fail with audio_already_consumed
     let track_call_2 = ToolCall {
@@ -283,7 +300,8 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
         arguments: json!({
             "presentation_id": pres.id,
             "title": "Segunda Pista"
-        }).to_string(),
+        })
+        .to_string(),
     };
     let res2 = dispatcher.dispatch(&track_call_2, &mut context);
     assert_eq!(res2["error"], "audio_already_consumed");
@@ -296,7 +314,8 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
         arguments: json!({
             "presentation_id": pres.id,
             "title": "Pista Fantasma"
-        }).to_string(),
+        })
+        .to_string(),
     };
     let res3 = dispatcher.dispatch(&track_call_no_audio, &mut empty_context);
     assert_eq!(res3["error"], "no_audio_staged");
@@ -344,4 +363,49 @@ async fn test_dispatcher_validation_empty_arguments() {
     };
     let res4 = dispatcher.dispatch(&empty_track, &mut context);
     assert_eq!(res4["error"], "validation_error");
+}
+
+#[tokio::test]
+async fn test_dispatcher_rejects_unknown_fields_in_tool_arguments() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Val").unwrap();
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::default();
+
+    let call_create = ToolCall {
+        id: "call_extra_1".to_string(),
+        name: "create_presentation".to_string(),
+        arguments: json!({ "name": "Show Nuevo", "extra_prop": "malicious" }).to_string(),
+    };
+    let res = dispatcher.dispatch(&call_create, &mut context);
+    assert_eq!(res["error"], "validation_error");
+    assert_eq!(res["message"], "Parámetros de herramienta inválidos");
+
+    let call_get = ToolCall {
+        id: "call_extra_2".to_string(),
+        name: "get_presentation".to_string(),
+        arguments: json!({ "presentation_id": pres.id, "foo": "bar" }).to_string(),
+    };
+    let res = dispatcher.dispatch(&call_get, &mut context);
+    assert_eq!(res["error"], "validation_error");
+    assert_eq!(res["message"], "Parámetros de herramienta inválidos");
+
+    let call_lyrics = ToolCall {
+        id: "call_extra_3".to_string(),
+        name: "add_lyrics".to_string(),
+        arguments: json!({ "presentation_id": pres.id, "text": "Letra", "extra": 123 }).to_string(),
+    };
+    let res = dispatcher.dispatch(&call_lyrics, &mut context);
+    assert_eq!(res["error"], "validation_error");
+    assert_eq!(res["message"], "Parámetros de herramienta inválidos");
+
+    let call_track = ToolCall {
+        id: "call_extra_4".to_string(),
+        name: "add_track_from_staged".to_string(),
+        arguments: json!({ "presentation_id": pres.id, "title": "Track", "bogus": true })
+            .to_string(),
+    };
+    let res = dispatcher.dispatch(&call_track, &mut context);
+    assert_eq!(res["error"], "validation_error");
+    assert_eq!(res["message"], "Parámetros de herramienta inválidos");
 }

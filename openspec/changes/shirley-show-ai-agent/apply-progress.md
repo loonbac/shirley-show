@@ -1,18 +1,17 @@
-# Apply Progress: Shirley Show AI Agent (Slices 1 & 2 Completed)
+# Apply Progress: Shirley Show AI Agent (Remediation Completed)
 
 **Change:** `shirley-show-ai-agent`  
-**Slice:** Slice 2 Frontend Chat UI (`aiagent-s2-chat-ui`)  
-**Status:** Both Slice 1 (Backend) and Slice 2 (Frontend) Completed (28/28 tasks done)  
+**Slice:** Remediation Slice (`fix-agent-verify-blockers`)  
+**Status:** All 28 implementation tasks completed and all 6 verify blockers remediated  
 **Execution mode:** auto  
 **Artifact store:** openspec  
 
 ## Native Attempt Authority
-- **Work-Unit:** `aiagent-s2-chat-ui`
-- **Token:** `sha256:504ad0ec074d3ef644155b5113e3a62c3a516d3cc391dd2b9c9e6cecad8a37ef`
-- **Request:** `a2-acquire-001`
-- **Max lines:** 3000
-- **Delivery path:** 2 PRs con `size:exception` acordado (PR2 = Slice 2 Frontend Chat UI)
-- **Action:** Report for settle (DO NOT settle)
+- **Work-Unit:** `fix-agent-verify-blockers`
+- **Attempt:** `avf-begin-001`
+- **Max lines:** 500
+- **Delivery path:** exception-ok (`size:exception` maintainer-accepted review slice)
+- **Action:** Report for finish (DO NOT settle)
 
 ---
 
@@ -21,12 +20,32 @@
 | Work Unit | RED Phase | GREEN Phase | TRIANGULATE Phase | REFACTOR Phase | Status |
 |---|---|---|---|---|---|
 | **WU 1.1: Runtime Config, Port & Groq Client** | `tests/groq_client_tests.rs` wrote failing unit and integration tests against Axum mock server. | `reqwest` & `dotenvy` added; `GroqConfig` implemented; port `ChatCompletionProvider` and `GroqClient` with DTOs and error mapping created. | Added edge-case test coverage for empty choices array, trailing slashes, and whitespace key normalization. | Verified credentials/prompts/payloads are never logged in `src/infra/groq/`; `cargo test --test groq_client_tests` passed (7/7). | Completed |
-| **WU 1.2: Tool Schemas, Context & Dispatcher** | `tests/agent_tools_tests.rs` asserted schemas, unknown tools rejection, ID authorization, deduplication, use case dispatch. | `AgentMessage`, `ToolCall`, `ToolDefinition` implemented; schemas, canonical signature, `TurnToolContext` and `AgentToolDispatcher` created. | Tested duplicate mutation calls returning `duplicate_call_ignored`, cached reads, missing staged files, and empty arguments. | Isolated dispatcher from direct SQL/filesystem; mutations append contiguously; `cargo test --test agent_tools_tests` passed (7/7). | Completed |
-| **WU 1.3: Bounded Loop & AppState** | `tests/agent_chat_tests.rs` asserted multi-step execution, 5-turn limit, 30s deadline, grounded responses, and unconfigured key. | `AgentChat` implemented; `AppState` updated with `AgentRuntime` and provider injection. | Tested tool failures back to model, provider error preserving committed actions in `actions_taken`, active ID tracking. | Cancellation safety with `tokio::time::timeout` preserving committed state; `cargo test --test agent_chat_tests` passed (6/6). | Completed |
-| **WU 1.4: HTTP Handler & Staging** | `tests/agent_chat_api_tests.rs` asserted JSON/multipart parsing, 415 unsupported, 400 validations, and staging lifecycle. | Extracted `json_request`, `multipart_request`, `chat` handler; route `/api/agent/chat` registered in router. | Added test for client stream interruption confirming immediate RAII deletion of `.part` staging files. | Verified zero regressions across entire test suite with `cargo test` (92 tests passing). | Completed |
-| **WU 2.1: Headless Chat State, Signals & Client** | `tests/agent_chat_ui_tests.rs` and `tests/agent-chat-state.test.mjs` wrote failing tests for state transitions and generation tracking. | Extracted `formatBytes` into `utils/format/bytes.js`; implemented `chat-state.js`, `active-presentation-context.js`, `agent-refresh.js`, `stage-mode-state.js`, and `agent-chat-api.js`. | Verified client-side file guard (> 100 MiB rejection, format checks), draft/attachment retention on failure, and retry restricted to empty `actions_taken`. | Decoupled headless state modules 100% from DOM; micro-modular 1-file-1-function architecture. | Completed |
-| **WU 2.2: Pure UI Molecules, Organisms & Scoped CSS** | `tests/agent-chat-ui-components.test.mjs` asserted accessibility attributes (`role="dialog"`), targets >= 48px, text escaping, and keyboard controls. | Added SVG icons (`sparkles`, `send`, `paperclip`, `bot`); implemented focus trap, stick-to-bottom, shortcuts, molecules, composer, panel, and 1:1 stylesheets. | Tested malicious script string plain-text rendering, multi-line lyrics preservation, long filename truncation, pending submit-lock, and reduced-motion. | Verified 580px desktop slide-over and 100vw x 100dvh mobile fullscreen overlay token alignment. | Completed |
-| **WU 2.3: App Composition, Route Sync & Verification** | `tests/agent-chat-integration.test.mjs` verified route context publishing and reactive refresh subscriptions. | Wired `AgentChatController` singleton in `main.js`; updated topbar and route controllers to compose trigger and publish context; wired Ctrl+K with Stage Mode suppression. | Executed full verification matrix against live server `:3100`; tested keyless degraded response, invalid requests, and confirmed "Evento 28 de Agosto" is intact. | Ran full regression test suite with `cargo test` (95 passing tests, 0 failures). | Completed |
+| **WU 1.2: Tool Schemas, Context & Dispatcher** | `tests/agent_tools_tests.rs` asserted schemas, unknown tools rejection, ID authorization, deduplication, use case dispatch. | `AgentMessage`, `ToolCall`, `ToolDefinition` implemented; schemas, canonical signature, `TurnToolContext` and `AgentToolDispatcher` created. | Added `#[serde(deny_unknown_fields)]` strict deserialization; tested rejection of unknown arguments, duplicate mutations, cached reads, and empty arguments. | Isolated dispatcher from direct SQL/filesystem; mutations append contiguously; `cargo test --test agent_tools_tests` passed (8/8). | Completed |
+| **WU 1.3: Bounded Loop & AppState** | `tests/agent_chat_tests.rs` asserted multi-step execution, 5-turn limit, 30s deadline, grounded responses, and unconfigured key. | `AgentChat` implemented; `AppState` updated with `AgentRuntime` and provider injection. | Tested character-based history cap (32k chars, not bytes), single oversized message exclusion, and `AgentMessage::System` pruning note. | Cancellation safety with `tokio::time::timeout` preserving committed state; `cargo test --test agent_chat_tests` passed (7/7). | Completed |
+| **WU 1.4: HTTP Handler & Staging** | `tests/agent_chat_api_tests.rs` asserted JSON/multipart parsing, 415 unsupported, 400 validations, and staging lifecycle. | Extracted `json_request`, `multipart_request`, `chat` handler; route `/api/agent/chat` registered in router. Global 30s deadline wraps multipart parsing/staging and loop. | Added tests for history truncation (32k char cap, single oversized message excluded), client stream abort purging `.part` files, and audio attachment > 100 MiB rejected with 400 Bad Request. | Verified zero regressions across entire test suite with `cargo test` (131 tests passing, 0 failures; `cargo fmt` clean). | Completed |
+| **WU 2.1: Headless Chat State, Signals & Client** | `tests/agent_chat_ui_tests.rs` and `tests/agent-chat-state.test.mjs` wrote failing tests for state transitions and generation tracking. | Extracted `formatBytes` into `utils/format/bytes.js`; implemented `chat-state.js`, `active-presentation-context.js`, `agent-refresh.js`, `stage-mode-state.js`, and `agent-chat-api.js`. | Verified client-side file guard (> 100 MiB rejection, format checks), draft/attachment retention on provider notice (`provider_auth`, `provider_rate_limited`, `provider_unavailable`, `agent_timeout`), and retry restricted to empty `actions_taken`. | Decoupled headless state modules 100% from DOM; micro-modular 1-file-1-function architecture. | Completed |
+| **WU 2.2: Pure UI Molecules, Organisms & Scoped CSS** | `tests/agent-chat-ui-components.test.mjs` asserted accessibility attributes (`role="dialog"`), targets >= 48px, text escaping, and keyboard controls. | Added SVG icons (`sparkles`, `send`, `paperclip`, `bot`); implemented focus trap with Escape dismissal, focus restoration, stick-to-bottom, shortcuts, molecules, composer, panel, and 1:1 stylesheets. | Tested malicious script string plain-text rendering, multi-line lyrics preservation, long filename truncation, pending submit-lock, reduced-motion, and notice fallback with actionable retry. | Verified 580px desktop slide-over and 100vw x 100dvh mobile fullscreen overlay token alignment (audited via CSS tokens and stylesheet assertions in headless test harness; visual subpixel rendering not testable in headless Node). | Completed |
+| **WU 2.3: App Composition, Route Sync & Verification** | `tests/agent-chat-integration.test.mjs` verified route context publishing and reactive refresh subscriptions. | Wired `AgentChatController` singleton in `main.js`; updated topbar and route controllers to compose trigger and publish context; wired Ctrl+K with Stage Mode suppression. Added scroll/anchor capture and restoration around `loadData()` on agent refresh. | Executed full verification matrix against live server `:3100`; tested keyless degraded response, invalid requests, and confirmed "Evento 28 de Agosto" is intact. | Ran full regression test suite with `cargo test` (131 passing tests, 0 failures). | Completed |
+
+---
+
+## Remediated Blocker Summary (6/6 Remediated)
+
+1. **TDD Evidence & Real Assertions**:
+   - `tests/agent_chat_api_tests.rs`: added `test_chat_api_json_history_truncation_and_32k_character_cap`, `test_chat_api_json_history_single_message_exceeding_32k_chars`, and `test_chat_api_multipart_attachment_exceeding_100_mib_rejected_400`.
+   - `tests/agent-chat-ui-components.test.mjs`: added tests for Escape key dismissal and focus restoration, CSS layout constraints (580px desktop, 100vw x 100dvh mobile, safe-area insets), and notice fallback rendering with actionable retry. Headless limitations honestly noted.
+   - `tests/agent-chat-integration.test.mjs`: added test verifying active context published from detail and reactive reload triggered with scroll/anchor capture and restoration.
+2. **Global 30s Deadline**:
+   - `src/handlers/agent/chat.rs`: wrapped multipart/JSON parsing, staging, and agent loop in `tokio::time::timeout(state.agent_chat.limits.request_timeout, ...)` and called `execute_with_timeout` with saturating remaining time.
+3. **Strict History Bounds & Character Cap**:
+   - `src/use_cases/agent_chat.rs`: character counting via `.chars().count()` (not bytes), single message > 32,000 characters pruned immediately without being accepted alone; pruning note inserted as `AgentMessage::System`, not `AgentMessage::User`. Added `AgentMessage::System` variant and wire mapping in `src/infra/groq/client.rs`.
+4. **Strict Tool Argument Validation**:
+   - `src/agent/tool_dispatcher.rs`: added `#[serde(deny_unknown_fields)]` to `CreatePresentationArgs`, `PresentationIdArgs`, `AddItemTextArgs`, and `AddTrackArgs`. Tested in `tests/agent_tools_tests.rs`.
+5. **Scroll Preservation on Detail Refresh**:
+   - `frontend/js/controllers/presentation-detail-controller.js`: captured `window.scrollY` and `scrollEl.scrollTop` before `await loadData()`, restored both immediately afterwards. Tested in `tests/agent-chat-integration.test.mjs`.
+6. **Draft Retention & Fallback Retry Copy**:
+   - `frontend/js/core/state/chat-state.js`: `resolveTurn` preserves `state.draft` when response includes provider notices (`provider_auth`, `provider_rate_limited`, `provider_unavailable`, `agent_timeout`, `provider_error`).
+   - `frontend/js/components/organisms/agent-chat-panel.js`: `renderNotice` provides fallback copy based on `notice.code` when `notice.message` is absent and renders actionable retry button when `notice.retryable && !hasCommittedActions`. Tested in `tests/agent-chat-state.test.mjs` and `tests/agent-chat-ui-components.test.mjs`.
 
 ---
 

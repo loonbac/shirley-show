@@ -61,6 +61,9 @@ impl ChatCompletionProvider for GroqClient {
 
             for msg in request.messages {
                 match msg {
+                    AgentMessage::System { content } => {
+                        wire_messages.push(GroqMessage::System { content });
+                    }
                     AgentMessage::User { content } => {
                         wire_messages.push(GroqMessage::User { content });
                     }
@@ -140,9 +143,12 @@ impl ChatCompletionProvider for GroqClient {
             let status = response.status();
             match status {
                 StatusCode::OK => {
-                    let parsed: GroqChatCompletionResponse = response.json().await.map_err(|_| {
-                        ProviderError::MalformedResponse("Invalid response JSON schema".to_string())
-                    })?;
+                    let parsed: GroqChatCompletionResponse =
+                        response.json().await.map_err(|_| {
+                            ProviderError::MalformedResponse(
+                                "Invalid response JSON schema".to_string(),
+                            )
+                        })?;
 
                     let choice = parsed.choices.into_iter().next().ok_or_else(|| {
                         ProviderError::MalformedResponse("Choices array is empty".to_string())

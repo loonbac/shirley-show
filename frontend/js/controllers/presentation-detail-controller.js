@@ -191,9 +191,32 @@ export function createPresentationDetailController(deps) {
   });
 
   // Subscribe to agent refresh events for this presentation
-  const unsubscribeRefresh = onAgentRefresh((event) => {
+  const unsubscribeRefresh = onAgentRefresh(async (event) => {
     if (event.scope === 'presentation' && event.presentationId === presentationId) {
-      loadData();
+      const scrollY =
+        (typeof window !== 'undefined' && window.scrollY) ||
+        (typeof document !== 'undefined' && document.documentElement && document.documentElement.scrollTop) ||
+        (typeof document !== 'undefined' && document.body && document.body.scrollTop) ||
+        0;
+      const scrollEl = view.el?.parentElement || view.el;
+      const elemScrollTop = scrollEl ? scrollEl.scrollTop : 0;
+
+      await loadData();
+
+      if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+        window.scrollTo(0, scrollY);
+      }
+      if (typeof document !== 'undefined') {
+        if (document.documentElement && document.documentElement.scrollTop !== undefined) {
+          document.documentElement.scrollTop = scrollY;
+        }
+        if (document.body && document.body.scrollTop !== undefined) {
+          document.body.scrollTop = scrollY;
+        }
+      }
+      if (scrollEl && scrollEl.scrollTop !== undefined) {
+        scrollEl.scrollTop = elemScrollTop;
+      }
     }
   });
 

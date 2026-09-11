@@ -297,4 +297,31 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   console.log('✓ 8. Retry offered only when actions_taken is empty');
 }
 
+// 9. resolveTurn preserves draft on provider notices
+{
+  const providerCodes = ['provider_auth', 'provider_rate_limited', 'provider_unavailable', 'agent_timeout'];
+  for (const code of providerCodes) {
+    const state = createChatState();
+    state.setDraft(`Mensaje guardado para ${code}`);
+    const turn = state.beginTurn({ message: `Mensaje guardado para ${code}` });
+    state.resolveTurn({
+      generationId: turn.generationId,
+      response: {
+        message: 'Error de proveedor',
+        actions_taken: [],
+        active_presentation_id: null,
+        notice: { code, retryable: true },
+      },
+    });
+
+    assert.equal(
+      state.get().draft,
+      `Mensaje guardado para ${code}`,
+      `Draft must be preserved when notice.code is ${code}`
+    );
+    assert.equal(state.get().notice.code, code);
+  }
+  console.log('✓ 9. resolveTurn preserves draft on provider notices (provider_auth, rate_limited, unavailable, timeout)');
+}
+
 console.log('All Agent Chat State and API Client unit tests passed!');

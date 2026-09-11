@@ -53,7 +53,8 @@ impl GroqConfig {
 
     pub fn from_env() -> Self {
         let api_key = env::var("GROQ_API_KEY").ok();
-        let base_url = env::var("GROQ_BASE_URL").unwrap_or_else(|_| DEFAULT_GROQ_BASE_URL.to_string());
+        let base_url =
+            env::var("GROQ_BASE_URL").unwrap_or_else(|_| DEFAULT_GROQ_BASE_URL.to_string());
         let model = env::var("GROQ_MODEL").unwrap_or_else(|_| DEFAULT_GROQ_MODEL.to_string());
 
         let mut config = Self {

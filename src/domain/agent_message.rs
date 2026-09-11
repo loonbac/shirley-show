@@ -5,6 +5,9 @@ use crate::domain::agent_tool::ToolCall;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum AgentMessage {
+    System {
+        content: String,
+    },
     User {
         content: String,
     },

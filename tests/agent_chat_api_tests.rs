@@ -25,7 +25,16 @@ impl ChatCompletionProvider for MockProvider {
     fn complete(
         &self,
         _request: CompletionRequest,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<CompletionResponse, shirley_show::infra::groq::error::ProviderError>> + Send>> {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        CompletionResponse,
+                        shirley_show::infra::groq::error::ProviderError,
+                    >,
+                > + Send,
+        >,
+    > {
         let resp = self.response.clone();
         Box::pin(async move { Ok(resp) })
     }
@@ -210,7 +219,8 @@ async fn test_chat_api_multipart_audio_upload_and_staging_lifecycle() {
                 arguments: json!({
                     "presentation_id": pres.id,
                     "title": "Pista Batería"
-                }).to_string(),
+                })
+                .to_string(),
             }],
         },
     });
@@ -254,7 +264,10 @@ async fn test_chat_api_multipart_audio_upload_and_staging_lifecycle() {
     // Staging directory must be empty after promotion
     let staging_dir = state.storage.staging_dir();
     let count = std::fs::read_dir(staging_dir).unwrap().count();
-    assert_eq!(count, 0, "Staging directory must be empty after consumption");
+    assert_eq!(
+        count, 0,
+        "Staging directory must be empty after consumption"
+    );
 }
 
 #[tokio::test]
@@ -395,5 +408,117 @@ async fn test_chat_api_multipart_client_abort_purges_staging() {
     assert_eq!(
         remaining_staging, 0,
         "Staging guard must have purged partial staging file upon stream error"
+    );
+}
+
+#[tokio::test]
+async fn test_chat_api_json_history_truncation_and_32k_character_cap() {
+    let (app, _state, _tmp) = setup_app_with_provider(CompletionResponse {
+        content: Some("Respuesta ok".to_string()),
+        tool_calls: vec![],
+    });
+
+    let mut history = Vec::new();
+    for i in 0..25 {
+        history.push(json!({
+            "role": if i % 2 == 0 { "user" } else { "assistant" },
+            "content": format!("Mensaje número {} con texto de relleno {}", i, "x".repeat(1500)),
+        }));
+    }
+
+    let payload = json!({
+        "message": "¿Qué shows tengo?",
+        "history": history,
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["message"], "Respuesta ok");
+}
+
+#[tokio::test]
+async fn test_chat_api_json_history_single_message_exceeding_32k_chars() {
+    let (app, _state, _tmp) = setup_app_with_provider(CompletionResponse {
+        content: Some("Respuesta ok".to_string()),
+        tool_calls: vec![],
+    });
+
+    let huge_content = "x".repeat(35_000);
+    let history = vec![json!({
+        "role": "user",
+        "content": huge_content,
+    })];
+
+    let payload = json!({
+        "message": "Hola Shirley",
+        "history": history,
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["message"], "Respuesta ok");
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_attachment_exceeding_100_mib_rejected_400() {
+    use tokio::io::AsyncReadExt;
+    use tokio_util::io::ReaderStream;
+
+    let (app, state, _tmp) = setup_test_app();
+
+    let boundary = "----WebKitFormBoundaryOversizedAudio";
+    let header_part = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"message\"\r\n\r\nAgrega pista\r\n\
+         --{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"huge.mp3\"\r\n\
+         Content-Type: audio/mpeg\r\n\r\n"
+    );
+
+    let mut first_chunk = header_part.into_bytes();
+    first_chunk.extend_from_slice(&[0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    let prefix = std::io::Cursor::new(first_chunk);
+    let zeroes = tokio::io::repeat(0).take(105 * 1024 * 1024);
+    let chained = prefix.chain(zeroes);
+    let stream = ReaderStream::new(chained);
+    let body = Body::from_stream(stream);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "file_too_large");
+
+    let staging_dir = state.storage.staging_dir();
+    let remaining_staging = std::fs::read_dir(staging_dir).unwrap().count();
+    assert_eq!(
+        remaining_staging, 0,
+        "Staging files must be purged after 100 MiB rejection"
     );
 }

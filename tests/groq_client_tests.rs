@@ -122,7 +122,10 @@ async fn test_groq_client_request_serialization_and_auth_header() {
         }],
     };
 
-    let response = client.complete(request).await.expect("successful completion");
+    let response = client
+        .complete(request)
+        .await
+        .expect("successful completion");
     assert_eq!(response.content.as_deref(), Some("¡Hola! Soy Shirley."));
     assert!(response.tool_calls.is_empty());
 
@@ -139,13 +142,19 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     let messages = body["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 4);
     assert_eq!(messages[0]["role"], "system");
-    assert_eq!(messages[0]["content"], "Eres Shirley, asistente de escenario.");
+    assert_eq!(
+        messages[0]["content"],
+        "Eres Shirley, asistente de escenario."
+    );
     assert_eq!(messages[1]["role"], "user");
     assert_eq!(messages[1]["content"], "Hola Shirley");
     assert_eq!(messages[2]["role"], "assistant");
     assert_eq!(messages[2]["tool_calls"][0]["id"], "call_abc123");
     assert_eq!(messages[2]["tool_calls"][0]["type"], "function");
-    assert_eq!(messages[2]["tool_calls"][0]["function"]["name"], "list_presentations");
+    assert_eq!(
+        messages[2]["tool_calls"][0]["function"]["name"],
+        "list_presentations"
+    );
     assert_eq!(messages[3]["role"], "tool");
     assert_eq!(messages[3]["tool_call_id"], "call_abc123");
     assert_eq!(messages[3]["content"], "[]");
@@ -154,7 +163,10 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0]["type"], "function");
     assert_eq!(tools[0]["function"]["name"], "list_presentations");
-    assert_eq!(tools[0]["function"]["description"], "Lista las presentaciones disponibles");
+    assert_eq!(
+        tools[0]["function"]["description"],
+        "Lista las presentaciones disponibles"
+    );
 }
 
 #[tokio::test]
@@ -195,7 +207,9 @@ async fn test_groq_client_tool_call_response_parsing() {
     let request = CompletionRequest {
         model: "llama-3.3-70b-versatile".to_string(),
         system_prompt: "sys".to_string(),
-        messages: vec![AgentMessage::User { content: "crea show".to_string() }],
+        messages: vec![AgentMessage::User {
+            content: "crea show".to_string(),
+        }],
         tools: vec![],
     };
 
@@ -204,7 +218,10 @@ async fn test_groq_client_tool_call_response_parsing() {
     assert_eq!(response.tool_calls.len(), 1);
     assert_eq!(response.tool_calls[0].id, "call_create_1");
     assert_eq!(response.tool_calls[0].name, "create_presentation");
-    assert_eq!(response.tool_calls[0].arguments, "{\"name\":\"Show Acústico\"}");
+    assert_eq!(
+        response.tool_calls[0].arguments,
+        "{\"name\":\"Show Acústico\"}"
+    );
 }
 
 #[tokio::test]
@@ -222,12 +239,17 @@ async fn test_groq_client_base_url_normalization() {
     let request = CompletionRequest {
         model: "llama-3.3-70b-versatile".to_string(),
         system_prompt: "sys".to_string(),
-        messages: vec![AgentMessage::User { content: "ping".to_string() }],
+        messages: vec![AgentMessage::User {
+            content: "ping".to_string(),
+        }],
         tools: vec![],
     };
 
     let response = client.complete(request).await;
-    assert!(response.is_ok(), "Base url trailing slashes should be normalized cleanly");
+    assert!(
+        response.is_ok(),
+        "Base url trailing slashes should be normalized cleanly"
+    );
 }
 
 #[tokio::test]
@@ -244,7 +266,9 @@ async fn test_groq_client_http_error_mappings() {
     let make_req = || CompletionRequest {
         model: "llama-3.3-70b-versatile".to_string(),
         system_prompt: "sys".to_string(),
-        messages: vec![AgentMessage::User { content: "test".to_string() }],
+        messages: vec![AgentMessage::User {
+            content: "test".to_string(),
+        }],
         tools: vec![],
     };
 
@@ -292,7 +316,9 @@ async fn test_groq_client_malformed_response() {
     let make_req = || CompletionRequest {
         model: "llama-3.3-70b-versatile".to_string(),
         system_prompt: "sys".to_string(),
-        messages: vec![AgentMessage::User { content: "test".to_string() }],
+        messages: vec![AgentMessage::User {
+            content: "test".to_string(),
+        }],
         tools: vec![],
     };
 
@@ -344,7 +370,9 @@ async fn test_groq_client_timeout_mapping() {
     let req = CompletionRequest {
         model: "llama-3.3-70b-versatile".to_string(),
         system_prompt: "sys".to_string(),
-        messages: vec![AgentMessage::User { content: "test".to_string() }],
+        messages: vec![AgentMessage::User {
+            content: "test".to_string(),
+        }],
         tools: vec![],
     };
 
