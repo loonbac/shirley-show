@@ -17,7 +17,7 @@ function formatBytes(bytes) {
 }
 
 /**
- * Creates a track item organism for the timeline.
+ * Creates a track item organism for the timeline with tactile actions and quick-editing.
  * @param {{
  *   item: { id: string, title: string, position: number, byte_size?: number, media_type?: string },
  *   isFirst?: boolean,
@@ -28,6 +28,7 @@ function formatBytes(bytes) {
  *   onMoveUp: (item: any) => void,
  *   onMoveDown: (item: any) => void,
  *   onDelete: (item: any) => void,
+ *   onEdit?: (item: any) => void,
  * }} props 
  * @returns {{
  *   el: HTMLElement,
@@ -45,6 +46,7 @@ export function createTrackItem(props) {
     onMoveUp,
     onMoveDown,
     onDelete,
+    onEdit,
   } = props;
 
   const isCurrentTrack = playbackState.currentTrackId === item.id;
@@ -60,23 +62,38 @@ export function createTrackItem(props) {
     onMoveDown: () => onMoveDown(item),
   });
 
+  const titleBadge = createElement('span', { class: 'track-item-badge' }, ['Pista']);
+  const titleText = createElement('span', { class: 'track-item-title-text' }, [item.title]);
   const titleEl = createElement('span', { class: 'track-item-title' }, [
-    createElement('span', { class: 'track-item-badge' }, ['Pista']),
-    document.createTextNode(item.title),
+    titleBadge,
+    titleText,
   ]);
 
   const metaText = item.byte_size ? formatBytes(item.byte_size) : '';
   const metaEl = createElement('span', { class: 'track-item-meta' }, [metaText]);
 
+  const editBtn = createIconButton({
+    iconName: 'edit',
+    ariaLabel: `Editar pista ${item.title}`,
+    title: 'Editar pista',
+    onClick: () => {
+      if (typeof onEdit === 'function') {
+        onEdit(item);
+      }
+    },
+  });
+
   const deleteBtn = createIconButton({
     iconName: 'trash',
     ariaLabel: `Eliminar pista ${item.title}`,
+    title: 'Eliminar pista',
     variant: 'danger',
     onClick: () => onDelete(item),
   });
 
   const headerActions = createElement('div', { class: 'track-item-actions' }, [
     metaEl,
+    editBtn.el,
     deleteBtn.el,
   ]);
 
@@ -115,7 +132,14 @@ export function createTrackItem(props) {
   ]);
 
   function update(nextProps = {}) {
-    if (nextProps.item !== undefined) item = nextProps.item;
+    if (nextProps.item !== undefined) {
+      item = nextProps.item;
+      titleText.textContent = item.title;
+      metaEl.textContent = item.byte_size ? formatBytes(item.byte_size) : '';
+      editBtn.update({ ariaLabel: `Editar pista ${item.title}` });
+      deleteBtn.update({ ariaLabel: `Eliminar pista ${item.title}` });
+    }
+    if (nextProps.onEdit !== undefined) onEdit = nextProps.onEdit;
     if (nextProps.isFirst !== undefined) isFirst = nextProps.isFirst;
     if (nextProps.isLast !== undefined) isLast = nextProps.isLast;
 

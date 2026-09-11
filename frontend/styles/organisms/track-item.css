@@ -7,6 +7,8 @@
   border: 1px solid var(--color-border);
   border-left: 4px solid var(--color-accent-track);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .track-item-content {
@@ -31,15 +33,21 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.track-item-title-text {
+  word-break: break-word;
 }
 
 .track-item-badge {
   font-size: var(--font-size-xs);
-  padding: 2px 6px;
-  background-color: color-mix(in srgb, var(--color-accent-track) 12%, transparent);
+  padding: 2px 8px;
+  background-color: var(--color-accent-track-subtle);
   color: var(--color-accent-track);
+  border: 1px solid color-mix(in srgb, var(--color-accent-track) 20%, transparent);
   border-radius: var(--radius-sm);
-  font-weight: var(--font-weight-normal);
+  font-weight: var(--font-weight-medium);
 }
 
 .track-item-meta {
@@ -61,6 +69,14 @@
   gap: var(--space-1);
 }
 
+/* Tactile 48px touch targets for all interactive controls */
+.track-item .icon-btn,
+.track-item .reorder-btn,
+.track-item .playback-toggle-btn {
+  min-width: var(--touch-target-action);
+  min-height: var(--touch-target-action);
+}
+
 @media (min-width: 768px) and (max-width: 1023px) {
   .track-item {
     width: 100%;
@@ -72,20 +88,18 @@
 @media (min-width: 1024px) {
   .track-item {
     width: 100%;
-    padding: var(--space-3) var(--space-5);
-    border-radius: var(--radius-sm);
+    padding: var(--space-4) var(--space-5);
+    border-radius: var(--radius-md);
     gap: var(--space-4);
-    align-items: center;
-    transition: background-color var(--transition-fast), border-color var(--transition-fast);
   }
 
   .track-item:hover {
     background-color: var(--color-surface-hover);
     border-color: var(--color-border-subtle);
+    box-shadow: var(--shadow-paper);
   }
 
   .track-item-content {
     gap: var(--space-2);
   }
 }
-

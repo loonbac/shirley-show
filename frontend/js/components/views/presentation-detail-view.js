@@ -3,6 +3,7 @@ import { createButton } from '../atoms/button.js';
 import { createSpinner } from '../atoms/spinner.js';
 import { createStatusMessage } from '../atoms/status-message.js';
 import { createIconButton } from '../molecules/icon-button.js';
+import { createQuickAddBar } from '../molecules/quick-add-bar.js';
 import { createEmptyState } from '../molecules/empty-state.js';
 import { createTimelineLayout } from '../layouts/timeline-layout.js';
 import { createTrackItem } from '../organisms/track-item.js';
@@ -20,6 +21,8 @@ import { createNoteItem } from '../organisms/note-item.js';
  *   onRename: () => void,
  *   onDeletePresentation: () => void,
  *   onAddItemClick: () => void,
+ *   onQuickAdd?: (type: 'track' | 'lyrics' | 'note') => void,
+ *   onEditItem?: (item: any) => void,
  *   onTogglePlay: (item: any) => void,
  *   onSeek: (seconds: number) => void,
  *   onMoveUp: (item: any) => void,
@@ -41,6 +44,8 @@ export function createPresentationDetailView(props) {
     onRename,
     onDeletePresentation,
     onAddItemClick,
+    onQuickAdd,
+    onEditItem,
     onTogglePlay,
     onSeek,
     onMoveUp,
@@ -109,6 +114,21 @@ export function createPresentationDetailView(props) {
       headerRight,
     ]);
 
+    // Prominent Quick Add Bar for immediate 1-tap addition
+    const quickAddBar = createQuickAddBar({
+      onAdd: (type) => {
+        if (typeof onQuickAdd === 'function') {
+          onQuickAdd(type);
+        } else if (typeof onAddItemClick === 'function') {
+          onAddItemClick();
+        }
+      },
+    });
+
+    const quickAddSection = createElement('div', { class: 'presentation-quick-add-section' }, [
+      quickAddBar.el,
+    ]);
+
     // Timeline or Empty State
     let timelineContent;
 
@@ -122,7 +142,7 @@ export function createPresentationDetailView(props) {
       timelineContent = createEmptyState({
         iconName: 'note',
         title: 'El show está vacío',
-        description: 'Agrega pistas de audio para reproducir, letras en tipografía grande para el atril o notas de escenario con indicaciones.',
+        description: 'Usa la barra superior para agregar pistas de audio, letras en tipografía grande o notas de escenario con indicaciones.',
         actions: [addFirstBtn.el],
       });
     } else {
@@ -146,6 +166,7 @@ export function createPresentationDetailView(props) {
             onMoveUp,
             onMoveDown,
             onDelete: onDeleteItem,
+            onEdit: onEditItem,
           });
         } else if (item.type === 'lyrics') {
           comp = createLyricsItem({
@@ -155,6 +176,7 @@ export function createPresentationDetailView(props) {
             onMoveUp,
             onMoveDown,
             onDelete: onDeleteItem,
+            onEdit: onEditItem,
           });
         } else {
           comp = createNoteItem({
@@ -164,6 +186,7 @@ export function createPresentationDetailView(props) {
             onMoveUp,
             onMoveDown,
             onDelete: onDeleteItem,
+            onEdit: onEditItem,
           });
         }
 
@@ -176,6 +199,7 @@ export function createPresentationDetailView(props) {
     }
 
     container.appendChild(detailHeader);
+    container.appendChild(quickAddSection);
     container.appendChild(timelineContent);
   }
 
@@ -199,6 +223,12 @@ export function createPresentationDetailView(props) {
     if (nextProps.errorMessage !== undefined) {
       errorMessage = nextProps.errorMessage;
       errorBanner.update({ message: errorMessage || '' });
+    }
+    if (nextProps.onQuickAdd !== undefined) {
+      onQuickAdd = nextProps.onQuickAdd;
+    }
+    if (nextProps.onEditItem !== undefined) {
+      onEditItem = nextProps.onEditItem;
     }
 
     if (nextProps.playbackState !== undefined) {

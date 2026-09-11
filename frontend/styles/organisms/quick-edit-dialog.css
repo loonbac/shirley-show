@@ -1,0 +1,65 @@
+.quick-edit-dialog {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  max-width: 560px;
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.quick-edit-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+}
+
+.quick-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.quick-edit-error {
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
+  background-color: var(--color-danger-subtle);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  line-height: var(--line-height-normal);
+}
+
+.quick-edit-shortcut-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-dim);
+}
+
+.quick-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 480px) {
+  .quick-edit-dialog {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+
+  .quick-edit-actions {
+    flex-direction: column-reverse;
+    gap: var(--space-2);
+  }
+
+  .quick-edit-actions .btn {
+    width: 100%;
+    min-height: var(--touch-target-action);
+  }
+}

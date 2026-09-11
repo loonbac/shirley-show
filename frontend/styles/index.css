@@ -22,6 +22,7 @@
 
 /* Molecules */
 @import "./molecules/icon-button.css";
+@import "./molecules/quick-add-bar.css";
 @import "./molecules/confirmation-dialog.css";
 @import "./molecules/item-type-selector.css";
 @import "./molecules/reorder-controls.css";
@@ -37,6 +38,7 @@
 @import "./organisms/lyrics-item.css";
 @import "./organisms/note-item.css";
 @import "./organisms/add-item-dialog.css";
+@import "./organisms/quick-edit-dialog.css";
 
 /* Views */
 @import "./views/presentations-view.css";

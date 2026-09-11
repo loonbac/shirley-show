@@ -4,9 +4,11 @@
   gap: var(--space-3);
   padding: var(--space-4);
   background-color: var(--color-accent-note-subtle);
-  border: 1px solid var(--color-accent-note);
+  border: 1px solid color-mix(in srgb, var(--color-accent-note) 30%, transparent);
   border-left: 4px solid var(--color-accent-note);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .note-item-content {
@@ -21,17 +23,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
 }
 
 .note-item-badge {
   font-size: var(--font-size-xs);
-  padding: 2px 6px;
+  padding: 2px 8px;
   background-color: var(--color-accent-note);
   color: var(--color-surface);
   font-weight: var(--font-weight-bold);
   border-radius: var(--radius-sm);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .note-body {
@@ -48,6 +51,13 @@
   gap: var(--space-1);
 }
 
+/* Tactile 48px touch targets for all interactive controls */
+.note-item .icon-btn,
+.note-item .reorder-btn {
+  min-width: var(--touch-target-action);
+  min-height: var(--touch-target-action);
+}
+
 @media (min-width: 768px) and (max-width: 1023px) {
   .note-item {
     width: 100%;
@@ -60,18 +70,17 @@
   .note-item {
     width: 100%;
     padding: var(--space-4) var(--space-5);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     gap: var(--space-4);
-    transition: background-color var(--transition-fast), border-color var(--transition-fast);
   }
 
   .note-item:hover {
     background-color: color-mix(in srgb, var(--color-accent-note) 14%, transparent);
     border-color: var(--color-accent-note);
+    box-shadow: var(--shadow-paper);
   }
 
   .note-body {
     max-width: 100%;
   }
 }
-

@@ -9,26 +9,39 @@ import { trimRequired } from '../../utils/validation/trim-required.js';
 
 /**
  * Creates a modal dialog organism for adding Track, Lyrics, or Note items.
+ * When `initialType` is provided, opens directly to that item form without tab navigation.
  * @param {{
+ *   initialType?: 'track' | 'lyrics' | 'note',
  *   onSubmit: (payload: { type: 'track' | 'lyrics' | 'note', title?: string, file?: File, body?: string }) => Promise<void> | void,
  *   onCancel: () => void,
  * }} props 
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
 export function createAddItemDialog(props) {
-  const { onSubmit, onCancel } = props;
+  const { onSubmit, onCancel, initialType } = props;
 
-  let selectedType = 'track';
+  let selectedType = initialType || 'track';
 
-  const titleEl = createElement('h3', { class: 'add-item-dialog-title' }, ['Agregar Elemento al Show']);
+  const typeTitles = {
+    track: 'Agregar Pista al Show',
+    lyrics: 'Agregar Letra al Show',
+    note: 'Agregar Nota de Escenario',
+  };
 
-  const typeSelector = createItemTypeSelector({
-    selected: 'track',
-    onChange: (newType) => {
-      selectedType = newType;
-      renderTypeFields();
-    },
-  });
+  const titleEl = createElement('h3', { class: 'add-item-dialog-title' }, [
+    initialType ? typeTitles[initialType] || 'Agregar Elemento al Show' : 'Agregar Elemento al Show',
+  ]);
+
+  let typeSelector = null;
+  if (!initialType) {
+    typeSelector = createItemTypeSelector({
+      selected: selectedType,
+      onChange: (newType) => {
+        selectedType = newType;
+        renderTypeFields();
+      },
+    });
+  }
 
   // Dynamic fields container
   const fieldsContainer = createElement('div', { class: 'add-item-fields' });
@@ -117,11 +130,13 @@ export function createAddItemDialog(props) {
     submitBtn.el,
   ]);
 
-  const formEl = createElement('form', { class: 'add-item-form' }, [
-    typeSelector.el,
+  const formChildren = [
+    typeSelector ? typeSelector.el : null,
     fieldsContainer,
     actionsEl,
-  ]);
+  ].filter(Boolean);
+
+  const formEl = createElement('form', { class: 'add-item-form' }, formChildren);
 
   const dialogCard = createElement(
     'div',

@@ -25,6 +25,10 @@
   overflow-wrap: break-word;
 }
 
+.presentation-quick-add-section {
+  width: 100%;
+}
+
 @media (min-width: 768px) and (max-width: 1023px) {
   .presentation-detail-view {
     gap: var(--space-5);
@@ -37,7 +41,7 @@
 
 @media (min-width: 1024px) {
   .presentation-detail-view {
-    gap: var(--space-6);
+    gap: var(--space-5);
   }
 
   .presentation-title-row {
@@ -49,4 +53,3 @@
     font-size: var(--font-size-3xl);
   }
 }
-

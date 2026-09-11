@@ -1,0 +1,87 @@
+.quick-add-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.quick-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch-target-action);
+  min-width: var(--touch-target-action);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  gap: var(--space-2);
+  cursor: pointer;
+  border: 1px solid transparent;
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.quick-add-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-paper);
+}
+
+.quick-add-btn:active {
+  transform: translateY(0);
+}
+
+.quick-add-btn:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.quick-add-btn-label {
+  white-space: nowrap;
+}
+
+/* Chromatic type accents */
+.quick-add-btn-track {
+  color: var(--color-accent-track);
+  background-color: var(--color-accent-track-subtle);
+  border-color: color-mix(in srgb, var(--color-accent-track) 30%, transparent);
+}
+
+.quick-add-btn-track:hover {
+  background-color: color-mix(in srgb, var(--color-accent-track) 16%, transparent);
+  border-color: var(--color-accent-track);
+}
+
+.quick-add-btn-lyrics {
+  color: var(--color-accent-lyrics);
+  background-color: var(--color-accent-lyrics-subtle);
+  border-color: color-mix(in srgb, var(--color-accent-lyrics) 30%, transparent);
+}
+
+.quick-add-btn-lyrics:hover {
+  background-color: color-mix(in srgb, var(--color-accent-lyrics) 16%, transparent);
+  border-color: var(--color-accent-lyrics);
+}
+
+.quick-add-btn-note {
+  color: var(--color-accent-note);
+  background-color: var(--color-accent-note-subtle);
+  border-color: color-mix(in srgb, var(--color-accent-note) 30%, transparent);
+}
+
+.quick-add-btn-note:hover {
+  background-color: color-mix(in srgb, var(--color-accent-note) 16%, transparent);
+  border-color: var(--color-accent-note);
+}
+
+@media (min-width: 768px) {
+  .quick-add-bar {
+    gap: var(--space-3);
+  }
+
+  .quick-add-btn {
+    font-size: var(--font-size-base);
+    padding: var(--space-3) var(--space-4);
+  }
+}

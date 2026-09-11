@@ -3,7 +3,7 @@ import { createIconButton } from '../molecules/icon-button.js';
 import { createReorderControls } from '../molecules/reorder-controls.js';
 
 /**
- * Creates a stage note item organism with amber cue styling.
+ * Creates a stage note item organism with warm-amber styling, tactile controls, and quick-editing.
  * @param {{
  *   item: { id: string, body: string, position: number },
  *   isFirst?: boolean,
@@ -11,6 +11,7 @@ import { createReorderControls } from '../molecules/reorder-controls.js';
  *   onMoveUp: (item: any) => void,
  *   onMoveDown: (item: any) => void,
  *   onDelete: (item: any) => void,
+ *   onEdit?: (item: any) => void,
  * }} props 
  * @returns {{
  *   el: HTMLElement,
@@ -25,6 +26,7 @@ export function createNoteItem(props) {
     onMoveUp,
     onMoveDown,
     onDelete,
+    onEdit,
   } = props;
 
   const reorder = createReorderControls({
@@ -36,16 +38,33 @@ export function createNoteItem(props) {
 
   const badgeEl = createElement('span', { class: 'note-item-badge' }, ['Nota de Escenario']);
 
+  const editBtn = createIconButton({
+    iconName: 'edit',
+    ariaLabel: 'Editar nota',
+    title: 'Editar nota',
+    onClick: () => {
+      if (typeof onEdit === 'function') {
+        onEdit(item);
+      }
+    },
+  });
+
   const deleteBtn = createIconButton({
     iconName: 'trash',
     ariaLabel: 'Eliminar nota',
+    title: 'Eliminar nota',
     variant: 'danger',
     onClick: () => onDelete(item),
   });
 
+  const actionsEl = createElement('div', { class: 'note-item-actions' }, [
+    editBtn.el,
+    deleteBtn.el,
+  ]);
+
   const headerEl = createElement('div', { class: 'note-item-header' }, [
     badgeEl,
-    deleteBtn.el,
+    actionsEl,
   ]);
 
   const bodyEl = createElement('div', { class: 'note-body' }, [item.body]);
@@ -65,6 +84,7 @@ export function createNoteItem(props) {
       item = nextProps.item;
       bodyEl.textContent = item.body;
     }
+    if (nextProps.onEdit !== undefined) onEdit = nextProps.onEdit;
     if (nextProps.isFirst !== undefined) isFirst = nextProps.isFirst;
     if (nextProps.isLast !== undefined) isLast = nextProps.isLast;
 

@@ -95,27 +95,27 @@ Chain strategy: pending
 
 ### 3.1 Cliente de Datos y Barra de Adición Inmediata
 
-- [ ] Crear el cliente de datos atómico `frontend/js/data/update-item.js` implementando la llamada `PATCH /api/presentations/{presentation_id}/items/{item_id}` con manejo tipado de errores vía `requestJson`. <!-- sdd-owner: implementation -->
-- [ ] Implementar la molécula `frontend/js/components/molecules/quick-add-bar.js` con tres botones táctiles dedicados (`+ Pista`, `+ Letra`, `+ Nota`) con tamaño mínimo de 48 px, emitiendo `onAdd('track'|'lyrics'|'note')`. <!-- sdd-owner: implementation -->
-- [ ] Crear la hoja de estilo atómica `frontend/styles/molecules/quick-add-bar.css` con diseño mobile-first y acentos cromáticos coincidentes con cada tipo de contenido. <!-- sdd-owner: implementation -->
-- [ ] Modificar `frontend/js/components/organisms/add-item-dialog.js` para recibir el tipo inicial preseleccionado y abrir directamente el formulario correspondiente sin paso de navegación por tabs. <!-- sdd-owner: implementation -->
+- [x] Crear el cliente de datos atómico `frontend/js/data/update-item.js` implementando la llamada `PATCH /api/presentations/{presentation_id}/items/{item_id}` con manejo tipado de errores vía `requestJson`. <!-- sdd-owner: implementation -->
+- [x] Implementar la molécula `frontend/js/components/molecules/quick-add-bar.js` con tres botones táctiles dedicados (`+ Pista`, `+ Letra`, `+ Nota`) con tamaño mínimo de 48 px, emitiendo `onAdd('track'|'lyrics'|'note')`. <!-- sdd-owner: implementation -->
+- [x] Crear la hoja de estilo atómica `frontend/styles/molecules/quick-add-bar.css` con diseño mobile-first y acentos cromáticos coincidentes con cada tipo de contenido. <!-- sdd-owner: implementation -->
+- [x] Modificar `frontend/js/components/organisms/add-item-dialog.js` para recibir el tipo inicial preseleccionado y abrir directamente el formulario correspondiente sin paso de navegación por tabs. <!-- sdd-owner: implementation -->
 
 ### 3.2 Diálogo de Edición Rápida
 
-- [ ] Implementar el organismo puro `frontend/js/components/organisms/quick-edit-dialog.js` recibiendo el item actual, precargando el valor de título o body, autofocando el campo, con atajos de teclado (Enter para pistas, Cmd/Ctrl+Enter para textarea, Escape para cancelar), y conservando el borrador ante errores de red o validación. <!-- sdd-owner: implementation -->
-- [ ] Crear la hoja de estilo atómica `frontend/styles/organisms/quick-edit-dialog.css` con overlay accesible, diseño responsivo y estado visual de error y carga sin destruir el formulario. <!-- sdd-owner: implementation -->
+- [x] Implementar el organismo puro `frontend/js/components/organisms/quick-edit-dialog.js` recibiendo el item actual, precargando el valor de título o body, autofocando el campo, con atajos de teclado (Enter para pistas, Cmd/Ctrl+Enter para textarea, Escape para cancelar), y conservando el borrador ante errores de red o validación. <!-- sdd-owner: implementation -->
+- [x] Crear la hoja de estilo atómica `frontend/styles/organisms/quick-edit-dialog.css` con overlay accesible, diseño responsivo y estado visual de error y carga sin destruir el formulario. <!-- sdd-owner: implementation -->
 
 ### 3.3 Bloques Táctiles de Escenario (Track, Lyrics, Note)
 
-- [ ] Rediseñar `frontend/js/components/organisms/track-item.js` y `frontend/styles/organisms/track-item.css` con acento violeta, áreas táctiles mínimas de 48 px, botón de edición rápida (lápiz) con callback `onEdit`, manteniendo confirmación de borrado y controles de reordenamiento accesibles. <!-- sdd-owner: implementation -->
-- [ ] Rediseñar `frontend/js/components/organisms/lyrics-item.js` y `frontend/styles/organisms/lyrics-item.css` con acento cian profundo, preservación de saltos de línea legibles, botón de edición rápida y áreas táctiles de 48 px. <!-- sdd-owner: implementation -->
-- [ ] Rediseñar `frontend/js/components/organisms/note-item.js` y `frontend/styles/organisms/note-item.css` con acento ámbar cálido, tipografía clara de indicación de show, botón de edición rápida y áreas táctiles de 48 px. <!-- sdd-owner: implementation -->
+- [x] Rediseñar `frontend/js/components/organisms/track-item.js` y `frontend/styles/organisms/track-item.css` con acento violeta, áreas táctiles mínimas de 48 px, botón de edición rápida (lápiz) con callback `onEdit`, manteniendo confirmación de borrado y controles de reordenamiento accesibles. <!-- sdd-owner: implementation -->
+- [x] Rediseñar `frontend/js/components/organisms/lyrics-item.js` y `frontend/styles/organisms/lyrics-item.css` con acento cian profundo, preservación de saltos de línea legibles, botón de edición rápida y áreas táctiles de 48 px. <!-- sdd-owner: implementation -->
+- [x] Rediseñar `frontend/js/components/organisms/note-item.js` y `frontend/styles/organisms/note-item.css` con acento ámbar cálido, tipografía clara de indicación de show, botón de edición rápida y áreas táctiles de 48 px. <!-- sdd-owner: implementation -->
 
 ### 3.4 Orquestación en Detalle de Presentación
 
-- [ ] Actualizar `frontend/js/components/views/presentation-detail-view.js` y `frontend/styles/views/presentation-detail-view.css` para integrar la `quick-add-bar` fija o destacada y gestionar el montaje del `quick-edit-dialog`. <!-- sdd-owner: implementation -->
-- [ ] Actualizar `frontend/js/controllers/presentation-detail-controller.js` para conectar `updateItem`, actualizar el estado local y la vista tras confirmación del servidor, preservar el borrador ante fallos, y manejar el caso 404 informando al usuario sin crear items duplicados. <!-- sdd-owner: implementation -->
-- [ ] Registrar estilos nuevos en `frontend/styles/index.css` y verificar manualmente: adición directa de los 3 tipos, edición rápida con guardado y cancelación, y conservación de draft ante fallo de red simulado. <!-- sdd-owner: implementation -->
+- [x] Actualizar `frontend/js/components/views/presentation-detail-view.js` y `frontend/styles/views/presentation-detail-view.css` para integrar la `quick-add-bar` fija o destacada y gestionar el montaje del `quick-edit-dialog`. <!-- sdd-owner: implementation -->
+- [x] Actualizar `frontend/js/controllers/presentation-detail-controller.js` para conectar `updateItem`, actualizar el estado local y la vista tras confirmación del servidor, preservar el borrador ante fallos, y manejar el caso 404 informando al usuario sin crear items duplicados. <!-- sdd-owner: implementation -->
+- [x] Registrar estilos nuevos en `frontend/styles/index.css` y verificar manualmente: adición directa de los 3 tipos, edición rápida con guardado y cancelación, y conservación de draft ante fallo de red simulado. <!-- sdd-owner: implementation -->
 
 ---
 

@@ -4,19 +4,21 @@ import { createIcon } from '../components/atoms/icon.js';
 import { createPresentationDetailView } from '../components/views/presentation-detail-view.js';
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createAddItemDialog } from '../components/organisms/add-item-dialog.js';
+import { createQuickEditDialog } from '../components/organisms/quick-edit-dialog.js';
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
 import { getPresentation } from '../data/get-presentation.js';
 import { renamePresentation } from '../data/rename-presentation.js';
 import { deletePresentation } from '../data/delete-presentation.js';
 import { addTextItem } from '../data/add-text-item.js';
 import { uploadTrack } from '../data/upload-track.js';
+import { updateItem } from '../data/update-item.js';
 import { moveItem } from '../data/move-item.js';
 import { deleteItem } from '../data/delete-item.js';
 import { toPresentations } from '../router/navigate.js';
 import { playbackSignal } from '../state/playback-state.js';
 
 /**
- * Controller orchestrating a presentation's vertical timeline and exclusive playback.
+ * Controller orchestrating a presentation's vertical timeline, quick actions, and exclusive playback.
  * @param {{
  *   presentationId: string,
  *   audioController: {
@@ -74,6 +76,8 @@ export function createPresentationDetailController(deps) {
     onRename: () => openRenameDialog(),
     onDeletePresentation: () => openDeletePresentationDialog(),
     onAddItemClick: () => openAddItemDialog(),
+    onQuickAdd: (type) => openAddItemDialog(type),
+    onEditItem: (item) => openQuickEditDialog(item),
     onTogglePlay: (track) => {
       audioController.toggle(track);
     },
@@ -162,9 +166,10 @@ export function createPresentationDetailController(deps) {
     document.body.appendChild(activeDialog.el);
   }
 
-  function openAddItemDialog() {
+  function openAddItemDialog(initialType) {
     closeActiveDialog();
     activeDialog = createAddItemDialog({
+      initialType,
       onSubmit: async (payload) => {
         try {
           if (payload.type === 'track') {
@@ -182,6 +187,29 @@ export function createPresentationDetailController(deps) {
           await loadData();
         } catch (err) {
           alert(err.message || 'Error al agregar el elemento.');
+        }
+      },
+      onCancel: closeActiveDialog,
+    });
+    document.body.appendChild(activeDialog.el);
+  }
+
+  function openQuickEditDialog(item) {
+    closeActiveDialog();
+    activeDialog = createQuickEditDialog({
+      item,
+      onSave: async (payload) => {
+        try {
+          const updatedItem = await updateItem(presentationId, item.id, payload);
+          // Update item in local items array and refresh view
+          items = items.map((it) => (it.id === updatedItem.id ? updatedItem : it));
+          view.update({ items });
+          closeActiveDialog();
+        } catch (err) {
+          if (err && (err.status === 404 || err.code === 'item_not_found')) {
+            throw new Error('Este elemento ya no existe en el servidor. Puede haber sido eliminado.');
+          }
+          throw err;
         }
       },
       onCancel: closeActiveDialog,
