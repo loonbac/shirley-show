@@ -39,7 +39,10 @@ impl<W: ShowItemWriter> UploadTrack<W> {
         };
 
         // 3. Persist item to database
-        match self.writer.append(presentation_id, ShowItemPayload::Track(payload)) {
+        match self
+            .writer
+            .append(presentation_id, ShowItemPayload::Track(payload))
+        {
             Ok(item) => Ok(item),
             Err(e) => {
                 // Compensation: remove promoted file from disk

@@ -33,7 +33,9 @@ fn test_rename_presentation_success() {
     let old_id = presentation.id.clone();
     let old_created = presentation.created_at.clone();
 
-    presentation.rename("  Setlist Final  ").expect("valid rename");
+    presentation
+        .rename("  Setlist Final  ")
+        .expect("valid rename");
     assert_eq!(presentation.id, old_id);
     assert_eq!(presentation.created_at, old_created);
     assert_eq!(presentation.title, "Setlist Final");
@@ -51,7 +53,10 @@ fn test_rename_presentation_rejects_empty_or_whitespace() {
 fn test_unicode_and_special_characters_handling() {
     let unicode_title = "  Concierto En Vivo — Ñandú & Güiro 🎸 ✨  ";
     let presentation = Presentation::new(unicode_title).expect("valid unicode title");
-    assert_eq!(presentation.title, "Concierto En Vivo — Ñandú & Güiro 🎸 ✨");
+    assert_eq!(
+        presentation.title,
+        "Concierto En Vivo — Ñandú & Güiro 🎸 ✨"
+    );
 
     let mut p = presentation;
     p.rename("   东京演出 2026   ").expect("cjk title");

@@ -4,6 +4,10 @@
  * silent degradation when unsupported or denied, clean release on deactivation,
  * and automatic re-acquisition on visibilitychange while active.
  *
+ * Generation-aware: if deactivate() runs while an acquisition is in flight,
+ * any sentinel resolving later is released immediately, and status never
+ * transitions to 'acquired' while active is false.
+ *
  * @param {{
  *   onChange?: (state: { active: boolean, status: 'idle' | 'acquired' | 'unsupported' | 'denied' | 'released' }) => void,
  * }} [options]
@@ -21,6 +25,7 @@ export function useWakeLock(options = {}) {
   let isActive = false;
   let sentinel = null;
   let status = 'idle'; // 'idle' | 'acquired' | 'unsupported' | 'denied' | 'released'
+  let generation = 0;
 
   function updateStatus(newStatus) {
     status = newStatus;
@@ -29,57 +34,88 @@ export function useWakeLock(options = {}) {
     }
   }
 
-  async function requestLock() {
-    if (!('wakeLock' in navigator)) {
-      updateStatus('unsupported');
+  async function requestLock(targetGen) {
+    if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) {
+      if (targetGen === generation && isActive) {
+        updateStatus('unsupported');
+      }
       return;
     }
 
     try {
-      sentinel = await navigator.wakeLock.request('screen');
+      const acquiredSentinel = await navigator.wakeLock.request('screen');
+
+      // Generation check: if deactivated or newer activation ran while waiting
+      if (targetGen !== generation || !isActive) {
+        try {
+          await acquiredSentinel.release();
+        } catch {
+          // ignore release error on discarded sentinel
+        }
+        return;
+      }
+
+      sentinel = acquiredSentinel;
       updateStatus('acquired');
 
-      sentinel.addEventListener('release', () => {
-        sentinel = null;
-        if (isActive) {
+      acquiredSentinel.addEventListener('release', () => {
+        if (sentinel === acquiredSentinel) {
+          sentinel = null;
+        }
+        if (isActive && targetGen === generation) {
           updateStatus('released');
         }
       });
     } catch (err) {
       // Degrade silently without modal interruption
-      sentinel = null;
-      updateStatus('denied');
+      if (targetGen === generation && isActive) {
+        sentinel = null;
+        updateStatus('denied');
+      }
     }
   }
 
   async function activate() {
+    if (isActive && sentinel) {
+      return;
+    }
     isActive = true;
-    await requestLock();
+    generation += 1;
+    const targetGen = generation;
+    await requestLock(targetGen);
   }
 
   async function deactivate() {
     isActive = false;
+    generation += 1;
     if (sentinel) {
+      const s = sentinel;
+      sentinel = null;
       try {
-        await sentinel.release();
+        await s.release();
       } catch {
         // ignore
       }
-      sentinel = null;
     }
     updateStatus('idle');
   }
 
   async function onVisibilityChange() {
-    if (isActive && document.visibilityState === 'visible' && !sentinel) {
-      await requestLock();
+    if (isActive && typeof document !== 'undefined' && document.visibilityState === 'visible' && !sentinel) {
+      generation += 1;
+      const targetGen = generation;
+      await requestLock(targetGen);
     }
   }
 
-  document.addEventListener('visibilitychange', onVisibilityChange);
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  }
 
   function destroy() {
-    document.removeEventListener('visibilitychange', onVisibilityChange);
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    }
     deactivate();
   }
 

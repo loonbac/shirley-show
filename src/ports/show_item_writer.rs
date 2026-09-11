@@ -11,7 +11,8 @@ pub struct DeleteItemResult {
 }
 
 pub trait ShowItemWriter: Send + Sync {
-    fn append(&self, presentation_id: &str, payload: ShowItemPayload) -> Result<ShowItem, AppError>;
+    fn append(&self, presentation_id: &str, payload: ShowItemPayload)
+    -> Result<ShowItem, AppError>;
     fn swap(
         &self,
         presentation_id: &str,

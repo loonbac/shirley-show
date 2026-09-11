@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use axum::body::Body;
-use http::{header, Request, StatusCode};
+use http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -43,12 +43,7 @@ async fn body_to_json(body: Body) -> Value {
     serde_json::from_slice(&bytes).expect("parse json")
 }
 
-fn build_multipart_body(
-    boundary: &str,
-    title: &str,
-    filename: &str,
-    file_bytes: &[u8],
-) -> Vec<u8> {
+fn build_multipart_body(boundary: &str, title: &str, filename: &str, file_bytes: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
 
     // title field
@@ -145,7 +140,9 @@ async fn test_add_text_items_validation_and_not_found() {
         .method("POST")
         .uri(format!("/api/presentations/{pres_id}/items"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "type": "lyrics", "body": "   " }).to_string()))
+        .body(Body::from(
+            json!({ "type": "lyrics", "body": "   " }).to_string(),
+        ))
         .unwrap();
     let res_empty = app.clone().oneshot(req_empty).await.unwrap();
     assert_eq!(res_empty.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -155,7 +152,9 @@ async fn test_add_text_items_validation_and_not_found() {
         .method("POST")
         .uri(format!("/api/presentations/{pres_id}/items"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "type": "unknown", "body": "Text" }).to_string()))
+        .body(Body::from(
+            json!({ "type": "unknown", "body": "Text" }).to_string(),
+        ))
         .unwrap();
     let res_bad_type = app.clone().oneshot(req_bad_type).await.unwrap();
     assert_eq!(res_bad_type.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -165,7 +164,9 @@ async fn test_add_text_items_validation_and_not_found() {
         .method("POST")
         .uri("/api/presentations/00000000-0000-0000-0000-000000000000/items")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "type": "lyrics", "body": "Text" }).to_string()))
+        .body(Body::from(
+            json!({ "type": "lyrics", "body": "Text" }).to_string(),
+        ))
         .unwrap();
     let res_not_found = app.oneshot(req_not_found).await.unwrap();
     assert_eq!(res_not_found.status(), StatusCode::NOT_FOUND);
@@ -177,7 +178,9 @@ async fn test_multipart_track_upload_success_and_validations() {
 
     let boundary = "boundaryXYZ12345";
     // Valid MP3 magic bytes: ID3 header
-    let mp3_bytes = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB];
+    let mp3_bytes = [
+        0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB,
+    ];
 
     // 1. Success upload
     let body = build_multipart_body(boundary, "Intro Acoustic", "intro.mp3", &mp3_bytes);
@@ -233,7 +236,8 @@ async fn test_multipart_track_upload_success_and_validations() {
     // 4. Missing audio field -> 400
     let mut missing_audio_body = Vec::new();
     missing_audio_body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
-    missing_audio_body.extend_from_slice(b"Content-Disposition: form-data; name=\"title\"\r\n\r\nSolo\r\n");
+    missing_audio_body
+        .extend_from_slice(b"Content-Disposition: form-data; name=\"title\"\r\n\r\nSolo\r\n");
     missing_audio_body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     let req_missing_audio = Request::builder()
         .method("POST")
@@ -300,19 +304,29 @@ async fn test_reorder_item_endpoint_and_boundary_conflict() {
         .method("POST")
         .uri(format!("/api/presentations/{pres_id}/items"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "type": "note", "body": "Note 0" }).to_string()))
+        .body(Body::from(
+            json!({ "type": "note", "body": "Note 0" }).to_string(),
+        ))
         .unwrap();
     let res1 = app.clone().oneshot(req1).await.unwrap();
-    let id0 = body_to_json(res1.into_body()).await["id"].as_str().unwrap().to_string();
+    let id0 = body_to_json(res1.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let req2 = Request::builder()
         .method("POST")
         .uri(format!("/api/presentations/{pres_id}/items"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "type": "note", "body": "Note 1" }).to_string()))
+        .body(Body::from(
+            json!({ "type": "note", "body": "Note 1" }).to_string(),
+        ))
         .unwrap();
     let res2 = app.clone().oneshot(req2).await.unwrap();
-    let id1 = body_to_json(res2.into_body()).await["id"].as_str().unwrap().to_string();
+    let id1 = body_to_json(res2.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Move id0 Up -> boundary error 409
     let req_up_boundary = Request::builder()
@@ -385,7 +399,6 @@ async fn test_delete_item_endpoint() {
     assert_eq!(std::fs::read_dir(storage.files_dir()).unwrap().count(), 0);
 }
 
-
 struct ChannelReader {
     rx: tokio::sync::mpsc::Receiver<Result<Vec<u8>, std::io::ErrorKind>>,
     current: Option<Vec<u8>>,
@@ -410,8 +423,13 @@ impl tokio::io::AsyncRead for ChannelReader {
                 self.pos = 0;
             }
             match self.rx.poll_recv(cx) {
-                std::task::Poll::Ready(Some(Ok(bytes))) => { self.current = Some(bytes); self.pos = 0; }
-                std::task::Poll::Ready(Some(Err(kind))) => return std::task::Poll::Ready(Err(std::io::Error::new(kind, "drop"))),
+                std::task::Poll::Ready(Some(Ok(bytes))) => {
+                    self.current = Some(bytes);
+                    self.pos = 0;
+                }
+                std::task::Poll::Ready(Some(Err(kind))) => {
+                    return std::task::Poll::Ready(Err(std::io::Error::new(kind, "drop")));
+                }
                 std::task::Poll::Ready(None) => return std::task::Poll::Ready(Ok(())),
                 std::task::Poll::Pending => return std::task::Poll::Pending,
             }
@@ -426,24 +444,47 @@ async fn test_multipart_track_upload_interrupted_cleans_staging() {
     let (tx, rx) = tokio::sync::mpsc::channel(4);
 
     let mut part1 = Vec::new();
-    part1.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nInterrupted\r\n").as_bytes());
+    part1.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nInterrupted\r\n"
+        )
+        .as_bytes(),
+    );
     part1.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"test.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
     tx.send(Ok(part1)).await.unwrap();
 
-    let stream = tokio_util::io::ReaderStream::new(ChannelReader { rx, current: None, pos: 0 });
-    let req = Request::builder().method("POST").uri(format!("/api/presentations/{pres_id}/tracks"))
-        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
-        .body(Body::from_stream(stream)).unwrap();
+    let stream = tokio_util::io::ReaderStream::new(ChannelReader {
+        rx,
+        current: None,
+        pos: 0,
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/tracks"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from_stream(stream))
+        .unwrap();
 
     let handle = tokio::spawn(async move { app.oneshot(req).await });
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    let _ = tx.send(Ok(vec![0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x34])).await;
+    let _ = tx
+        .send(Ok(vec![
+            0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x34,
+        ]))
+        .await;
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     let _ = tx.send(Err(std::io::ErrorKind::ConnectionReset)).await;
 
     let res = handle.await.unwrap().unwrap();
     assert!(res.status().is_client_error() || res.status().is_server_error());
-    assert_eq!(std::fs::read_dir(storage.staging_dir()).unwrap().count(), 0, "No leftover staging files after interrupt");
+    assert_eq!(
+        std::fs::read_dir(storage.staging_dir()).unwrap().count(),
+        0,
+        "No leftover staging files after interrupt"
+    );
 }
 
 #[tokio::test]
@@ -452,19 +493,32 @@ async fn test_multipart_track_upload_duplicate_audio_rejected_and_cleaned() {
     let boundary = "boundaryDupTest123";
     let mp3 = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
     let mut body = Vec::new();
-    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nT1\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nT1\r\n")
+            .as_bytes(),
+    );
     body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"1.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
     body.extend_from_slice(&mp3);
     body.extend_from_slice(format!("\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"2.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
     body.extend_from_slice(&mp3);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
 
-    let req = Request::builder().method("POST").uri(format!("/api/presentations/{pres_id}/tracks"))
-        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
-        .body(Body::from(body)).unwrap();
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/tracks"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(std::fs::read_dir(storage.staging_dir()).unwrap().count(), 0, "No leftover staging files after duplicate audio");
+    assert_eq!(
+        std::fs::read_dir(storage.staging_dir()).unwrap().count(),
+        0,
+        "No leftover staging files after duplicate audio"
+    );
 }
 
 #[tokio::test]
@@ -476,7 +530,9 @@ async fn test_patch_item_endpoint_and_validations() {
         .method("POST")
         .uri(format!("/api/presentations/{pres_id}/items"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "type": "lyrics", "body": "Original Lyrics" }).to_string()))
+        .body(Body::from(
+            json!({ "type": "lyrics", "body": "Original Lyrics" }).to_string(),
+        ))
         .unwrap();
     let res_lyrics = app.clone().oneshot(req_lyrics).await.unwrap();
     assert_eq!(res_lyrics.status(), StatusCode::CREATED);
@@ -491,7 +547,10 @@ async fn test_patch_item_endpoint_and_validations() {
     let req_track = Request::builder()
         .method("POST")
         .uri(format!("/api/presentations/{pres_id}/tracks"))
-        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
         .body(Body::from(body_bytes))
         .unwrap();
     let res_track = app.clone().oneshot(req_track).await.unwrap();
@@ -504,7 +563,9 @@ async fn test_patch_item_endpoint_and_validations() {
         .method("PATCH")
         .uri(format!("/api/presentations/{pres_id}/items/{lyrics_id}"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "body": "Updated Lyrics Text" }).to_string()))
+        .body(Body::from(
+            json!({ "body": "Updated Lyrics Text" }).to_string(),
+        ))
         .unwrap();
     let res_patch_lyrics = app.clone().oneshot(req_patch_lyrics).await.unwrap();
     assert_eq!(res_patch_lyrics.status(), StatusCode::OK);
@@ -518,7 +579,9 @@ async fn test_patch_item_endpoint_and_validations() {
         .method("PATCH")
         .uri(format!("/api/presentations/{pres_id}/items/{track_id}"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "title": "Updated Song Title" }).to_string()))
+        .body(Body::from(
+            json!({ "title": "Updated Song Title" }).to_string(),
+        ))
         .unwrap();
     let res_patch_track = app.clone().oneshot(req_patch_track).await.unwrap();
     assert_eq!(res_patch_track.status(), StatusCode::OK);
@@ -552,7 +615,9 @@ async fn test_patch_item_endpoint_and_validations() {
         .method("PATCH")
         .uri(format!("/api/presentations/{pres_id}/items/{track_id}"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "body": "Trying to set body on track" }).to_string()))
+        .body(Body::from(
+            json!({ "body": "Trying to set body on track" }).to_string(),
+        ))
         .unwrap();
     let res_incompat_track = app.clone().oneshot(req_incompat_track).await.unwrap();
     assert_eq!(res_incompat_track.status(), StatusCode::BAD_REQUEST);
@@ -562,7 +627,9 @@ async fn test_patch_item_endpoint_and_validations() {
         .method("PATCH")
         .uri(format!("/api/presentations/{pres_id}/items/{lyrics_id}"))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "title": "Trying to set title on lyrics" }).to_string()))
+        .body(Body::from(
+            json!({ "title": "Trying to set title on lyrics" }).to_string(),
+        ))
         .unwrap();
     let res_incompat_lyrics = app.clone().oneshot(req_incompat_lyrics).await.unwrap();
     assert_eq!(res_incompat_lyrics.status(), StatusCode::BAD_REQUEST);
@@ -570,7 +637,9 @@ async fn test_patch_item_endpoint_and_validations() {
     // 9. 404 on missing item or missing presentation
     let req_404_item = Request::builder()
         .method("PATCH")
-        .uri(format!("/api/presentations/{pres_id}/items/missing-item-id"))
+        .uri(format!(
+            "/api/presentations/{pres_id}/items/missing-item-id"
+        ))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({ "body": "valid text" }).to_string()))
         .unwrap();
@@ -579,7 +648,9 @@ async fn test_patch_item_endpoint_and_validations() {
 
     let req_404_pres = Request::builder()
         .method("PATCH")
-        .uri(format!("/api/presentations/missing-pres-id/items/{lyrics_id}"))
+        .uri(format!(
+            "/api/presentations/missing-pres-id/items/{lyrics_id}"
+        ))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({ "body": "valid text" }).to_string()))
         .unwrap();
@@ -598,7 +669,9 @@ async fn test_move_item_target_position_and_validations() {
             .method("POST")
             .uri(format!("/api/presentations/{pres_id}/items"))
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(json!({ "type": "note", "body": title }).to_string()))
+            .body(Body::from(
+                json!({ "type": "note", "body": title }).to_string(),
+            ))
             .unwrap();
         let res = app.clone().oneshot(req).await.unwrap();
         let j = body_to_json(res.into_body()).await;
@@ -608,7 +681,10 @@ async fn test_move_item_target_position_and_validations() {
     // 1. Success move Note 2 to target_position 0 -> [Note 2, Note 0, Note 1]
     let req_move = Request::builder()
         .method("POST")
-        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[2]))
+        .uri(format!(
+            "/api/presentations/{pres_id}/items/{}/move",
+            item_ids[2]
+        ))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({ "target_position": 0 }).to_string()))
         .unwrap();
@@ -626,7 +702,10 @@ async fn test_move_item_target_position_and_validations() {
     // 2. Target position out of bounds (< 0) -> 409
     let req_oob_neg = Request::builder()
         .method("POST")
-        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .uri(format!(
+            "/api/presentations/{pres_id}/items/{}/move",
+            item_ids[0]
+        ))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({ "target_position": -1 }).to_string()))
         .unwrap();
@@ -636,7 +715,10 @@ async fn test_move_item_target_position_and_validations() {
     // Target position out of bounds (>= N, here N=3, target=3) -> 409
     let req_oob_high = Request::builder()
         .method("POST")
-        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .uri(format!(
+            "/api/presentations/{pres_id}/items/{}/move",
+            item_ids[0]
+        ))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({ "target_position": 3 }).to_string()))
         .unwrap();
@@ -646,9 +728,14 @@ async fn test_move_item_target_position_and_validations() {
     // 3. Ambiguity: both direction and target_position provided -> 400
     let req_both = Request::builder()
         .method("POST")
-        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .uri(format!(
+            "/api/presentations/{pres_id}/items/{}/move",
+            item_ids[0]
+        ))
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json!({ "direction": "up", "target_position": 0 }).to_string()))
+        .body(Body::from(
+            json!({ "direction": "up", "target_position": 0 }).to_string(),
+        ))
         .unwrap();
     let res_both = app.clone().oneshot(req_both).await.unwrap();
     assert_eq!(res_both.status(), StatusCode::BAD_REQUEST);
@@ -656,7 +743,10 @@ async fn test_move_item_target_position_and_validations() {
     // 4. Neither direction nor target_position provided -> 400
     let req_neither = Request::builder()
         .method("POST")
-        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .uri(format!(
+            "/api/presentations/{pres_id}/items/{}/move",
+            item_ids[0]
+        ))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({}).to_string()))
         .unwrap();
@@ -667,7 +757,10 @@ async fn test_move_item_target_position_and_validations() {
     // Currently order is [Note 2, Note 0, Note 1]. Move Note 2 down -> [Note 0, Note 2, Note 1]
     let req_retro = Request::builder()
         .method("POST")
-        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[2]))
+        .uri(format!(
+            "/api/presentations/{pres_id}/items/{}/move",
+            item_ids[2]
+        ))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(json!({ "direction": "down" }).to_string()))
         .unwrap();

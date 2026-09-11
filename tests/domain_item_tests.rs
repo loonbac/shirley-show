@@ -1,7 +1,9 @@
 use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::domain::move_direction::MoveDirection;
 use shirley_show::domain::presentation_summary::{PresentationSummary, ShowItemPreview};
-use shirley_show::domain::show_item::{LyricsPayload, NotePayload, ShowItem, ShowItemPayload, TrackPayload};
+use shirley_show::domain::show_item::{
+    LyricsPayload, NotePayload, ShowItem, ShowItemPayload, TrackPayload,
+};
 use shirley_show::domain::show_item_kind::ShowItemKind;
 use shirley_show::domain::show_item_update::ShowItemUpdate;
 
@@ -26,9 +28,15 @@ fn test_audio_format_properties() {
 #[test]
 fn test_move_direction_parsing() {
     assert_eq!("up".parse::<MoveDirection>().unwrap(), MoveDirection::Up);
-    assert_eq!("down".parse::<MoveDirection>().unwrap(), MoveDirection::Down);
+    assert_eq!(
+        "down".parse::<MoveDirection>().unwrap(),
+        MoveDirection::Down
+    );
     assert_eq!("UP".parse::<MoveDirection>().unwrap(), MoveDirection::Up);
-    assert_eq!("Down".parse::<MoveDirection>().unwrap(), MoveDirection::Down);
+    assert_eq!(
+        "Down".parse::<MoveDirection>().unwrap(),
+        MoveDirection::Down
+    );
     assert!("left".parse::<MoveDirection>().is_err());
     assert!("".parse::<MoveDirection>().is_err());
 }
@@ -39,8 +47,14 @@ fn test_show_item_kind_as_str() {
     assert_eq!(ShowItemKind::Lyrics.as_str(), "lyrics");
     assert_eq!(ShowItemKind::Note.as_str(), "note");
 
-    assert_eq!("track".parse::<ShowItemKind>().unwrap(), ShowItemKind::Track);
-    assert_eq!("lyrics".parse::<ShowItemKind>().unwrap(), ShowItemKind::Lyrics);
+    assert_eq!(
+        "track".parse::<ShowItemKind>().unwrap(),
+        ShowItemKind::Track
+    );
+    assert_eq!(
+        "lyrics".parse::<ShowItemKind>().unwrap(),
+        ShowItemKind::Lyrics
+    );
     assert_eq!("note".parse::<ShowItemKind>().unwrap(), ShowItemKind::Note);
     assert!("invalid".parse::<ShowItemKind>().is_err());
 }
@@ -78,12 +92,8 @@ fn test_note_payload_validation() {
 #[test]
 fn test_track_payload_validation() {
     // Valid track
-    let valid = TrackPayload::new(
-        "  Acoustic Intro  ",
-        "audio-123.mp3",
-        "audio/mpeg",
-        1024,
-    ).unwrap();
+    let valid =
+        TrackPayload::new("  Acoustic Intro  ", "audio-123.mp3", "audio/mpeg", 1024).unwrap();
     assert_eq!(valid.title, "Acoustic Intro");
     assert_eq!(valid.audio_key, "audio-123.mp3");
     assert_eq!(valid.media_type, "audio/mpeg");
@@ -124,7 +134,7 @@ fn test_show_item_constructors_and_invariants() {
     assert_eq!(item2.kind(), ShowItemKind::Note);
 
     let track_payload = ShowItemPayload::Track(
-        TrackPayload::new("Solo", "track-1.mp3", "audio/mpeg", 5000).unwrap()
+        TrackPayload::new("Solo", "track-1.mp3", "audio/mpeg", 5000).unwrap(),
     );
     let item3 = ShowItem::new(pres_id, 2, track_payload);
     assert_eq!(item3.position, 2);
@@ -150,7 +160,8 @@ fn test_show_item_from_db_mappings_and_corruption() {
         Some("audio/mpeg".into()),
         Some(2048),
         "2026-03-30T00:00:00Z".into(),
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(track_item.kind(), ShowItemKind::Track);
 
     // Corrupted DB row: track without audio_key
@@ -188,7 +199,10 @@ fn test_show_item_from_db_mappings_and_corruption() {
 fn test_show_item_update_validation_and_trim() {
     // Valid track title with trimming
     let update_track = ShowItemUpdate::new_track_title("  Updated Song Title  ").unwrap();
-    assert_eq!(update_track, ShowItemUpdate::TrackTitle("Updated Song Title".to_string()));
+    assert_eq!(
+        update_track,
+        ShowItemUpdate::TrackTitle("Updated Song Title".to_string())
+    );
 
     // Empty or whitespace-only track title rejected
     let empty_track = ShowItemUpdate::new_track_title("   ");
@@ -198,7 +212,10 @@ fn test_show_item_update_validation_and_trim() {
 
     // Valid text body with trimming
     let update_body = ShowItemUpdate::new_text_body("  First line\nSecond line  ").unwrap();
-    assert_eq!(update_body, ShowItemUpdate::TextBody("First line\nSecond line".to_string()));
+    assert_eq!(
+        update_body,
+        ShowItemUpdate::TextBody("First line\nSecond line".to_string())
+    );
 
     // Empty or whitespace-only body rejected
     let empty_body = ShowItemUpdate::new_text_body("   \n\t  ");
@@ -248,9 +265,15 @@ fn test_presentation_summary_and_preview_serialization() {
     assert_eq!(json_val["preview_items"][0]["type"], "track");
     assert_eq!(json_val["preview_items"][0]["title"], "Intro Acústico");
     assert_eq!(json_val["preview_items"][1]["type"], "lyrics");
-    assert_eq!(json_val["preview_items"][1]["snippet"], "Primera estrofa normalizada...");
+    assert_eq!(
+        json_val["preview_items"][1]["snippet"],
+        "Primera estrofa normalizada..."
+    );
     assert_eq!(json_val["preview_items"][2]["type"], "note");
-    assert_eq!(json_val["preview_items"][2]["snippet"], "Cambio de afinación");
+    assert_eq!(
+        json_val["preview_items"][2]["snippet"],
+        "Cambio de afinación"
+    );
 
     // Deserialization roundtrip
     let deserialized: PresentationSummary = serde_json::from_value(json_val).unwrap();
@@ -263,5 +286,8 @@ fn test_show_item_preview_snippet_normalization() {
     let snippet = ShowItemPreview::normalize_snippet(long_text, 60);
     assert!(!snippet.contains('\n'));
     assert!(snippet.chars().count() <= 60);
-    assert_eq!(ShowItemPreview::normalize_snippet("   Single   line   ", 60), "Single line");
+    assert_eq!(
+        ShowItemPreview::normalize_snippet("   Single   line   ", 60),
+        "Single line"
+    );
 }

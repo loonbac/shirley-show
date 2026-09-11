@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use crate::domain::Presentation;
 use crate::domain::presentation_summary::PresentationSummary;
 use crate::domain::show_item::{ShowItem, ShowItemPayload};
-use crate::domain::Presentation;
 
 pub type PresentationSummaryResponse = PresentationSummary;
 

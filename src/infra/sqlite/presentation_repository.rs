@@ -56,7 +56,8 @@ impl PresentationReader for SqlitePresentationRepository {
 
         let mut presentations = Vec::new();
         for r in rows {
-            presentations.push(r.map_err(|e| AppError::Database(format!("Failed to read row: {e}")))?);
+            presentations
+                .push(r.map_err(|e| AppError::Database(format!("Failed to read row: {e}")))?);
         }
 
         Ok(presentations)
@@ -133,8 +134,9 @@ impl PresentationWriter for SqlitePresentationRepository {
             ));
         }
 
-        self.get(id)?
-            .ok_or_else(|| AppError::not_found("presentation_not_found", "Presentación no encontrada."))
+        self.get(id)?.ok_or_else(|| {
+            AppError::not_found("presentation_not_found", "Presentación no encontrada.")
+        })
     }
 
     fn delete(&self, id: &str) -> Result<DeleteResult, AppError> {
@@ -145,7 +147,9 @@ impl PresentationWriter for SqlitePresentationRepository {
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to begin immediate transaction: {e}"))
+            })?;
 
         let count: i32 = tx
             .query_row(
@@ -153,7 +157,9 @@ impl PresentationWriter for SqlitePresentationRepository {
                 [id],
                 |r| r.get(0),
             )
-            .map_err(|e| AppError::Database(format!("Failed to check presentation existence: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to check presentation existence: {e}"))
+            })?;
 
         if count == 0 {
             return Err(AppError::not_found(
@@ -173,7 +179,9 @@ impl PresentationWriter for SqlitePresentationRepository {
                 .map_err(|e| AppError::Database(format!("Failed to query audio keys: {e}")))?;
             let mut keys = Vec::new();
             for r in rows {
-                keys.push(r.map_err(|e| AppError::Database(format!("Failed to read audio key: {e}")))?);
+                keys.push(
+                    r.map_err(|e| AppError::Database(format!("Failed to read audio key: {e}")))?,
+                );
             }
             keys
         };

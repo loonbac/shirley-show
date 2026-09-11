@@ -1,6 +1,6 @@
+use shirley_show::domain::Presentation;
 use shirley_show::domain::presentation_summary::ShowItemPreview;
 use shirley_show::domain::show_item::{LyricsPayload, NotePayload, ShowItemPayload, TrackPayload};
-use shirley_show::domain::Presentation;
 use shirley_show::error::AppError;
 use shirley_show::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use shirley_show::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
@@ -90,7 +90,9 @@ fn test_rename_presentation() {
 #[test]
 fn test_rename_non_existent_returns_not_found() {
     let (repo, _f) = setup_repo();
-    let err = repo.rename("missing-id", "New Title", "2026-03-22T00:00:00Z").unwrap_err();
+    let err = repo
+        .rename("missing-id", "New Title", "2026-03-22T00:00:00Z")
+        .unwrap_err();
     assert!(matches!(err, AppError::NotFound { .. }));
 }
 
@@ -114,7 +116,8 @@ fn test_delete_presentation_and_cascade_with_audio_queue() {
             "INSERT INTO show_items (id, presentation_id, position, kind, body, created_at)
              VALUES ('item-1', ?1, 0, 'lyrics', 'La la la', '2026-03-22T00:00:00Z');",
             [&p.id],
-        ).expect("insert lyrics item");
+        )
+        .expect("insert lyrics item");
 
         conn.execute(
             "INSERT INTO show_items (id, presentation_id, position, kind, title, audio_key, media_type, byte_size, created_at)
@@ -132,7 +135,11 @@ fn test_delete_presentation_and_cascade_with_audio_queue() {
     // Verify cascade deleted show_items
     let conn = rusqlite::Connection::open(f.path()).expect("open raw conn");
     let items_count: i32 = conn
-        .query_row("SELECT count(*) FROM show_items WHERE presentation_id = ?1;", [&p.id], |r| r.get(0))
+        .query_row(
+            "SELECT count(*) FROM show_items WHERE presentation_id = ?1;",
+            [&p.id],
+            |r| r.get(0),
+        )
         .expect("count show_items");
     assert_eq!(items_count, 0, "Show items should be deleted via cascade");
 
@@ -144,16 +151,21 @@ fn test_delete_presentation_and_cascade_with_audio_queue() {
             |r| r.get(0),
         )
         .expect("count pending deletions");
-    assert_eq!(pending_count, 1, "Track audio_key should be queued in pending_audio_deletions");
+    assert_eq!(
+        pending_count, 1,
+        "Track audio_key should be queued in pending_audio_deletions"
+    );
 }
 
 #[test]
 fn test_delete_presentation_physical_audio_cleanup() {
     let (repo, f) = setup_repo();
     let audio_dir = tempfile::tempdir().expect("audio dir");
-    let storage = std::sync::Arc::new(shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage::new(
-        audio_dir.path().join("audio"),
-    ));
+    let storage = std::sync::Arc::new(
+        shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage::new(
+            audio_dir.path().join("audio"),
+        ),
+    );
     let repo = repo.with_storage(storage.clone());
 
     let p = Presentation::new("Live Album").expect("presentation");
@@ -161,10 +173,18 @@ fn test_delete_presentation_physical_audio_cleanup() {
 
     // Stage and promote a real audio file
     let (stage_id, stage_path) = storage.create_staging_file().expect("stage file");
-    std::fs::write(&stage_path, &[0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB])
-        .expect("write staged audio");
+    std::fs::write(
+        &stage_path,
+        &[
+            0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB,
+        ],
+    )
+    .expect("write staged audio");
     let key = storage
-        .promote_staged_file(&stage_id, shirley_show::domain::audio_format::AudioFormat::Mp3)
+        .promote_staged_file(
+            &stage_id,
+            shirley_show::domain::audio_format::AudioFormat::Mp3,
+        )
         .expect("promote audio");
 
     let file_path = storage.resolve_path(&key);
@@ -185,12 +205,19 @@ fn test_delete_presentation_physical_audio_cleanup() {
     assert_eq!(del_res.cleanup_pending, false);
 
     // Assert physical file removed
-    assert!(!file_path.exists(), "Audio file must be physically deleted post-commit");
+    assert!(
+        !file_path.exists(),
+        "Audio file must be physically deleted post-commit"
+    );
 
     // Assert DB cascade
     let conn = rusqlite::Connection::open(f.path()).expect("open raw conn");
     let items_count: i32 = conn
-        .query_row("SELECT count(*) FROM show_items WHERE presentation_id = ?1;", [&p.id], |r| r.get(0))
+        .query_row(
+            "SELECT count(*) FROM show_items WHERE presentation_id = ?1;",
+            [&p.id],
+            |r| r.get(0),
+        )
         .expect("count show_items");
     assert_eq!(items_count, 0, "Show items must be cascade deleted");
 
@@ -202,7 +229,10 @@ fn test_delete_presentation_physical_audio_cleanup() {
             |r| r.get(0),
         )
         .expect("count pending deletions");
-    assert_eq!(pending_count, 0, "Pending queue must have 0 entries after successful cleanup");
+    assert_eq!(
+        pending_count, 0,
+        "Pending queue must have 0 entries after successful cleanup"
+    );
 }
 
 #[test]
@@ -239,25 +269,46 @@ fn test_presentation_summary_repository_list_summaries() {
 
     let item_repo = SqliteShowItemRepository::new(pool.clone());
     // Pos 0: Track
-    item_repo.append(&p_full.id, ShowItemPayload::Track(
-        TrackPayload::new("Intro Acústica", "track-1.mp3", "audio/mpeg", 1024).unwrap()
-    )).unwrap();
+    item_repo
+        .append(
+            &p_full.id,
+            ShowItemPayload::Track(
+                TrackPayload::new("Intro Acústica", "track-1.mp3", "audio/mpeg", 1024).unwrap(),
+            ),
+        )
+        .unwrap();
     // Pos 1: Lyrics
-    item_repo.append(&p_full.id, ShowItemPayload::Lyrics(
-        LyricsPayload::new("Verso 1\nLínea 2\n\nEstribillo potente").unwrap()
-    )).unwrap();
+    item_repo
+        .append(
+            &p_full.id,
+            ShowItemPayload::Lyrics(
+                LyricsPayload::new("Verso 1\nLínea 2\n\nEstribillo potente").unwrap(),
+            ),
+        )
+        .unwrap();
     // Pos 2: Note
-    item_repo.append(&p_full.id, ShowItemPayload::Note(
-        NotePayload::new("Revisar afinación en D").unwrap()
-    )).unwrap();
+    item_repo
+        .append(
+            &p_full.id,
+            ShowItemPayload::Note(NotePayload::new("Revisar afinación en D").unwrap()),
+        )
+        .unwrap();
     // Pos 3: Track
-    item_repo.append(&p_full.id, ShowItemPayload::Track(
-        TrackPayload::new("Tema Principal", "track-2.mp3", "audio/mpeg", 2048).unwrap()
-    )).unwrap();
+    item_repo
+        .append(
+            &p_full.id,
+            ShowItemPayload::Track(
+                TrackPayload::new("Tema Principal", "track-2.mp3", "audio/mpeg", 2048).unwrap(),
+            ),
+        )
+        .unwrap();
     // Pos 4: Lyrics
-    item_repo.append(&p_full.id, ShowItemPayload::Lyrics(
-        LyricsPayload::new("Outro suave").unwrap()
-    )).unwrap();
+    item_repo
+        .append(
+            &p_full.id,
+            ShowItemPayload::Lyrics(LyricsPayload::new("Outro suave").unwrap()),
+        )
+        .unwrap();
 
     let summaries2 = summary_repo.list_summaries().unwrap();
     assert_eq!(summaries2.len(), 2);
@@ -272,7 +323,9 @@ fn test_presentation_summary_repository_list_summaries() {
     assert_eq!(summary.preview_items.len(), 3);
 
     match &summary.preview_items[0] {
-        ShowItemPreview::Track { position, title, .. } => {
+        ShowItemPreview::Track {
+            position, title, ..
+        } => {
             assert_eq!(*position, 0);
             assert_eq!(title.as_str(), "Intro Acústica");
         }
@@ -280,7 +333,9 @@ fn test_presentation_summary_repository_list_summaries() {
     }
 
     match &summary.preview_items[1] {
-        ShowItemPreview::Lyrics { position, snippet, .. } => {
+        ShowItemPreview::Lyrics {
+            position, snippet, ..
+        } => {
             assert_eq!(*position, 1);
             assert_eq!(snippet.as_str(), "Verso 1 Línea 2 Estribillo potente");
         }
@@ -288,7 +343,9 @@ fn test_presentation_summary_repository_list_summaries() {
     }
 
     match &summary.preview_items[2] {
-        ShowItemPreview::Note { position, snippet, .. } => {
+        ShowItemPreview::Note {
+            position, snippet, ..
+        } => {
             assert_eq!(*position, 2);
             assert_eq!(snippet.as_str(), "Revisar afinación en D");
         }

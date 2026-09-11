@@ -14,8 +14,8 @@ impl<R: PresentationReader> GetPresentation<R> {
     }
 
     pub fn execute(&self, id: &str) -> Result<Presentation, AppError> {
-        self.reader
-            .get(id)?
-            .ok_or_else(|| AppError::not_found("presentation_not_found", "Presentación no encontrada."))
+        self.reader.get(id)?.ok_or_else(|| {
+            AppError::not_found("presentation_not_found", "Presentación no encontrada.")
+        })
     }
 }

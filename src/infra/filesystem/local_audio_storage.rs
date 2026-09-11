@@ -37,9 +37,8 @@ impl LocalAudioStorage {
     pub fn create_staging_file(&self) -> Result<(String, PathBuf), AppError> {
         let stage_id = Uuid::new_v4().to_string();
         let path = self.staging_dir.join(format!("{stage_id}.part"));
-        let _ = std::fs::File::create(&path).map_err(|e| {
-            AppError::Internal(format!("Failed to create staging file: {e}"))
-        })?;
+        let _ = std::fs::File::create(&path)
+            .map_err(|e| AppError::Internal(format!("Failed to create staging file: {e}")))?;
         Ok((stage_id, path))
     }
 
@@ -59,9 +58,8 @@ impl LocalAudioStorage {
         let key = GeneratedAudioKey::generate(format);
         let dest_path = self.files_dir.join(key.as_str());
 
-        std::fs::rename(&stage_path, &dest_path).map_err(|e| {
-            AppError::Internal(format!("Failed to promote staged audio file: {e}"))
-        })?;
+        std::fs::rename(&stage_path, &dest_path)
+            .map_err(|e| AppError::Internal(format!("Failed to promote staged audio file: {e}")))?;
 
         Ok(key)
     }
@@ -78,9 +76,8 @@ impl LocalAudioStorage {
     pub fn delete_file(&self, key_str: &str) -> Result<bool, AppError> {
         let path = self.resolve_path_str(key_str)?;
         if path.exists() {
-            std::fs::remove_file(&path).map_err(|e| {
-                AppError::Internal(format!("Failed to delete audio file: {e}"))
-            })?;
+            std::fs::remove_file(&path)
+                .map_err(|e| AppError::Internal(format!("Failed to delete audio file: {e}")))?;
             Ok(true)
         } else {
             Ok(false)

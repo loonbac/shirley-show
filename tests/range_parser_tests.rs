@@ -1,4 +1,4 @@
-use shirley_show::handlers::audio::parse_range::{parse_range, RangeSpec};
+use shirley_show::handlers::audio::parse_range::{RangeSpec, parse_range};
 
 #[test]
 fn test_parse_range_none_or_empty() {
@@ -76,11 +76,20 @@ fn test_parse_range_clamp_oversized_end() {
 #[test]
 fn test_parse_range_unsatisfiable() {
     // start >= total_size
-    assert_eq!(parse_range(Some("bytes=1000-1500"), 1000), RangeSpec::Unsatisfiable);
-    assert_eq!(parse_range(Some("bytes=1500-"), 1000), RangeSpec::Unsatisfiable);
+    assert_eq!(
+        parse_range(Some("bytes=1000-1500"), 1000),
+        RangeSpec::Unsatisfiable
+    );
+    assert_eq!(
+        parse_range(Some("bytes=1500-"), 1000),
+        RangeSpec::Unsatisfiable
+    );
 
     // start > end
-    assert_eq!(parse_range(Some("bytes=500-400"), 1000), RangeSpec::Unsatisfiable);
+    assert_eq!(
+        parse_range(Some("bytes=500-400"), 1000),
+        RangeSpec::Unsatisfiable
+    );
 }
 
 #[test]
@@ -91,5 +100,8 @@ fn test_parse_range_malformed_or_multi_falls_back_to_full() {
     assert_eq!(parse_range(Some("bytes=abc-def"), 1000), RangeSpec::Full);
     assert_eq!(parse_range(Some("bytes=-"), 1000), RangeSpec::Full);
     // Multiple ranges (RFC 9110 allows servers to ignore and return 200 Full)
-    assert_eq!(parse_range(Some("bytes=0-100, 200-300"), 1000), RangeSpec::Full);
+    assert_eq!(
+        parse_range(Some("bytes=0-100, 200-300"), 1000),
+        RangeSpec::Full
+    );
 }

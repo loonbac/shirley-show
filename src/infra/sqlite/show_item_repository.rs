@@ -108,9 +108,9 @@ impl ShowItemReader for SqliteShowItemRepository {
             )
             .map_err(|e| AppError::Database(format!("Failed to prepare get item by id query: {e}")))?;
 
-        let mut rows = stmt
-            .query([item_id])
-            .map_err(|e| AppError::Database(format!("Failed to execute get item by id query: {e}")))?;
+        let mut rows = stmt.query([item_id]).map_err(|e| {
+            AppError::Database(format!("Failed to execute get item by id query: {e}"))
+        })?;
 
         if let Some(row) = rows
             .next()
@@ -124,7 +124,11 @@ impl ShowItemReader for SqliteShowItemRepository {
 }
 
 impl ShowItemWriter for SqliteShowItemRepository {
-    fn append(&self, presentation_id: &str, payload: ShowItemPayload) -> Result<ShowItem, AppError> {
+    fn append(
+        &self,
+        presentation_id: &str,
+        payload: ShowItemPayload,
+    ) -> Result<ShowItem, AppError> {
         let mut conn = self
             .pool
             .get()
@@ -132,7 +136,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to begin immediate transaction: {e}"))
+            })?;
 
         let pres_exists: i64 = tx
             .query_row(
@@ -140,7 +146,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
                 [presentation_id],
                 |r| r.get(0),
             )
-            .map_err(|e| AppError::Database(format!("Failed to check presentation existence: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to check presentation existence: {e}"))
+            })?;
 
         if pres_exists == 0 {
             return Err(AppError::not_found(
@@ -209,7 +217,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to begin immediate transaction: {e}"))
+            })?;
 
         let pres_exists: i64 = tx
             .query_row(
@@ -217,7 +227,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
                 [presentation_id],
                 |r| r.get(0),
             )
-            .map_err(|e| AppError::Database(format!("Failed to check presentation existence: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to check presentation existence: {e}"))
+            })?;
 
         if pres_exists == 0 {
             return Err(AppError::not_found(
@@ -240,7 +252,7 @@ impl ShowItemWriter for SqliteShowItemRepository {
                 return Err(AppError::not_found(
                     "item_not_found",
                     "Elemento no encontrado en esta presentación.",
-                ))
+                ));
             }
         };
 
@@ -310,7 +322,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to begin immediate transaction: {e}"))
+            })?;
 
         let item_data: Option<(i64, Option<String>)> = tx
             .query_row(
@@ -326,7 +340,7 @@ impl ShowItemWriter for SqliteShowItemRepository {
                 return Err(AppError::not_found(
                     "item_not_found",
                     "Elemento no encontrado en esta presentación.",
-                ))
+                ));
             }
         };
 
@@ -384,7 +398,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to begin immediate transaction: {e}"))
+            })?;
 
         let pres_exists: i64 = tx
             .query_row(
@@ -392,7 +408,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
                 [presentation_id],
                 |r| r.get(0),
             )
-            .map_err(|e| AppError::Database(format!("Failed to check presentation existence: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to check presentation existence: {e}"))
+            })?;
 
         if pres_exists == 0 {
             return Err(AppError::not_found(
@@ -427,7 +445,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
             "UPDATE presentations SET updated_at = ?1 WHERE id = ?2;",
             params![updated_at, presentation_id],
         )
-        .map_err(|e| AppError::Database(format!("Failed to update presentation updated_at: {e}")))?;
+        .map_err(|e| {
+            AppError::Database(format!("Failed to update presentation updated_at: {e}"))
+        })?;
 
         let updated_item = {
             let mut stmt = tx
@@ -474,7 +494,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
 
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to begin immediate transaction: {e}"))
+            })?;
 
         let pres_exists: i64 = tx
             .query_row(
@@ -482,7 +504,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
                 [presentation_id],
                 |r| r.get(0),
             )
-            .map_err(|e| AppError::Database(format!("Failed to check presentation existence: {e}")))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to check presentation existence: {e}"))
+            })?;
 
         if pres_exists == 0 {
             return Err(AppError::not_found(
@@ -505,7 +529,7 @@ impl ShowItemWriter for SqliteShowItemRepository {
                 return Err(AppError::not_found(
                     "item_not_found",
                     "Elemento no encontrado en esta presentación.",
-                ))
+                ));
             }
         };
 
@@ -574,8 +598,9 @@ impl ShowItemWriter for SqliteShowItemRepository {
         )
         .map_err(|e| AppError::Database(format!("Failed to set target position: {e}")))?;
 
-        tx.commit()
-            .map_err(|e| AppError::Database(format!("Failed to commit move_to transaction: {e}")))?;
+        tx.commit().map_err(|e| {
+            AppError::Database(format!("Failed to commit move_to transaction: {e}"))
+        })?;
 
         self.list_by_presentation(presentation_id)
     }

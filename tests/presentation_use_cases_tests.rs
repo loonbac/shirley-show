@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
-use shirley_show::domain::presentation_summary::PresentationSummary;
 use shirley_show::domain::Presentation;
+use shirley_show::domain::presentation_summary::PresentationSummary;
 use shirley_show::error::AppError;
 use shirley_show::ports::presentation_reader::PresentationReader;
 use shirley_show::ports::presentation_summary_reader::PresentationSummaryReader;

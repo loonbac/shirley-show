@@ -1,12 +1,12 @@
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::response::Response;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 use tokio_util::io::ReaderStream;
 
 use crate::error::AppError;
-use crate::handlers::audio::parse_range::{parse_range, RangeSpec};
+use crate::handlers::audio::parse_range::{RangeSpec, parse_range};
 use crate::state::AppState;
 
 pub async fn stream(
@@ -17,9 +17,7 @@ pub async fn stream(
 ) -> Result<Response, AppError> {
     let opened = state.open_track_audio.execute(&id)?;
 
-    let range_header = headers
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok());
+    let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
 
     let range_spec = parse_range(range_header, opened.byte_size);
 

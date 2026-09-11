@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 
 use crate::error::{ErrorBody, ErrorResponse};
 use crate::handlers::dto::{PresentationResponse, RenamePresentationRequest};
@@ -31,11 +31,9 @@ pub async fn rename(
     };
 
     match state.rename_presentation.execute(&id, &request.title) {
-        Ok(presentation) => (
-            StatusCode::OK,
-            Json(PresentationResponse { presentation }),
-        )
-            .into_response(),
+        Ok(presentation) => {
+            (StatusCode::OK, Json(PresentationResponse { presentation })).into_response()
+        }
         Err(err) => err.into_response(),
     }
 }

@@ -15,6 +15,7 @@ impl<W: ShowItemWriter> AddLyrics<W> {
 
     pub fn execute(&self, presentation_id: &str, body: &str) -> Result<ShowItem, AppError> {
         let payload = LyricsPayload::new(body)?;
-        self.writer.append(presentation_id, ShowItemPayload::Lyrics(payload))
+        self.writer
+            .append(presentation_id, ShowItemPayload::Lyrics(payload))
     }
 }

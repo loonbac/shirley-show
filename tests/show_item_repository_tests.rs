@@ -3,7 +3,7 @@ use shirley_show::domain::presentation::Presentation;
 use shirley_show::domain::show_item::{LyricsPayload, NotePayload, ShowItemPayload, TrackPayload};
 use shirley_show::domain::show_item_kind::ShowItemKind;
 use shirley_show::domain::show_item_update::ShowItemUpdate;
-use shirley_show::infra::sqlite::connect::{init_pool, DbPool};
+use shirley_show::infra::sqlite::connect::{DbPool, init_pool};
 use shirley_show::infra::sqlite::migrate::migrate_pool;
 use shirley_show::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use shirley_show::infra::sqlite::show_item_repository::SqliteShowItemRepository;
@@ -13,7 +13,12 @@ use shirley_show::ports::show_item_reader::ShowItemReader;
 use shirley_show::ports::show_item_writer::ShowItemWriter;
 use tempfile::TempDir;
 
-fn setup_repo() -> (SqliteShowItemRepository, SqlitePresentationRepository, DbPool, TempDir) {
+fn setup_repo() -> (
+    SqliteShowItemRepository,
+    SqlitePresentationRepository,
+    DbPool,
+    TempDir,
+) {
     let dir = tempfile::tempdir().expect("temp dir");
     let db_path = dir.path().join("test.sqlite3");
     let path = db_path.to_str().expect("valid path");
@@ -45,7 +50,9 @@ fn test_append_items_and_list_ordered() {
     assert_eq!(item2.kind(), ShowItemKind::Note);
 
     // Append 3: Track
-    let p3 = ShowItemPayload::Track(TrackPayload::new("Backing track", "audio-abc.mp3", "audio/mpeg", 2048).unwrap());
+    let p3 = ShowItemPayload::Track(
+        TrackPayload::new("Backing track", "audio-abc.mp3", "audio/mpeg", 2048).unwrap(),
+    );
     let item3 = item_repo.append(&pres.id, p3).unwrap();
     assert_eq!(item3.position, 2);
     assert_eq!(item3.kind(), ShowItemKind::Track);
@@ -101,9 +108,24 @@ fn test_swap_atomic_and_boundary_guards() {
     let pres = Presentation::new("Show").unwrap();
     pres_repo.create(&pres).unwrap();
 
-    let item0 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 0").unwrap())).unwrap();
-    let item1 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 1").unwrap())).unwrap();
-    let item2 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 2").unwrap())).unwrap();
+    let item0 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 0").unwrap()),
+        )
+        .unwrap();
+    let item1 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 1").unwrap()),
+        )
+        .unwrap();
+    let item2 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 2").unwrap()),
+        )
+        .unwrap();
 
     // Boundary: moving item0 Up must fail with conflict
     let err_up = item_repo.swap(&pres.id, &item0.id, MoveDirection::Up);
@@ -114,7 +136,9 @@ fn test_swap_atomic_and_boundary_guards() {
     assert!(err_down.is_err());
 
     // Swap item1 Up: item1 becomes pos 0, item0 becomes pos 1
-    let swapped_items = item_repo.swap(&pres.id, &item1.id, MoveDirection::Up).unwrap();
+    let swapped_items = item_repo
+        .swap(&pres.id, &item1.id, MoveDirection::Up)
+        .unwrap();
     assert_eq!(swapped_items.len(), 3);
     assert_eq!(swapped_items[0].id, item1.id);
     assert_eq!(swapped_items[0].position, 0);
@@ -124,7 +148,9 @@ fn test_swap_atomic_and_boundary_guards() {
     assert_eq!(swapped_items[2].position, 2);
 
     // Swap item1 Down: reverts back to original
-    let swapped_back = item_repo.swap(&pres.id, &item1.id, MoveDirection::Down).unwrap();
+    let swapped_back = item_repo
+        .swap(&pres.id, &item1.id, MoveDirection::Down)
+        .unwrap();
     assert_eq!(swapped_back[0].id, item0.id);
     assert_eq!(swapped_back[0].position, 0);
     assert_eq!(swapped_back[1].id, item1.id);
@@ -140,7 +166,12 @@ fn test_single_item_presentation_swap_boundary_checks() {
     let pres = Presentation::new("Single Item Show").unwrap();
     pres_repo.create(&pres).unwrap();
 
-    let only_item = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Only").unwrap())).unwrap();
+    let only_item = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Only").unwrap()),
+        )
+        .unwrap();
 
     // Both up and down must fail on a 1-item list
     let err_up = item_repo.swap(&pres.id, &only_item.id, MoveDirection::Up);
@@ -156,10 +187,30 @@ fn test_rapid_successive_swaps_maintain_contiguous_indices() {
     let pres = Presentation::new("Rapid Swap Show").unwrap();
     pres_repo.create(&pres).unwrap();
 
-    let _it0 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("0").unwrap())).unwrap();
-    let it1 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("1").unwrap())).unwrap();
-    let it2 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("2").unwrap())).unwrap();
-    let it3 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("3").unwrap())).unwrap();
+    let _it0 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("0").unwrap()),
+        )
+        .unwrap();
+    let it1 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("1").unwrap()),
+        )
+        .unwrap();
+    let it2 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("2").unwrap()),
+        )
+        .unwrap();
+    let it3 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("3").unwrap()),
+        )
+        .unwrap();
 
     // Perform rapid successive swaps
     let swaps = [
@@ -174,7 +225,10 @@ fn test_rapid_successive_swaps_maintain_contiguous_indices() {
         let items = item_repo.swap(&pres.id, id, dir).unwrap();
         assert_eq!(items.len(), 4);
         for (idx, item) in items.iter().enumerate() {
-            assert_eq!(item.position, idx as i64, "Positions must be strictly contiguous 0..N-1");
+            assert_eq!(
+                item.position, idx as i64,
+                "Positions must be strictly contiguous 0..N-1"
+            );
         }
     }
 }
@@ -186,12 +240,26 @@ fn test_delete_item_recompacts_and_enqueues_audio() {
     let pres = Presentation::new("Show").unwrap();
     pres_repo.create(&pres).unwrap();
 
-    let item0 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 0").unwrap())).unwrap();
-    let item1 = item_repo.append(
-        &pres.id,
-        ShowItemPayload::Track(TrackPayload::new("Track 1", "audio-key-999.mp3", "audio/mpeg", 5000).unwrap()),
-    ).unwrap();
-    let item2 = item_repo.append(&pres.id, ShowItemPayload::Lyrics(LyricsPayload::new("Lyrics 2").unwrap())).unwrap();
+    let item0 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 0").unwrap()),
+        )
+        .unwrap();
+    let item1 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Track(
+                TrackPayload::new("Track 1", "audio-key-999.mp3", "audio/mpeg", 5000).unwrap(),
+            ),
+        )
+        .unwrap();
+    let item2 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Lyrics(LyricsPayload::new("Lyrics 2").unwrap()),
+        )
+        .unwrap();
 
     // Delete item1 (middle track)
     let del_result = item_repo.delete(&pres.id, &item1.id).unwrap();
@@ -207,11 +275,13 @@ fn test_delete_item_recompacts_and_enqueues_audio() {
 
     // Verify audio_key is in pending_audio_deletions table
     let conn = pool.get().unwrap();
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pending_audio_deletions WHERE audio_key = 'audio-key-999.mp3';",
-        [],
-        |r| r.get(0),
-    ).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pending_audio_deletions WHERE audio_key = 'audio-key-999.mp3';",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
     assert_eq!(count, 1);
 
     // Verify deleting non-existent item returns error
@@ -225,9 +295,24 @@ fn test_delete_first_and_last_items_recompaction() {
     let pres = Presentation::new("Edge Delete Show").unwrap();
     pres_repo.create(&pres).unwrap();
 
-    let i0 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("0").unwrap())).unwrap();
-    let i1 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("1").unwrap())).unwrap();
-    let i2 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("2").unwrap())).unwrap();
+    let i0 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("0").unwrap()),
+        )
+        .unwrap();
+    let i1 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("1").unwrap()),
+        )
+        .unwrap();
+    let i2 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("2").unwrap()),
+        )
+        .unwrap();
 
     // Delete first item (i0)
     let res0 = item_repo.delete(&pres.id, &i0.id).unwrap();
@@ -269,7 +354,9 @@ fn test_update_show_item_success_and_invariants() {
     // 1. Update track title
     let update_track = ShowItemUpdate::new_track_title("Updated Title").unwrap();
     let updated_at_ts = "2026-03-30T12:00:00Z";
-    let updated_track = item_repo.update(&pres.id, &track_item.id, update_track, updated_at_ts).unwrap();
+    let updated_track = item_repo
+        .update(&pres.id, &track_item.id, update_track, updated_at_ts)
+        .unwrap();
 
     assert_eq!(updated_track.id, track_item.id);
     assert_eq!(updated_track.position, 0);
@@ -291,7 +378,9 @@ fn test_update_show_item_success_and_invariants() {
     // 2. Update lyrics body
     let update_lyrics = ShowItemUpdate::new_text_body("Updated Lyrics Body").unwrap();
     let updated_at_ts2 = "2026-03-30T12:05:00Z";
-    let updated_lyrics = item_repo.update(&pres.id, &lyrics_item.id, update_lyrics, updated_at_ts2).unwrap();
+    let updated_lyrics = item_repo
+        .update(&pres.id, &lyrics_item.id, update_lyrics, updated_at_ts2)
+        .unwrap();
     match &updated_lyrics.payload {
         ShowItemPayload::Lyrics(l) => {
             assert_eq!(l.body, "Updated Lyrics Body");
@@ -300,10 +389,20 @@ fn test_update_show_item_success_and_invariants() {
     }
 
     // 3. Error on non-existent item or non-existent presentation
-    let err1 = item_repo.update(&pres.id, "non-existent-item", ShowItemUpdate::TrackTitle("X".into()), "2026-03-30T12:10:00Z");
+    let err1 = item_repo.update(
+        &pres.id,
+        "non-existent-item",
+        ShowItemUpdate::TrackTitle("X".into()),
+        "2026-03-30T12:10:00Z",
+    );
     assert!(err1.is_err());
 
-    let err2 = item_repo.update("non-existent-pres", &track_item.id, ShowItemUpdate::TrackTitle("X".into()), "2026-03-30T12:10:00Z");
+    let err2 = item_repo.update(
+        "non-existent-pres",
+        &track_item.id,
+        ShowItemUpdate::TrackTitle("X".into()),
+        "2026-03-30T12:10:00Z",
+    );
     assert!(err2.is_err());
 }
 
@@ -314,10 +413,30 @@ fn test_move_to_absolute_reordering_and_boundaries() {
     let pres = Presentation::new("Move To Test").unwrap();
     pres_repo.create(&pres).unwrap();
 
-    let i0 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 0").unwrap())).unwrap();
-    let i1 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 1").unwrap())).unwrap();
-    let i2 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 2").unwrap())).unwrap();
-    let i3 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 3").unwrap())).unwrap();
+    let i0 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 0").unwrap()),
+        )
+        .unwrap();
+    let i1 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 1").unwrap()),
+        )
+        .unwrap();
+    let i2 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 2").unwrap()),
+        )
+        .unwrap();
+    let i3 = item_repo
+        .append(
+            &pres.id,
+            ShowItemPayload::Note(NotePayload::new("Item 3").unwrap()),
+        )
+        .unwrap();
 
     // Sequence is [0, 1, 2, 3]
 

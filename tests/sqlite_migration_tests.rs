@@ -24,7 +24,11 @@ fn test_sqlite_pragmas_and_migration_tables() {
     let journal_mode: String = conn
         .query_row("PRAGMA journal_mode;", [], |row| row.get(0))
         .expect("query journal_mode");
-    assert_eq!(journal_mode.to_lowercase(), "wal", "journal_mode should be WAL");
+    assert_eq!(
+        journal_mode.to_lowercase(),
+        "wal",
+        "journal_mode should be WAL"
+    );
 
     // Check table creation
     let tables: Vec<String> = {
@@ -56,13 +60,21 @@ fn test_pragmas_persist_across_multiple_connections() {
     let conn1 = pool.get().expect("conn1");
     let conn2 = pool.get().expect("conn2");
 
-    let fk1: i32 = conn1.query_row("PRAGMA foreign_keys;", [], |r| r.get(0)).unwrap();
-    let fk2: i32 = conn2.query_row("PRAGMA foreign_keys;", [], |r| r.get(0)).unwrap();
+    let fk1: i32 = conn1
+        .query_row("PRAGMA foreign_keys;", [], |r| r.get(0))
+        .unwrap();
+    let fk2: i32 = conn2
+        .query_row("PRAGMA foreign_keys;", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(fk1, 1);
     assert_eq!(fk2, 1);
 
-    let bt1: i32 = conn1.query_row("PRAGMA busy_timeout;", [], |r| r.get(0)).unwrap();
-    let bt2: i32 = conn2.query_row("PRAGMA busy_timeout;", [], |r| r.get(0)).unwrap();
+    let bt1: i32 = conn1
+        .query_row("PRAGMA busy_timeout;", [], |r| r.get(0))
+        .unwrap();
+    let bt2: i32 = conn2
+        .query_row("PRAGMA busy_timeout;", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(bt1, 5000);
     assert_eq!(bt2, 5000);
 }
@@ -79,7 +91,11 @@ fn test_migration_idempotency() {
 
     let conn = pool.get().expect("conn");
     let count: i32 = conn
-        .query_row("SELECT count(*) FROM schema_migrations WHERE version = 1;", [], |row| row.get(0))
+        .query_row(
+            "SELECT count(*) FROM schema_migrations WHERE version = 1;",
+            [],
+            |row| row.get(0),
+        )
         .expect("schema version query");
     assert_eq!(count, 1);
 }

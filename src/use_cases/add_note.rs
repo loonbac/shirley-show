@@ -15,6 +15,7 @@ impl<W: ShowItemWriter> AddNote<W> {
 
     pub fn execute(&self, presentation_id: &str, body: &str) -> Result<ShowItem, AppError> {
         let payload = NotePayload::new(body)?;
-        self.writer.append(presentation_id, ShowItemPayload::Note(payload))
+        self.writer
+            .append(presentation_id, ShowItemPayload::Note(payload))
     }
 }

@@ -1,16 +1,13 @@
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("Bad request: {message}")]
-    BadRequest {
-        code: &'static str,
-        message: String,
-    },
+    BadRequest { code: &'static str, message: String },
 
     #[error("Validation error: {message}")]
     Validation {
@@ -20,28 +17,16 @@ pub enum AppError {
     },
 
     #[error("Resource not found: {message}")]
-    NotFound {
-        code: &'static str,
-        message: String,
-    },
+    NotFound { code: &'static str, message: String },
 
     #[error("Conflict: {message}")]
-    Conflict {
-        code: &'static str,
-        message: String,
-    },
+    Conflict { code: &'static str, message: String },
 
     #[error("Payload too large: {message}")]
-    PayloadTooLarge {
-        code: &'static str,
-        message: String,
-    },
+    PayloadTooLarge { code: &'static str, message: String },
 
     #[error("Unsupported media type: {message}")]
-    UnsupportedMediaType {
-        code: &'static str,
-        message: String,
-    },
+    UnsupportedMediaType { code: &'static str, message: String },
 
     #[error("Database error: {0}")]
     Database(String),
@@ -58,7 +43,11 @@ impl AppError {
         }
     }
 
-    pub fn validation(code: &'static str, message: impl Into<String>, field: impl Into<String>) -> Self {
+    pub fn validation(
+        code: &'static str,
+        message: impl Into<String>,
+        field: impl Into<String>,
+    ) -> Self {
         Self::Validation {
             code,
             message: message.into(),
@@ -118,7 +107,11 @@ impl IntoResponse for AppError {
                     field: None,
                 },
             ),
-            AppError::Validation { code, message, field } => (
+            AppError::Validation {
+                code,
+                message,
+                field,
+            } => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 ErrorBody {
                     code: code.to_string(),

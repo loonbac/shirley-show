@@ -44,7 +44,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(pool: DbPool) -> Self {
-        Self::new_with_items(pool, Arc::new(LocalAudioStorage::new(PathBuf::from("audio"))))
+        Self::new_with_items(
+            pool,
+            Arc::new(LocalAudioStorage::new(PathBuf::from("audio"))),
+        )
     }
 
     pub fn new_with_items(pool: DbPool, storage: Arc<LocalAudioStorage>) -> Self {
@@ -70,7 +73,11 @@ impl AppState {
             upload_track: Arc::new(UploadTrack::new(item_repo.clone(), storage.clone())),
             reorder_item: Arc::new(ReorderItem::new(item_repo.clone())),
             update_show_item: Arc::new(UpdateShowItem::new(item_repo.clone(), item_repo.clone())),
-            delete_item: Arc::new(DeleteItem::new(item_repo.clone(), storage.clone(), cleanup_repo)),
+            delete_item: Arc::new(DeleteItem::new(
+                item_repo.clone(),
+                storage.clone(),
+                cleanup_repo,
+            )),
             open_track_audio: Arc::new(OpenTrackAudio::new(item_repo, storage)),
         }
     }

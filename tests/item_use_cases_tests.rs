@@ -8,7 +8,7 @@ use shirley_show::domain::show_item_kind::ShowItemKind;
 use shirley_show::error::AppError;
 use shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use shirley_show::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
-use shirley_show::infra::sqlite::connect::{init_pool, DbPool};
+use shirley_show::infra::sqlite::connect::{DbPool, init_pool};
 use shirley_show::infra::sqlite::migrate::migrate_pool;
 use shirley_show::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use shirley_show::infra::sqlite::show_item_repository::SqliteShowItemRepository;
@@ -130,7 +130,11 @@ fn test_upload_track_success_and_compensation_on_failure() {
     assert!(err3.is_err());
     let entries_after = std::fs::read_dir(ctx.storage.files_dir()).unwrap();
     let files_after: Vec<_> = entries_after.filter_map(|e| e.ok()).collect();
-    assert_eq!(files_after.len(), 1, "Promoted file must be cleaned up on validation failure");
+    assert_eq!(
+        files_after.len(),
+        1,
+        "Promoted file must be cleaned up on validation failure"
+    );
 }
 
 #[test]
@@ -146,14 +150,20 @@ fn test_reorder_item_use_case() {
     let reorder = ReorderItem::new(ctx.item_repo.clone());
 
     // Swap i1 Up -> i1 is pos 0, i0 is pos 1
-    let items = reorder.execute(&pres.id, &i1.id, MoveDirection::Up).unwrap();
+    let items = reorder
+        .execute(&pres.id, &i1.id, MoveDirection::Up)
+        .unwrap();
     assert_eq!(items[0].id, i1.id);
     assert_eq!(items[0].position, 0);
     assert_eq!(items[1].id, i0.id);
     assert_eq!(items[1].position, 1);
 
     // Swap boundary -> moving i1 Up again fails
-    assert!(reorder.execute(&pres.id, &i1.id, MoveDirection::Up).is_err());
+    assert!(
+        reorder
+            .execute(&pres.id, &i1.id, MoveDirection::Up)
+            .is_err()
+    );
 }
 
 #[test]
@@ -271,7 +281,13 @@ fn test_update_show_item_use_case() {
     let err_incompatible = update_uc
         .execute(&pres.id, &track_item.id, None, Some("Some text".into()))
         .unwrap_err();
-    assert!(matches!(err_incompatible, AppError::BadRequest { code: "incompatible_field", .. }));
+    assert!(matches!(
+        err_incompatible,
+        AppError::BadRequest {
+            code: "incompatible_field",
+            ..
+        }
+    ));
 
     // 3. Valid lyrics update
     let updated_lyrics = update_uc
@@ -288,25 +304,54 @@ fn test_update_show_item_use_case() {
     let err_incompatible_lyrics = update_uc
         .execute(&pres.id, &lyrics_item.id, Some("New Title".into()), None)
         .unwrap_err();
-    assert!(matches!(err_incompatible_lyrics, AppError::BadRequest { code: "incompatible_field", .. }));
+    assert!(matches!(
+        err_incompatible_lyrics,
+        AppError::BadRequest {
+            code: "incompatible_field",
+            ..
+        }
+    ));
 
     // 5. Reject both fields provided
     let err_both = update_uc
-        .execute(&pres.id, &track_item.id, Some("Title".into()), Some("Body".into()))
+        .execute(
+            &pres.id,
+            &track_item.id,
+            Some("Title".into()),
+            Some("Body".into()),
+        )
         .unwrap_err();
-    assert!(matches!(err_both, AppError::BadRequest { code: "invalid_update_fields", .. }));
+    assert!(matches!(
+        err_both,
+        AppError::BadRequest {
+            code: "invalid_update_fields",
+            ..
+        }
+    ));
 
     // 6. Reject empty fields provided
     let err_none = update_uc
         .execute(&pres.id, &track_item.id, None, None)
         .unwrap_err();
-    assert!(matches!(err_none, AppError::BadRequest { code: "invalid_update_fields", .. }));
+    assert!(matches!(
+        err_none,
+        AppError::BadRequest {
+            code: "invalid_update_fields",
+            ..
+        }
+    ));
 
     // 7. Reject empty string after trim
     let err_empty = update_uc
         .execute(&pres.id, &track_item.id, Some("   ".into()), None)
         .unwrap_err();
-    assert!(matches!(err_empty, AppError::BadRequest { code: "empty_update_value", .. }));
+    assert!(matches!(
+        err_empty,
+        AppError::BadRequest {
+            code: "empty_update_value",
+            ..
+        }
+    ));
 
     // 8. 404 on missing item
     let err_not_found = update_uc
@@ -329,7 +374,9 @@ fn test_reorder_item_target_position_use_case() {
     let reorder = ReorderItem::new(ctx.item_repo.clone());
 
     // Move i2 to position 0 -> [i2, i0, i1]
-    let items = reorder.execute_target_position(&pres.id, &i2.id, 0).unwrap();
+    let items = reorder
+        .execute_target_position(&pres.id, &i2.id, 0)
+        .unwrap();
     assert_eq!(items[0].id, i2.id);
     assert_eq!(items[0].position, 0);
     assert_eq!(items[1].id, i0.id);

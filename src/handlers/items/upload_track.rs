@@ -1,15 +1,15 @@
 use std::io::Write;
 use std::path::Path;
 
+use axum::Json;
 use axum::extract::{Multipart, Path as AxumPath, State};
 use axum::http::StatusCode;
-use axum::Json;
 
 use crate::domain::show_item::MAX_AUDIO_BYTE_SIZE;
 use crate::error::AppError;
 use crate::handlers::dto::ShowItemResponse;
-use crate::infra::filesystem::detect_audio_format::detect_audio_format;
 use crate::infra::filesystem::StagingFileGuard;
+use crate::infra::filesystem::detect_audio_format::detect_audio_format;
 use crate::state::AppState;
 
 pub async fn upload_track(
@@ -43,10 +43,7 @@ pub async fn upload_track(
                 ));
             }
 
-            let filename = field
-                .file_name()
-                .unwrap_or("audio.mp3")
-                .to_string();
+            let filename = field.file_name().unwrap_or("audio.mp3").to_string();
 
             let ext = Path::new(&filename)
                 .extension()
@@ -56,9 +53,8 @@ pub async fn upload_track(
 
             let (stage_id, stage_path) = state.storage.create_staging_file()?;
             let guard = StagingFileGuard::new(state.storage.clone(), stage_id, stage_path.clone());
-            let mut file = std::fs::File::create(guard.path()).map_err(|e| {
-                AppError::Internal(format!("Failed to open staging file: {e}"))
-            })?;
+            let mut file = std::fs::File::create(guard.path())
+                .map_err(|e| AppError::Internal(format!("Failed to open staging file: {e}")))?;
 
             let mut header_buf = Vec::new();
 
@@ -130,13 +126,10 @@ pub async fn upload_track(
     };
 
     let stage_id = guard.stage_id().to_string();
-    let item = state.upload_track.execute(
-        &presentation_id,
-        &title,
-        &stage_id,
-        format,
-        total_bytes,
-    )?;
+    let item =
+        state
+            .upload_track
+            .execute(&presentation_id, &title, &stage_id, format, total_bytes)?;
 
     guard.defuse();
 

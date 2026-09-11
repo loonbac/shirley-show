@@ -65,9 +65,9 @@ impl PresentationSummaryReader for PresentationSummaryRepository {
             )
             .map_err(|e| AppError::Database(format!("Failed to prepare list_summaries query: {e}")))?;
 
-        let mut rows = stmt
-            .query([])
-            .map_err(|e| AppError::Database(format!("Failed to execute list_summaries query: {e}")))?;
+        let mut rows = stmt.query([]).map_err(|e| {
+            AppError::Database(format!("Failed to execute list_summaries query: {e}"))
+        })?;
 
         let mut summaries: Vec<PresentationSummary> = Vec::new();
 
@@ -84,11 +84,16 @@ impl PresentationSummaryReader for PresentationSummaryRepository {
             let notes_count: i64 = row.get(6).map_err(|e| AppError::Database(e.to_string()))?;
             let total_items: i64 = row.get(7).map_err(|e| AppError::Database(e.to_string()))?;
 
-            let item_id: Option<String> = row.get(8).map_err(|e| AppError::Database(e.to_string()))?;
-            let position: Option<i64> = row.get(9).map_err(|e| AppError::Database(e.to_string()))?;
-            let kind: Option<String> = row.get(10).map_err(|e| AppError::Database(e.to_string()))?;
-            let item_title: Option<String> = row.get(11).map_err(|e| AppError::Database(e.to_string()))?;
-            let body: Option<String> = row.get(12).map_err(|e| AppError::Database(e.to_string()))?;
+            let item_id: Option<String> =
+                row.get(8).map_err(|e| AppError::Database(e.to_string()))?;
+            let position: Option<i64> =
+                row.get(9).map_err(|e| AppError::Database(e.to_string()))?;
+            let kind: Option<String> =
+                row.get(10).map_err(|e| AppError::Database(e.to_string()))?;
+            let item_title: Option<String> =
+                row.get(11).map_err(|e| AppError::Database(e.to_string()))?;
+            let body: Option<String> =
+                row.get(12).map_err(|e| AppError::Database(e.to_string()))?;
 
             let last_matches = summaries.last().map(|s| s.id == id).unwrap_or(false);
 

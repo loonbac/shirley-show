@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use axum::body::Body;
-use http::{header, Request, StatusCode};
+use http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
 use shirley_show::router::create_router;
@@ -102,7 +102,10 @@ async fn test_serve_static_assets_css_and_js() {
     assert!(css_content_type.contains("text/css"));
 
     let css_body = res_css.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(std::str::from_utf8(&css_body).unwrap(), "body { margin: 0; }");
+    assert_eq!(
+        std::str::from_utf8(&css_body).unwrap(),
+        "body { margin: 0; }"
+    );
 
     // Test JS asset
     let req_js = Request::builder()

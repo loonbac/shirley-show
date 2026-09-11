@@ -1,6 +1,6 @@
+use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
 
 /// RAII guard that automatically removes an unpromoted staging file on drop unless defused.
 pub struct StagingFileGuard {
@@ -11,7 +11,11 @@ pub struct StagingFileGuard {
 
 impl StagingFileGuard {
     pub fn new(storage: Arc<LocalAudioStorage>, stage_id: String, path: PathBuf) -> Self {
-        Self { storage, stage_id: Some(stage_id), path }
+        Self {
+            storage,
+            stage_id: Some(stage_id),
+            path,
+        }
     }
 
     pub fn stage_id(&self) -> &str {

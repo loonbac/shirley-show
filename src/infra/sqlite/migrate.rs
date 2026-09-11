@@ -24,9 +24,9 @@ pub fn migrate_db(conn: &mut Connection) -> Result<(), AppError> {
         .map_err(|e| AppError::Database(format!("Failed to query schema_migrations: {e}")))?;
 
     if applied == 0 {
-        let tx = conn
-            .transaction()
-            .map_err(|e| AppError::Database(format!("Failed to begin transaction for migration: {e}")))?;
+        let tx = conn.transaction().map_err(|e| {
+            AppError::Database(format!("Failed to begin transaction for migration: {e}"))
+        })?;
 
         tx.execute_batch(MIGRATION_0001)
             .map_err(|e| AppError::Database(format!("Failed to apply migration 0001: {e}")))?;
@@ -37,16 +37,17 @@ pub fn migrate_db(conn: &mut Connection) -> Result<(), AppError> {
         )
         .map_err(|e| AppError::Database(format!("Failed to record migration version 1: {e}")))?;
 
-        tx.commit()
-            .map_err(|e| AppError::Database(format!("Failed to commit migration transaction: {e}")))?;
+        tx.commit().map_err(|e| {
+            AppError::Database(format!("Failed to commit migration transaction: {e}"))
+        })?;
     }
 
     Ok(())
 }
 
 pub fn migrate_pool(pool: &DbPool) -> Result<(), AppError> {
-    let mut conn = pool
-        .get()
-        .map_err(|e| AppError::Database(format!("Failed to acquire connection for migration: {e}")))?;
+    let mut conn = pool.get().map_err(|e| {
+        AppError::Database(format!("Failed to acquire connection for migration: {e}"))
+    })?;
     migrate_db(&mut conn)
 }

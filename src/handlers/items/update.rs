@@ -1,5 +1,5 @@
-use axum::extract::{Path, State};
 use axum::Json;
+use axum::extract::{Path, State};
 
 use crate::error::AppError;
 use crate::handlers::dto::{ShowItemResponse, UpdateItemRequest};
@@ -10,9 +10,10 @@ pub async fn update(
     Path((presentation_id, item_id)): Path<(String, String)>,
     Json(payload): Json<UpdateItemRequest>,
 ) -> Result<Json<ShowItemResponse>, AppError> {
-    let item = state
-        .update_show_item
-        .execute(&presentation_id, &item_id, payload.title, payload.body)?;
+    let item =
+        state
+            .update_show_item
+            .execute(&presentation_id, &item_id, payload.title, payload.body)?;
 
     Ok(Json(ShowItemResponse::from(&item)))
 }

@@ -1,4 +1,3 @@
-use std::io::Write;
 use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::infra::filesystem::detect_audio_format::detect_audio_format;
 use shirley_show::infra::filesystem::generated_audio_key::GeneratedAudioKey;
@@ -8,17 +7,27 @@ use shirley_show::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use shirley_show::infra::sqlite::connect::init_pool;
 use shirley_show::infra::sqlite::migrate::migrate_pool;
 use shirley_show::ports::cleanup_queue::CleanupQueue;
+use std::io::Write;
 
 #[test]
 fn test_detect_audio_format_magic_bytes() {
     // MP3 with ID3 header
     let mp3_id3 = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-    assert_eq!(detect_audio_format(&mp3_id3, "mp3").unwrap(), AudioFormat::Mp3);
-    assert_eq!(detect_audio_format(&mp3_id3, ".MP3").unwrap(), AudioFormat::Mp3);
+    assert_eq!(
+        detect_audio_format(&mp3_id3, "mp3").unwrap(),
+        AudioFormat::Mp3
+    );
+    assert_eq!(
+        detect_audio_format(&mp3_id3, ".MP3").unwrap(),
+        AudioFormat::Mp3
+    );
 
     // MP3 with raw frame sync (0xFF, 0xFB)
     let mp3_frame = [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00];
-    assert_eq!(detect_audio_format(&mp3_frame, "mp3").unwrap(), AudioFormat::Mp3);
+    assert_eq!(
+        detect_audio_format(&mp3_frame, "mp3").unwrap(),
+        AudioFormat::Mp3
+    );
 
     // WAV RIFF/WAVE header
     let mut wav = vec![0u8; 12];
@@ -88,7 +97,9 @@ fn test_local_audio_storage_stage_promote_delete() {
     std::fs::write(&stage_path, b"dummy audio content").unwrap();
 
     // Promote
-    let key = storage.promote_staged_file(&stage_id, AudioFormat::Mp3).unwrap();
+    let key = storage
+        .promote_staged_file(&stage_id, AudioFormat::Mp3)
+        .unwrap();
     assert!(!stage_path.exists(), "Staged file should be moved/renamed");
 
     let resolved_path = storage.resolve_path(&key);
@@ -119,7 +130,9 @@ fn test_cleanup_queue_and_reconciliation() {
     // Create a real file on disk and queue it in pending_audio_deletions
     let (stage_id, stage_path) = storage.create_staging_file().unwrap();
     std::fs::write(&stage_path, b"audio to clean up").unwrap();
-    let key = storage.promote_staged_file(&stage_id, AudioFormat::Mp3).unwrap();
+    let key = storage
+        .promote_staged_file(&stage_id, AudioFormat::Mp3)
+        .unwrap();
 
     // Add to pending cleanup queue
     let conn = pool.get().unwrap();
@@ -167,14 +180,18 @@ fn test_cleanup_failure_retains_record_with_error_and_attempts() {
     ).unwrap();
 
     // Record failure explicitly
-    cleanup_repo.record_failure(invalid_key, "Permission denied on host").unwrap();
+    cleanup_repo
+        .record_failure(invalid_key, "Permission denied on host")
+        .unwrap();
 
     // Verify attempts incremented and last_error recorded
-    let (attempts, last_error): (i32, Option<String>) = conn.query_row(
-        "SELECT attempts, last_error FROM pending_audio_deletions WHERE audio_key = ?1;",
-        [invalid_key],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    ).unwrap();
+    let (attempts, last_error): (i32, Option<String>) = conn
+        .query_row(
+            "SELECT attempts, last_error FROM pending_audio_deletions WHERE audio_key = ?1;",
+            [invalid_key],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
 
     assert_eq!(attempts, 1);
     assert_eq!(last_error, Some("Permission denied on host".to_string()));

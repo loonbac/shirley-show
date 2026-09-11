@@ -48,9 +48,8 @@ impl<R: ShowItemReader> OpenTrackAudio<R> {
             ));
         }
 
-        let metadata = std::fs::metadata(&path).map_err(|e| {
-            AppError::Internal(format!("Failed to read audio file metadata: {e}"))
-        })?;
+        let metadata = std::fs::metadata(&path)
+            .map_err(|e| AppError::Internal(format!("Failed to read audio file metadata: {e}")))?;
 
         let byte_size = metadata.len();
         if byte_size == 0 && expected_size > 0 {

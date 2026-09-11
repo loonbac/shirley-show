@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use axum::body::Body;
-use http::{header, Request, StatusCode};
+use http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde_json::Value;
+use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -61,10 +61,7 @@ async fn test_audio_stream_full_request_200() {
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(
-        res.headers().get(header::ACCEPT_RANGES).unwrap(),
-        "bytes"
-    );
+    assert_eq!(res.headers().get(header::ACCEPT_RANGES).unwrap(), "bytes");
     assert_eq!(
         res.headers().get(header::CONTENT_TYPE).unwrap(),
         "audio/mpeg"
@@ -89,10 +86,7 @@ async fn test_audio_stream_range_request_206() {
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
-    assert_eq!(
-        res.headers().get(header::ACCEPT_RANGES).unwrap(),
-        "bytes"
-    );
+    assert_eq!(res.headers().get(header::ACCEPT_RANGES).unwrap(), "bytes");
     assert_eq!(
         res.headers().get(header::CONTENT_RANGE).unwrap(),
         "bytes 0-4/20"
@@ -135,10 +129,7 @@ async fn test_audio_stream_head_request_without_body() {
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(
-        res.headers().get(header::ACCEPT_RANGES).unwrap(),
-        "bytes"
-    );
+    assert_eq!(res.headers().get(header::ACCEPT_RANGES).unwrap(), "bytes");
     assert_eq!(res.headers().get(header::CONTENT_LENGTH).unwrap(), "20");
 
     let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
@@ -159,7 +150,12 @@ async fn test_audio_stream_malformed_and_multi_range_fallback_to_200() {
 
     let res_malformed = app.clone().oneshot(req_malformed).await.unwrap();
     assert_eq!(res_malformed.status(), StatusCode::OK);
-    let bytes = res_malformed.into_body().collect().await.unwrap().to_bytes();
+    let bytes = res_malformed
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     assert_eq!(bytes.len(), 20);
 
     // Multi-range: fallback to 200 full response
@@ -192,7 +188,10 @@ async fn test_audio_stream_missing_track_and_missing_file_404() {
 
     // 2. Track exists in DB, but file missing on disk -> 404 audio_unavailable
     // Find and delete the file from storage
-    let files: Vec<_> = std::fs::read_dir(storage.files_dir()).unwrap().filter_map(|e| e.ok()).collect();
+    let files: Vec<_> = std::fs::read_dir(storage.files_dir())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
     for f in files {
         std::fs::remove_file(f.path()).unwrap();
     }
@@ -206,7 +205,12 @@ async fn test_audio_stream_missing_track_and_missing_file_404() {
     let res_missing_file = app.oneshot(req_missing_file).await.unwrap();
     assert_eq!(res_missing_file.status(), StatusCode::NOT_FOUND);
 
-    let bytes = res_missing_file.into_body().collect().await.unwrap().to_bytes();
+    let bytes = res_missing_file
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let json: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(json["error"]["code"], "audio_unavailable");
 }

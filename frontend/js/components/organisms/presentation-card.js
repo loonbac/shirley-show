@@ -75,7 +75,7 @@ export function createPresentationCard(props) {
     deleteBtn.el,
   ]);
 
-  const headerRow = createElement('div', { class: 'presentation-card-header-row' }, [\
+  const headerRow = createElement('div', { class: 'presentation-card-header-row' }, [
     titleLink,
     discreteActions,
   ]);

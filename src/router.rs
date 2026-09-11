@@ -1,6 +1,6 @@
+use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post};
-use axum::Router;
 use tower_http::services::ServeDir;
 
 use crate::handlers::{audio, items, presentations, static_assets};
@@ -15,7 +15,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/presentations", get(presentations::list::list))
         .route("/api/presentations", post(presentations::create::create))
         .route("/api/presentations/{id}", get(presentations::get::get))
-        .route("/api/presentations/{id}", patch(presentations::rename::rename))
+        .route(
+            "/api/presentations/{id}",
+            patch(presentations::rename::rename),
+        )
         .route(
             "/api/presentations/{id}",
             axum::routing::delete(presentations::delete::delete),
@@ -26,8 +29,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/api/presentations/{presentation_id}/tracks",
-            post(items::upload_track::upload_track)
-                .layer(DefaultBodyLimit::max(101 * 1024 * 1024)),
+            post(items::upload_track::upload_track).layer(DefaultBodyLimit::max(101 * 1024 * 1024)),
         )
         .route(
             "/api/presentations/{presentation_id}/items/{item_id}/move",

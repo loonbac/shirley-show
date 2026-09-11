@@ -1,6 +1,6 @@
-use uuid::Uuid;
 use crate::domain::audio_format::AudioFormat;
 use crate::error::AppError;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedAudioKey {

@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use chrono::Utc;
+use std::sync::Arc;
 
 use crate::domain::Presentation;
 use crate::error::AppError;

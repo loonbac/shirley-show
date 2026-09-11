@@ -29,6 +29,7 @@ impl<W: ShowItemWriter> ReorderItem<W> {
         item_id: &str,
         target_position: i64,
     ) -> Result<Vec<ShowItem>, AppError> {
-        self.writer.move_to(presentation_id, item_id, target_position)
+        self.writer
+            .move_to(presentation_id, item_id, target_position)
     }
 }
