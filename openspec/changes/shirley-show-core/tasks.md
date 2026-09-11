@@ -84,44 +84,44 @@ Chain strategy: pending
 ## Slice C: Micro-Modular Frontend UI & Exclusive Audio Player
 
 ### 12. Static Assets Serving and Application Entry Point
-- [ ] RED: Write HTTP integration tests in `tests/static_assets_tests.rs` verifying `/` serves `index.html` with `Cache-Control: no-cache` and `/assets/*` serves files from `frontend/`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement static file routing in `src/handlers/static_assets.rs`, wire into `src/router.rs`, implement `src/config.rs` and executable entry point `src/main.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Create minimal `frontend/index.html` and verify server startup and graceful asset fallback via `cargo test`. <!-- sdd-owner: implementation -->
+- [x] RED: Write HTTP integration tests in `tests/static_assets_tests.rs` verifying `/` serves `index.html` with `Cache-Control: no-cache` and `/assets/*` serves files from `frontend/`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement static file routing in `src/handlers/static_assets.rs`, wire into `src/router.rs`, implement `src/config.rs` and executable entry point `src/main.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Create minimal `frontend/index.html` and verify server startup and graceful asset fallback via `cargo test`. <!-- sdd-owner: implementation -->
 
 ### 13. CSS Design Tokens, Reset and Atomic Styles
-- [ ] Implement design tokens in `frontend/styles/tokens/colors.css`, `spacing.css`, `typography.css`, `elevations.css`, and `motion.css`. <!-- sdd-owner: implementation -->
-- [ ] Implement base and layout stylesheets in `frontend/styles/base/reset.css`, `typography.css`, `layouts/shell-layout.css`, and `timeline-layout.css`. <!-- sdd-owner: implementation -->
-- [ ] Implement atomic component stylesheets in `frontend/styles/atoms/` (`button.css`, `icon.css`, `text-input.css`, `text-area.css`, `range-input.css`, `status-message.css`, `spinner.css`), `molecules/`, `organisms/`, `views/`, and bundle in `frontend/styles/index.css`. <!-- sdd-owner: implementation -->
+- [x] Implement design tokens in `frontend/styles/tokens/colors.css`, `spacing.css`, `typography.css`, `elevations.css`, and `motion.css`. <!-- sdd-owner: implementation -->
+- [x] Implement base and layout stylesheets in `frontend/styles/base/reset.css`, `typography.css`, `layouts/shell-layout.css`, and `timeline-layout.css`. <!-- sdd-owner: implementation -->
+- [x] Implement atomic component stylesheets in `frontend/styles/atoms/` (`button.css`, `icon.css`, `text-input.css`, `text-area.css`, `range-input.css`, `status-message.css`, `spinner.css`), `molecules/`, `organisms/`, `views/`, and bundle in `frontend/styles/index.css`. <!-- sdd-owner: implementation -->
 
 ### 14. Frontend Core Utilities, Signals and Headless Behaviors
-- [ ] Implement DOM and formatting utilities in `frontend/js/utils/dom/create-element.js`, `frontend/js/utils/format/duration.js`, and `frontend/js/utils/validation/trim-required.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement reactive micro-signals in `frontend/js/state/create-signal.js`, `frontend/js/state/active-route.js`, and `frontend/js/state/playback-state.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement headless behaviors in `frontend/js/behaviors/create-audio-controller.js` (enforcing exactly one `HTMLAudioElement` and never autoplaying), `bind-dialog-dismiss.js`, and `bind-form-submit.js`. <!-- sdd-owner: implementation -->
+- [x] Implement DOM and formatting utilities in `frontend/js/utils/dom/create-element.js`, `frontend/js/utils/format/duration.js`, and `frontend/js/utils/validation/trim-required.js`. <!-- sdd-owner: implementation -->
+- [x] Implement reactive micro-signals in `frontend/js/state/create-signal.js`, `frontend/js/state/active-route.js`, and `frontend/js/state/playback-state.js`. <!-- sdd-owner: implementation -->
+- [x] Implement headless behaviors in `frontend/js/behaviors/create-audio-controller.js` (enforcing exactly one `HTMLAudioElement` and never autoplaying), `bind-dialog-dismiss.js`, and `bind-form-submit.js`. <!-- sdd-owner: implementation -->
 
 ### 15. Frontend Data Client Actions and Hash Router
-- [ ] Implement generic JSON and multipart fetch client in `frontend/js/data/request-json.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement isolated presentation API actions in `frontend/js/data/list-presentations.js`, `create-presentation.js`, `get-presentation.js`, `rename-presentation.js`, and `delete-presentation.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement isolated item API actions in `frontend/js/data/add-text-item.js`, `upload-track.js`, `move-item.js`, and `delete-item.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement pure hash routing in `frontend/js/router/parse-route.js` and `frontend/js/router/navigate.js` supporting `#/presentations` and `#/presentations/:id`. <!-- sdd-owner: implementation -->
+- [x] Implement generic JSON and multipart fetch client in `frontend/js/data/request-json.js`. <!-- sdd-owner: implementation -->
+- [x] Implement isolated presentation API actions in `frontend/js/data/list-presentations.js`, `create-presentation.js`, `get-presentation.js`, `rename-presentation.js`, and `delete-presentation.js`. <!-- sdd-owner: implementation -->
+- [x] Implement isolated item API actions in `frontend/js/data/add-text-item.js`, `upload-track.js`, `move-item.js`, and `delete-item.js`. <!-- sdd-owner: implementation -->
+- [x] Implement pure hash routing in `frontend/js/router/parse-route.js` and `frontend/js/router/navigate.js` supporting `#/presentations` and `#/presentations/:id`. <!-- sdd-owner: implementation -->
 
 ### 16. UI Atoms and Molecules
-- [ ] Implement atomic UI components in `frontend/js/components/atoms/button.js`, `icon.js`, `text-input.js`, `text-area.js`, `range-input.js`, `status-message.js`, and `spinner.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement molecular UI components in `frontend/js/components/molecules/icon-button.js`, `confirmation-dialog.js`, `item-type-selector.js`, `reorder-controls.js`, `playback-controls.js`, and `empty-state.js`. <!-- sdd-owner: implementation -->
+- [x] Implement atomic UI components in `frontend/js/components/atoms/button.js`, `icon.js`, `text-input.js`, `text-area.js`, `range-input.js`, `status-message.js`, and `spinner.js`. <!-- sdd-owner: implementation -->
+- [x] Implement molecular UI components in `frontend/js/components/molecules/icon-button.js`, `confirmation-dialog.js`, `item-type-selector.js`, `reorder-controls.js`, `playback-controls.js`, and `empty-state.js`. <!-- sdd-owner: implementation -->
 
 ### 17. UI Organisms, Layouts and Views
-- [ ] Implement top-level organisms in `frontend/js/components/organisms/app-topbar.js`, `presentation-card.js`, `presentation-form-dialog.js`, `track-item.js`, `lyrics-item.js`, `note-item.js`, and `add-item-dialog.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement layout components in `frontend/js/components/layouts/shell-layout.js` and `timeline-layout.js`. <!-- sdd-owner: implementation -->
-- [ ] Implement catalog and presentation views in `frontend/js/components/views/presentations-view.js` and `presentation-detail-view.js`. <!-- sdd-owner: implementation -->
+- [x] Implement top-level organisms in `frontend/js/components/organisms/app-topbar.js`, `presentation-card.js`, `presentation-form-dialog.js`, `track-item.js`, `lyrics-item.js`, `note-item.js`, and `add-item-dialog.js`. <!-- sdd-owner: implementation -->
+- [x] Implement layout components in `frontend/js/components/layouts/shell-layout.js` and `timeline-layout.js`. <!-- sdd-owner: implementation -->
+- [x] Implement catalog and presentation views in `frontend/js/components/views/presentations-view.js` and `presentation-detail-view.js`. <!-- sdd-owner: implementation -->
 
 ### 18. Frontend Orchestration Controllers and Composition Root
-- [ ] Implement catalog controller in `frontend/js/controllers/presentations-controller.js` connecting API actions, dialogs, empty states, and view updates. <!-- sdd-owner: implementation -->
-- [ ] Implement presentation detail controller in `frontend/js/controllers/presentation-detail-controller.js` wiring timeline items, audio controller, reordering, item creation dialogs, and deletion confirmations. <!-- sdd-owner: implementation -->
-- [ ] Implement composition root in `frontend/js/main.js` binding hash change events, initializing the shared audio controller, and mounting views into the root shell element. <!-- sdd-owner: implementation -->
+- [x] Implement catalog controller in `frontend/js/controllers/presentations-controller.js` connecting API actions, dialogs, empty states, and view updates. <!-- sdd-owner: implementation -->
+- [x] Implement presentation detail controller in `frontend/js/controllers/presentation-detail-controller.js` wiring timeline items, audio controller, reordering, item creation dialogs, and deletion confirmations. <!-- sdd-owner: implementation -->
+- [x] Implement composition root in `frontend/js/main.js` binding hash change events, initializing the shared audio controller, and mounting views into the root shell element. <!-- sdd-owner: implementation -->
 
 ### 19. End-to-End Verification and Acceptance
-- [ ] Run full automated test suite via `cargo test` verifying all unit, repository, and HTTP service tests pass without warnings. <!-- sdd-owner: implementation -->
-- [ ] Perform manual end-to-end verification of catalog workflows: create presentation, rename presentation, empty catalog state, and delete presentation with cascade cleanup confirmation. <!-- sdd-owner: implementation -->
-- [ ] Perform manual end-to-end verification of show execution: vertical timeline rendering, adding lyrics/note/track, 44x44px touch targets, mobile seek via range streaming, exclusive single-track playback, stop-on-navigation, and atomic up/down reordering. <!-- sdd-owner: implementation -->
+- [x] Run full automated test suite via `cargo test` verifying all unit, repository, and HTTP service tests pass without warnings. <!-- sdd-owner: implementation -->
+- [x] Perform manual end-to-end verification of catalog workflows: create presentation, rename presentation, empty catalog state, and delete presentation with cascade cleanup confirmation. <!-- sdd-owner: implementation -->
+- [x] Perform manual end-to-end verification of show execution: vertical timeline rendering, adding lyrics/note/track, 44x44px touch targets, mobile seek via range streaming, exclusive single-track playback, stop-on-navigation, and atomic up/down reordering. <!-- sdd-owner: implementation -->
 
 ---
 

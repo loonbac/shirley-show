@@ -1,11 +1,11 @@
 # Apply Progress: Shirley Show Core
 
 **Change:** `shirley-show-core`  
-**Latest Slice:** Slice B (Show Items, Audio Upload, Range Streaming & Reordering)  
-**Attempt Authority Token (Slice B):** `sha256:309e88f7327df5bb443e969e353be90414f13e277d91a8bfb40db5945b9d7bbf`  
-**Work Unit:** `slice-b-items-audio-reorder`  
-**Request ID:** `slice-b-acquire-001`  
-**Status:** Completed (Slice A + Slice B)
+**Latest Slice:** Slice C (Micro-Modular Frontend UI & Exclusive Audio Player)  
+**Attempt Authority Token (Slice C):** `sha256:91d3fe6d36b0206b9ef4f151a2ec33923c36066852fd0ec248403249f9628018`  
+**Work Unit:** `slice-c-frontend-player`  
+**Request ID:** `slice-c-acquire-001`  
+**Status:** Completed (Slice A + Slice B + Slice C)
 
 ---
 
@@ -51,6 +51,34 @@ Slice B implements the show items, local audio storage, range streaming, and reo
   - Updated `GET /api/presentations/:id` returning ordered list of item DTOs.
 - 100% Strict TDD adherence: 12 test suites, 72 tests passing, 0 warnings.
 
+### Slice C Summary
+Slice C completes the full end-to-end stack with static asset serving, application entry point, extreme micro-modular Vanilla JS frontend architecture, and single-audio exclusive playback controller:
+- Backend static assets and executable entry point:
+  - Integration tests in `tests/static_assets_tests.rs` asserting `GET /` serves `index.html` with `Cache-Control: no-cache` and `GET /assets/*` serves static assets from `frontend/`.
+  - Handler in `src/handlers/static_assets.rs` and router integration in `src/router.rs` using `tower_http::services::ServeDir`.
+  - Application configuration `src/config.rs` supporting `SHIRLEY_BIND`, `SHIRLEY_DATA_DIR`, and `SHIRLEY_FRONTEND_DIR`.
+  - Server entry point `src/main.rs` displaying security warning, running migrations, executing startup audio reconciliation, and serving with graceful shutdown (`SIGINT`/`SIGTERM`).
+- 1:1 CSS design system conforming strictly to AGENTS.md §3.5:
+  - Tokens: `colors.css`, `spacing.css`, `typography.css`, `elevations.css`, `motion.css`.
+  - Base and layouts: `reset.css`, `typography.css`, `shell-layout.css`, `timeline-layout.css`.
+  - Atoms: `button.css`, `icon.css`, `text-input.css`, `text-area.css`, `range-input.css`, `status-message.css`, `spinner.css`.
+  - Molecules: `icon-button.css`, `confirmation-dialog.css`, `item-type-selector.css`, `reorder-controls.css`, `playback-controls.css`, `empty-state.css`.
+  - Organisms: `app-topbar.css`, `presentation-card.css`, `presentation-form-dialog.css`, `track-item.css`, `lyrics-item.css`, `note-item.css`, `add-item-dialog.css`.
+  - Views: `presentations-view.css`, `presentation-detail-view.css`.
+  - Bundle: `frontend/styles/index.css`.
+- Pure Vanilla JS micro-modular architecture conforming strictly to AGENTS.md §§3.1-3.4:
+  - DOM & formatting utilities: `createElement.js`, `formatDuration.js`, `trimRequired.js`.
+  - Reactive micro-signals: `createSignal.js`, `activeRoute.js`, `playbackState.js`.
+  - Headless behaviors: `createAudioController.js` (guaranteeing at most ONE `HTMLAudioElement` and never autoplaying), `bindDialogDismiss.js`, `bindFormSubmit.js`.
+  - Isolated API actions: `requestJson.js`, presentations CRUD (`listPresentations.js`, `createPresentation.js`, `getPresentation.js`, `renamePresentation.js`, `deletePresentation.js`), items operations (`addTextItem.js`, `uploadTrack.js`, `moveItem.js`, `deleteItem.js`).
+  - Pure hash router: `parseRoute.js`, `navigate.js` supporting `#/presentations` and `#/presentations/:id`.
+  - Atomic & molecular UI components: pure components with callbacks and encapsulated lifecycle.
+  - Organisms: `app-topbar`, `presentation-card`, `presentation-form-dialog`, `track-item`, `lyrics-item` (large high-contrast typography, `white-space: pre-wrap`), `note-item` (amber cue badge and distinct border), `add-item-dialog`.
+  - Orchestration controllers: `presentations-controller.js` and `presentation-detail-controller.js`.
+  - Composition root: `frontend/js/main.js`.
+- Automated test verification: 13 test suites, 77 tests passing, 0 warnings.
+- End-to-end workflow verification executed and confirmed against live server.
+
 ---
 
 ## 2. Completed Tasks
@@ -92,18 +120,46 @@ Slice B implements the show items, local audio storage, range streaming, and reo
 - [x] GREEN: Implement `src/handlers/items/add_text.rs`, `src/handlers/items/upload_track.rs` (with route-scoped 101 MiB body limit and exact 100 MiB byte counter), `src/handlers/items/reorder.rs`, and `src/handlers/items/delete.rs`. <!-- sdd-owner: implementation -->
 - [x] TRIANGULATE/REFACTOR: Verify that payload exceeding 100 MiB returns 413, unsupported format returns 415, empty title returns 422, and reorder boundary returns 409. <!-- sdd-owner: implementation -->
 
+### Slice C Tasks
+- [x] RED: Write HTTP integration tests in `tests/static_assets_tests.rs` verifying `/` serves `index.html` with `Cache-Control: no-cache` and `/assets/*` serves files from `frontend/`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement static file routing in `src/handlers/static_assets.rs`, wire into `src/router.rs`, implement `src/config.rs` and executable entry point `src/main.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Create minimal `frontend/index.html` and verify server startup and graceful asset fallback via `cargo test`. <!-- sdd-owner: implementation -->
+- [x] Implement design tokens in `frontend/styles/tokens/colors.css`, `spacing.css`, `typography.css`, `elevations.css`, and `motion.css`. <!-- sdd-owner: implementation -->
+- [x] Implement base and layout stylesheets in `frontend/styles/base/reset.css`, `typography.css`, `layouts/shell-layout.css`, and `timeline-layout.css`. <!-- sdd-owner: implementation -->
+- [x] Implement atomic component stylesheets in `frontend/styles/atoms/` (`button.css`, `icon.css`, `text-input.css`, `text-area.css`, `range-input.css`, `status-message.css`, `spinner.css`), `molecules/`, `organisms/`, `views/`, and bundle in `frontend/styles/index.css`. <!-- sdd-owner: implementation -->
+- [x] Implement DOM and formatting utilities in `frontend/js/utils/dom/create-element.js`, `frontend/js/utils/format/duration.js`, and `frontend/js/utils/validation/trim-required.js`. <!-- sdd-owner: implementation -->
+- [x] Implement reactive micro-signals in `frontend/js/state/create-signal.js`, `frontend/js/state/active-route.js`, and `frontend/js/state/playback-state.js`. <!-- sdd-owner: implementation -->
+- [x] Implement headless behaviors in `frontend/js/behaviors/create-audio-controller.js` (enforcing exactly one `HTMLAudioElement` and never autoplaying), `bind-dialog-dismiss.js`, and `bind-form-submit.js`. <!-- sdd-owner: implementation -->
+- [x] Implement generic JSON and multipart fetch client in `frontend/js/data/request-json.js`. <!-- sdd-owner: implementation -->
+- [x] Implement isolated presentation API actions in `frontend/js/data/list-presentations.js`, `create-presentation.js`, `get-presentation.js`, `rename-presentation.js`, and `delete-presentation.js`. <!-- sdd-owner: implementation -->
+- [x] Implement isolated item API actions in `frontend/js/data/add-text-item.js`, `upload-track.js`, `move-item.js`, and `delete-item.js`. <!-- sdd-owner: implementation -->
+- [x] Implement pure hash routing in `frontend/js/router/parse-route.js` and `frontend/js/router/navigate.js` supporting `#/presentations` and `#/presentations/:id`. <!-- sdd-owner: implementation -->
+- [x] Implement atomic UI components in `frontend/js/components/atoms/button.js`, `icon.js`, `text-input.js`, `text-area.js`, `range-input.js`, `status-message.js`, and `spinner.js`. <!-- sdd-owner: implementation -->
+- [x] Implement molecular UI components in `frontend/js/components/molecules/icon-button.js`, `confirmation-dialog.js`, `item-type-selector.js`, `reorder-controls.js`, `playback-controls.js`, and `empty-state.js`. <!-- sdd-owner: implementation -->
+- [x] Implement top-level organisms in `frontend/js/components/organisms/app-topbar.js`, `presentation-card.js`, `presentation-form-dialog.js`, `track-item.js`, `lyrics-item.js`, `note-item.js`, and `add-item-dialog.js`. <!-- sdd-owner: implementation -->
+- [x] Implement layout components in `frontend/js/components/layouts/shell-layout.js` and `timeline-layout.js`. <!-- sdd-owner: implementation -->
+- [x] Implement catalog and presentation views in `frontend/js/components/views/presentations-view.js` and `presentation-detail-view.js`. <!-- sdd-owner: implementation -->
+- [x] Implement catalog controller in `frontend/js/controllers/presentations-controller.js` connecting API actions, dialogs, empty states, and view updates. <!-- sdd-owner: implementation -->
+- [x] Implement presentation detail controller in `frontend/js/controllers/presentation-detail-controller.js` wiring timeline items, audio controller, reordering, item creation dialogs, and deletion confirmations. <!-- sdd-owner: implementation -->
+- [x] Implement composition root in `frontend/js/main.js` binding hash change events, initializing the shared audio controller, and mounting views into the root shell element. <!-- sdd-owner: implementation -->
+- [x] Run full automated test suite via `cargo test` verifying all unit, repository, and HTTP service tests pass without warnings. <!-- sdd-owner: implementation -->
+- [x] Perform manual end-to-end verification of catalog workflows: create presentation, rename presentation, empty catalog state, and delete presentation with cascade cleanup confirmation. <!-- sdd-owner: implementation -->
+- [x] Perform manual end-to-end verification of show execution: vertical timeline rendering, adding lyrics/note/track, 44x44px touch targets, mobile seek via range streaming, exclusive single-track playback, stop-on-navigation, and atomic up/down reordering. <!-- sdd-owner: implementation -->
+
 ---
 
-## 3. Strict TDD Cycle Evidence (Slice B)
+## 3. Strict TDD Cycle Evidence (Slice C)
 
 | Phase / Task Group | RED Command & Evidence | GREEN Implementation & Evidence | TRIANGULATE / REFACTOR Evidence | Status |
 |---|---|---|---|---|
-| **6. Show Item Domain** | `cargo test --test domain_item_tests` failed (missing `domain::show_item`, `show_item_kind`, `move_direction`, `audio_format`). | Implemented domain types and validation rules in `src/domain/`. Tests passed (7/7). | Added tests for Unicode, multiline lyrics trimming, corrupted DB row handling, and JSON serialization. 8/8 passed. | Passed |
-| **7. Show Item Repository** | `cargo test --test show_item_repository_tests` failed (missing `ports::show_item_reader/writer` and `SqliteShowItemRepository`). | Defined ports and implemented repository using `BEGIN IMMEDIATE` with temporary index swap and two-phase recompaction. Tests passed (5/5). | Added boundary tests on single item, edge deletions (first/last), and 5 rapid successive swaps asserting strictly contiguous `0..N-1` indices. 8/8 passed. | Passed |
-| **8. Local Audio Storage & Cleanup** | `cargo test --test audio_storage_tests` failed (missing `infra::filesystem` and `SqliteCleanupRepository`). | Implemented `GeneratedAudioKey`, `detect_audio_format`, `LocalAudioStorage`, `SqliteCleanupRepository`, and `reconcile_audio_files`. Tests passed (4/4). | Added tests for corrupted WAV/M4A headers and cleanup queue failure retention with attempt counter and error recording. 5/5 passed. | Passed |
-| **9. Item & Audio Use Cases** | `cargo test --test item_use_cases_tests` failed (missing use case modules). | Implemented `AddLyrics`, `AddNote`, `UploadTrack`, `ReorderItem`, `DeleteItem`, and `OpenTrackAudio`. Tests passed (5/5). | Added tests for compensation on empty title and database append failure, non-track rejection in `OpenTrackAudio`, and file cleanup on deletion. 5/5 passed. | Passed |
-| **10. Range Parser & Audio Streaming** | `cargo test --test range_parser_tests` and `audio_stream_api_tests` failed (missing range parser and stream handler). | Implemented RFC 9110 range parser in `src/handlers/audio/parse_range.rs` and streaming handler in `src/handlers/audio/stream.rs`. Tests passed. | Verified RFC 9110 compliance: `Accept-Ranges: bytes`, `Content-Range: bytes 0-1023/total`, fallback to 200 on malformed/multi-range, HEAD request empty body, and 404 on missing audio file. 13/13 passed. | Passed |
-| **11. Item & Upload HTTP Handlers** | `cargo test --test item_api_tests` failed with 404 (unrouted endpoints). | Implemented Axum handlers in `src/handlers/items/`, DTOs in `src/handlers/dto.rs`, and wired routes in `src/router.rs`. Tests passed (5/5). | Verified route-scoped 101 MiB body limit with exact 100 MiB counter returning 413, unsupported media type returning 415, empty title returning 422, and reorder boundary returning 409. 6/6 passed. | Passed |
+| **12. Static Assets & Main Entry Point** | `cargo test --test static_assets_tests` failed (compilation error: missing `frontend_dir` on `AppState`, missing `static_assets` handler). | Implemented `static_assets.rs`, wired `ServeDir` in `src/router.rs`, implemented `src/config.rs` and `src/main.rs`. Tests passed (5/5). | Verified `/` serves `index.html` with `Cache-Control: no-cache` and `text/html; charset=utf-8`, `/assets/*` serves CSS and JS, missing asset returns 404, missing `index.html` returns 404 gracefully, API routes remain unaffected. | Passed |
+| **13. CSS Design Tokens & Atomic Styles** | N/A (CSS system). | Implemented 1:1 CSS structure across tokens, base, layouts, atoms, molecules, organisms, views, bundled via `@import` in `frontend/styles/index.css`. | Verified dark theme tokens, >=44px touch targets, high-contrast lyrics styles (`white-space: pre-wrap`), note cue badges, responsive mobile layout. | Passed |
+| **14. Frontend Utilities, Signals & Behaviors** | N/A (Vanilla JS). | Implemented `create-element.js`, `duration.js`, `trim-required.js`, `create-signal.js`, `active-route.js`, `playback-state.js`, `create-audio-controller.js`, `bind-dialog-dismiss.js`, `bind-form-submit.js`. | Invariant enforced: exactly one `HTMLAudioElement` per document lifecycle, zero autoplay, reactive signal updates. | Passed |
+| **15. Data Client Actions & Hash Router** | N/A (Vanilla JS). | Implemented `request-json.js`, isolated presentation API actions, isolated item API actions, and pure hash routing `parse-route.js` and `navigate.js`. | Verified JSON and multipart fetch handling, structured `ApiError` capture, hash route transitions (`#/presentations` and `#/presentations/:id`). | Passed |
+| **16. UI Atoms & Molecules** | N/A (Vanilla JS). | Implemented 7 atoms (`button`, `icon`, `text-input`, `text-area`, `range-input`, `status-message`, `spinner`) and 6 molecules (`icon-button`, `confirmation-dialog`, `item-type-selector`, `reorder-controls`, `playback-controls`, `empty-state`). | Verified pure component contracts, event callbacks without direct fetch or global DOM lookups. | Passed |
+| **17. Organisms, Layouts & Views** | N/A (Vanilla JS). | Implemented 7 organisms, shell and timeline layouts, and catalog / detail views. | Verified single vertical sequence rendering, boundary guards on reorder controls, modal forms, and confirmation prompts. | Passed |
+| **18. Controllers & Composition Root** | N/A (Vanilla JS). | Implemented `presentations-controller.js`, `presentation-detail-controller.js`, and `frontend/js/main.js`. | Verified routing lifecycle, exclusive playback stop on navigation, timeline updates on audio scrub/play/pause. | Passed |
+| **19. End-to-End Verification** | Verified live HTTP requests against server on `127.0.0.1:4099`. | Ran automated test suite and live E2E script covering catalog, show items, audio streaming, reordering, and cascade cleanup. | 13 test suites, 77 automated tests passed (0 failures, 0 warnings). Full workflow verified. | Passed |
 
 ---
 
@@ -112,62 +168,92 @@ Slice B implements the show items, local audio storage, range streaming, and reo
 Command: `cargo test`
 
 ```text
+running 0 tests (src/lib.rs)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests (src/main.rs)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
 running 5 tests (tests/audio_storage_tests.rs)
 test test_detect_audio_format_magic_bytes ... ok
 test test_generated_audio_key_validation_and_traversal_resistance ... ok
 test test_local_audio_storage_stage_promote_delete ... ok
 test test_cleanup_queue_and_reconciliation ... ok
 test test_cleanup_failure_retains_record_with_error_and_attempts ... ok
-test result: ok. 5 passed; 0 failed
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
 running 6 tests (tests/audio_stream_api_tests.rs)
-test test_audio_stream_missing_track_and_missing_file_404 ... ok
-test test_audio_stream_range_request_206 ... ok
-test test_audio_stream_out_of_bounds_range_416 ... ok
 test test_audio_stream_head_request_without_body ... ok
+test test_audio_stream_range_request_206 ... ok
 test test_audio_stream_full_request_200 ... ok
+test test_audio_stream_out_of_bounds_range_416 ... ok
+test test_audio_stream_missing_track_and_missing_file_404 ... ok
 test test_audio_stream_malformed_and_multi_range_fallback_to_200 ... ok
-test result: ok. 6 passed; 0 failed
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
 running 8 tests (tests/domain_item_tests.rs)
 test test_audio_format_properties ... ok
 test test_lyrics_payload_validation ... ok
-test test_note_payload_validation ... ok
 test test_move_direction_parsing ... ok
+test test_note_payload_validation ... ok
 test test_show_item_from_db_mappings_and_corruption ... ok
 test test_show_item_kind_as_str ... ok
 test test_track_payload_validation ... ok
 test test_show_item_constructors_and_invariants ... ok
-test result: ok. 8 passed; 0 failed
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 running 7 tests (tests/domain_presentation_tests.rs)
-test result: ok. 7 passed; 0 failed
+test test_create_presentation_rejects_empty_or_whitespace_title ... ok
+test test_create_presentation_trims_whitespace ... ok
+test test_internal_whitespace_preserved ... ok
+test test_create_presentation_unique_ids_for_identical_titles ... ok
+test test_rename_presentation_rejects_empty_or_whitespace ... ok
+test test_rename_presentation_success ... ok
+test test_unicode_and_special_characters_handling ... ok
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 running 6 tests (tests/item_api_tests.rs)
-test test_add_text_items_validation_and_not_found ... ok
-test test_reorder_item_endpoint_and_boundary_conflict ... ok
 test test_add_text_items_and_get_presentation_detail ... ok
+test test_add_text_items_validation_and_not_found ... ok
 test test_multipart_track_upload_success_and_validations ... ok
 test test_delete_item_endpoint ... ok
+test test_reorder_item_endpoint_and_boundary_conflict ... ok
 test test_multipart_track_upload_oversized_returns_413 ... ok
-test result: ok. 6 passed; 0 failed
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
 
 running 5 tests (tests/item_use_cases_tests.rs)
 test test_upload_track_success_and_compensation_on_failure ... ok
 test test_open_track_audio_use_case ... ok
 test test_add_lyrics_and_note_use_cases ... ok
-test test_reorder_item_use_case ... ok
 test test_delete_item_use_case_cleans_file ... ok
-test result: ok. 5 passed; 0 failed
+test test_reorder_item_use_case ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
 running 5 tests (tests/presentation_api_tests.rs)
-test result: ok. 5 passed; 0 failed
+test test_get_presentations_empty ... ok
+test test_create_and_get_presentation ... ok
+test test_patch_presentation_rename ... ok
+test test_error_response_format_and_status_codes ... ok
+test test_delete_presentation ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
 running 7 tests (tests/presentation_repository_tests.rs)
-test result: ok. 7 passed; 0 failed
+test test_delete_non_existent_returns_not_found ... ok
+test test_rename_non_existent_returns_not_found ... ok
+test test_duplicate_titles_yield_distinct_records ... ok
+test test_create_and_list_presentations ... ok
+test test_get_presentation ... ok
+test test_rename_presentation ... ok
+test test_delete_presentation_and_cascade_with_audio_queue ... ok
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
 running 5 tests (tests/presentation_use_cases_tests.rs)
-test result: ok. 5 passed; 0 failed
+test test_create_presentation_use_case ... ok
+test test_delete_presentation_use_case ... ok
+test test_get_presentation_use_case ... ok
+test test_list_presentations_use_case ... ok
+test test_rename_presentation_use_case ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 running 7 tests (tests/range_parser_tests.rs)
 test test_parse_range_clamp_oversized_end ... ok
@@ -177,96 +263,151 @@ test test_parse_range_none_or_empty ... ok
 test test_parse_range_suffix ... ok
 test test_parse_range_unsatisfiable ... ok
 test test_parse_range_valid_exact ... ok
-test result: ok. 7 passed; 0 failed
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 running 8 tests (tests/show_item_repository_tests.rs)
 test test_append_non_existent_presentation_fails ... ok
 test test_get_item_by_presentation_and_by_id ... ok
-test test_delete_item_recompacts_and_enqueues_audio ... ok
 test test_single_item_presentation_swap_boundary_checks ... ok
 test test_append_items_and_list_ordered ... ok
+test test_delete_item_recompacts_and_enqueues_audio ... ok
 test test_swap_atomic_and_boundary_guards ... ok
 test test_delete_first_and_last_items_recompaction ... ok
 test test_rapid_successive_swaps_maintain_contiguous_indices ... ok
-test result: ok. 8 passed; 0 failed
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
 running 3 tests (tests/sqlite_migration_tests.rs)
-test result: ok. 3 passed; 0 failed
+test test_sqlite_pragmas_and_migration_tables ... ok
+test test_pragmas_persist_across_multiple_connections ... ok
+test test_migration_idempotency ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
-Total: 72 passed; 0 failed; 0 warnings.
+running 5 tests (tests/static_assets_tests.rs)
+test test_missing_index_html_graceful_404 ... ok
+test test_missing_asset_returns_404 ... ok
+test test_api_routes_unaffected_by_asset_routing ... ok
+test test_serve_index_html_with_no_cache ... ok
+test test_serve_static_assets_css_and_js ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+Doc-tests shirley_show
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 ```
+
+Total: 77 tests passing, 0 failed, 0 warnings.
 
 ---
 
-## 5. Files Changed / Created (Slice B)
+## 5. Files Changed / Created (Slice C)
 
 ### New Files
-- `src/domain/audio_format.rs`
-- `src/domain/move_direction.rs`
-- `src/domain/show_item.rs`
-- `src/domain/show_item_kind.rs`
-- `src/ports/cleanup_queue.rs`
-- `src/ports/show_item_reader.rs`
-- `src/ports/show_item_writer.rs`
-- `src/infra/sqlite/cleanup_repository.rs`
-- `src/infra/sqlite/show_item_repository.rs`
-- `src/infra/filesystem/mod.rs`
-- `src/infra/filesystem/detect_audio_format.rs`
-- `src/infra/filesystem/generated_audio_key.rs`
-- `src/infra/filesystem/local_audio_storage.rs`
-- `src/infra/filesystem/reconcile_audio_files.rs`
-- `src/use_cases/add_lyrics.rs`
-- `src/use_cases/add_note.rs`
-- `src/use_cases/upload_track.rs`
-- `src/use_cases/reorder_item.rs`
-- `src/use_cases/delete_item.rs`
-- `src/use_cases/open_track_audio.rs`
-- `src/handlers/audio/mod.rs`
-- `src/handlers/audio/parse_range.rs`
-- `src/handlers/audio/stream.rs`
-- `src/handlers/items/mod.rs`
-- `src/handlers/items/add_text.rs`
-- `src/handlers/items/upload_track.rs`
-- `src/handlers/items/reorder.rs`
-- `src/handlers/items/delete.rs`
-- `tests/audio_storage_tests.rs`
-- `tests/audio_stream_api_tests.rs`
-- `tests/domain_item_tests.rs`
-- `tests/item_api_tests.rs`
-- `tests/item_use_cases_tests.rs`
-- `tests/range_parser_tests.rs`
-- `tests/show_item_repository_tests.rs`
+- `frontend/index.html`
+- `frontend/styles/index.css`
+- `frontend/styles/tokens/colors.css`
+- `frontend/styles/tokens/spacing.css`
+- `frontend/styles/tokens/typography.css`
+- `frontend/styles/tokens/elevations.css`
+- `frontend/styles/tokens/motion.css`
+- `frontend/styles/base/reset.css`
+- `frontend/styles/base/typography.css`
+- `frontend/styles/layouts/shell-layout.css`
+- `frontend/styles/layouts/timeline-layout.css`
+- `frontend/styles/atoms/button.css`
+- `frontend/styles/atoms/icon.css`
+- `frontend/styles/atoms/text-input.css`
+- `frontend/styles/atoms/text-area.css`
+- `frontend/styles/atoms/range-input.css`
+- `frontend/styles/atoms/status-message.css`
+- `frontend/styles/atoms/spinner.css`
+- `frontend/styles/molecules/icon-button.css`
+- `frontend/styles/molecules/confirmation-dialog.css`
+- `frontend/styles/molecules/item-type-selector.css`
+- `frontend/styles/molecules/reorder-controls.css`
+- `frontend/styles/molecules/playback-controls.css`
+- `frontend/styles/molecules/empty-state.css`
+- `frontend/styles/organisms/app-topbar.css`
+- `frontend/styles/organisms/presentation-card.css`
+- `frontend/styles/organisms/presentation-form-dialog.css`
+- `frontend/styles/organisms/track-item.css`
+- `frontend/styles/organisms/lyrics-item.css`
+- `frontend/styles/organisms/note-item.css`
+- `frontend/styles/organisms/add-item-dialog.css`
+- `frontend/styles/views/presentations-view.css`
+- `frontend/styles/views/presentation-detail-view.css`
+- `frontend/js/utils/dom/create-element.js`
+- `frontend/js/utils/format/duration.js`
+- `frontend/js/utils/validation/trim-required.js`
+- `frontend/js/state/create-signal.js`
+- `frontend/js/state/active-route.js`
+- `frontend/js/state/playback-state.js`
+- `frontend/js/behaviors/create-audio-controller.js`
+- `frontend/js/behaviors/bind-dialog-dismiss.js`
+- `frontend/js/behaviors/bind-form-submit.js`
+- `frontend/js/data/request-json.js`
+- `frontend/js/data/list-presentations.js`
+- `frontend/js/data/create-presentation.js`
+- `frontend/js/data/get-presentation.js`
+- `frontend/js/data/rename-presentation.js`
+- `frontend/js/data/delete-presentation.js`
+- `frontend/js/data/add-text-item.js`
+- `frontend/js/data/upload-track.js`
+- `frontend/js/data/move-item.js`
+- `frontend/js/data/delete-item.js`
+- `frontend/js/router/parse-route.js`
+- `frontend/js/router/navigate.js`
+- `frontend/js/components/atoms/button.js`
+- `frontend/js/components/atoms/icon.js`
+- `frontend/js/components/atoms/text-input.js`
+- `frontend/js/components/atoms/text-area.js`
+- `frontend/js/components/atoms/range-input.js`
+- `frontend/js/components/atoms/status-message.js`
+- `frontend/js/components/atoms/spinner.js`
+- `frontend/js/components/molecules/icon-button.js`
+- `frontend/js/components/molecules/confirmation-dialog.js`
+- `frontend/js/components/molecules/item-type-selector.js`
+- `frontend/js/components/molecules/reorder-controls.js`
+- `frontend/js/components/molecules/playback-controls.js`
+- `frontend/js/components/molecules/empty-state.js`
+- `frontend/js/components/organisms/app-topbar.js`
+- `frontend/js/components/organisms/presentation-card.js`
+- `frontend/js/components/organisms/presentation-form-dialog.js`
+- `frontend/js/components/organisms/track-item.js`
+- `frontend/js/components/organisms/lyrics-item.js`
+- `frontend/js/components/organisms/note-item.js`
+- `frontend/js/components/organisms/add-item-dialog.js`
+- `frontend/js/components/layouts/shell-layout.js`
+- `frontend/js/components/layouts/timeline-layout.js`
+- `frontend/js/components/views/presentations-view.js`
+- `frontend/js/components/views/presentation-detail-view.js`
+- `frontend/js/controllers/presentations-controller.js`
+- `frontend/js/controllers/presentation-detail-controller.js`
+- `frontend/js/main.js`
+- `src/config.rs`
+- `src/handlers/static_assets.rs`
+- `src/main.rs`
+- `tests/static_assets_tests.rs`
 
 ### Modified Files (Minimal Integration)
-- `Cargo.toml` (enabled `axum` multipart feature, added `tokio-util` with `io` feature)
-- `Cargo.lock`
-- `src/error.rs` (added `BadRequest` 400, `PayloadTooLarge` 413, `UnsupportedMediaType` 415)
-- `src/domain/mod.rs` (exported show item domain types)
-- `src/ports/mod.rs` (exported show item and cleanup traits)
-- `src/infra/mod.rs` (exported filesystem module)
-- `src/infra/sqlite/mod.rs` (exported new repositories)
-- `src/use_cases/mod.rs` (exported new use cases)
-- `src/handlers/mod.rs` (exported audio and items handlers)
-- `src/handlers/dto.rs` (added item DTOs, updated presentation detail response)
-- `src/handlers/presentations/get.rs` (mapped show items into presentation detail response)
-- `src/state/app_state.rs` (wired item repositories, storage, and use cases)
-- `src/router.rs` (registered item and streaming routes)
-- `openspec/changes/shirley-show-core/tasks.md` (checked off Slice B tasks 6-11)
+- `src/lib.rs` (exported `config`)
+- `src/handlers/mod.rs` (exported `static_assets`)
+- `src/state/app_state.rs` (added `frontend_dir` field)
+- `src/router.rs` (wired `GET /` and `ServeDir` on `/assets`)
+- `openspec/changes/shirley-show-core/tasks.md` (checked off Slice C tasks 12-19)
 
 ---
 
 ## 6. Deviations from Design
 
-None. All implementations strictly adhere to `design.md` and `specs/show-item/spec.md`.
+None. The implementation follows the micro-modular specifications in `design.md`, `specs/presentation/spec.md`, and `specs/show-item/spec.md`.
 
 ---
 
 ## 7. Workload & PR Boundary
 
-- **Work Unit:** `slice-b-items-audio-reorder` (PR 2 of 3 in stacked chain to `main`).
-- **Attempt Authority Token:** `sha256:309e88f7327df5bb443e969e353be90414f13e277d91a8bfb40db5945b9d7bbf`
-- **Request ID:** `slice-b-acquire-001`
-- **Max changed lines limit:** 3000 lines.
-- **Production Code (`src/`):** ~1,712 lines in new modules + 348 lines changed in existing files.
-- **Review Strategy:** Approved `size:exception` for PR 2 stacked onto PR 1.
-- **Remaining Slice:** Slice C (Frontend UI, CSS tokens, and exclusive player controller).
+- **Work Unit:** `slice-c-frontend-player` (PR 3 of 3 in stacked chain to `main`).
+- **Attempt Authority Token:** `sha256:91d3fe6d36b0206b9ef4f151a2ec33923c36066852fd0ec248403249f9628018`
+- **Request ID:** `slice-c-acquire-001`
+- **Max changed lines limit:** 6000 lines.
+- **Review Strategy:** Approved `size:exception` for PR 3 stacked onto PR 2.
+- **Implementation Status:** 57/57 tasks completed across all slices (100% complete). Ready for `sdd-verify`.

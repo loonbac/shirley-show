@@ -1,0 +1,105 @@
+import { createElement } from '../../utils/dom/create-element.js';
+import { createButton } from '../atoms/button.js';
+import { createSpinner } from '../atoms/spinner.js';
+import { createStatusMessage } from '../atoms/status-message.js';
+import { createEmptyState } from '../molecules/empty-state.js';
+import { createPresentationCard } from '../organisms/presentation-card.js';
+
+/**
+ * Pure view for presentations catalog.
+ * @param {{
+ *   presentations?: Array<{ id: string, title: string, created_at: string, updated_at: string }>,
+ *   isLoading?: boolean,
+ *   errorMessage?: string | null,
+ *   onCreateClick: () => void,
+ *   onSelect: (id: string) => void,
+ *   onRename: (id: string, currentTitle: string) => void,
+ *   onDelete: (id: string, title: string) => void,
+ * }} props 
+ * @returns {{
+ *   el: HTMLElement,
+ *   update: (props: Partial<typeof props>) => void,
+ * }}
+ */
+export function createPresentationsView(props) {
+  let {
+    presentations = [],
+    isLoading = false,
+    errorMessage = null,
+    onCreateClick,
+    onSelect,
+    onRename,
+    onDelete,
+  } = props;
+
+  const errorBanner = createStatusMessage({ message: errorMessage || '', type: 'error' });
+  const contentArea = createElement('div', { class: 'presentations-content' });
+
+  const el = createElement('div', { class: 'presentations-view' }, [
+    errorBanner.el,
+    contentArea,
+  ]);
+
+  function renderContent() {
+    contentArea.innerHTML = '';
+
+    if (isLoading) {
+      const loadingBox = createElement(
+        'div',
+        { style: { display: 'flex', justifyContent: 'center', padding: '40px' } },
+        [createSpinner({ size: 'lg' })]
+      );
+      contentArea.appendChild(loadingBox);
+      return;
+    }
+
+    if (presentations.length === 0) {
+      const createFirstBtn = createButton({
+        text: 'Crear Primera Presentación',
+        variant: 'primary',
+        onClick: onCreateClick,
+      });
+
+      const empty = createEmptyState({
+        iconName: 'track',
+        title: 'No hay presentaciones aún',
+        description: 'Crea tu primera presentación para organizar tus pistas de audio, letras para el atril y notas de escenario.',
+        actions: [createFirstBtn.el],
+      });
+
+      contentArea.appendChild(empty);
+      return;
+    }
+
+    const listEl = createElement('ul', { class: 'presentations-list' });
+    for (const pres of presentations) {
+      const card = createPresentationCard({
+        presentation: pres,
+        onSelect,
+        onRename,
+        onDelete,
+      });
+      listEl.appendChild(card);
+    }
+    contentArea.appendChild(listEl);
+  }
+
+  renderContent();
+
+  function update(nextProps = {}) {
+    if (nextProps.presentations !== undefined) presentations = nextProps.presentations;
+    if (nextProps.isLoading !== undefined) isLoading = nextProps.isLoading;
+    if (nextProps.errorMessage !== undefined) {
+      errorMessage = nextProps.errorMessage;
+      errorBanner.update({ message: errorMessage || '' });
+    }
+    if (nextProps.onCreateClick !== undefined) onCreateClick = nextProps.onCreateClick;
+    if (nextProps.onSelect !== undefined) onSelect = nextProps.onSelect;
+    if (nextProps.onRename !== undefined) onRename = nextProps.onRename;
+    if (nextProps.onDelete !== undefined) onDelete = nextProps.onDelete;
+
+    renderContent();
+  }
+
+  return { el, update };
+}

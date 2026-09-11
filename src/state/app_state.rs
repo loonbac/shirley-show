@@ -22,6 +22,7 @@ use crate::use_cases::upload_track::UploadTrack;
 pub struct AppState {
     pub pool: DbPool,
     pub storage: Arc<LocalAudioStorage>,
+    pub frontend_dir: PathBuf,
     pub item_repo: Arc<SqliteShowItemRepository>,
     pub cleanup_repo: Arc<SqliteCleanupRepository>,
     pub list_presentations: Arc<ListPresentations<SqlitePresentationRepository>>,
@@ -50,6 +51,7 @@ impl AppState {
         Self {
             pool,
             storage: storage.clone(),
+            frontend_dir: PathBuf::from("frontend"),
             item_repo: item_repo.clone(),
             cleanup_repo: cleanup_repo.clone(),
             list_presentations: Arc::new(ListPresentations::new(pres_repo.clone())),

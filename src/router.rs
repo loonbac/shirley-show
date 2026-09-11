@@ -1,12 +1,17 @@
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post};
 use axum::Router;
+use tower_http::services::ServeDir;
 
-use crate::handlers::{audio, items, presentations};
+use crate::handlers::{audio, items, presentations, static_assets};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
+    let frontend_dir = state.frontend_dir.clone();
+
     Router::new()
+        .route("/", get(static_assets::serve_index))
+        .nest_service("/assets", ServeDir::new(frontend_dir))
         .route("/api/presentations", get(presentations::list::list))
         .route("/api/presentations", post(presentations::create::create))
         .route("/api/presentations/{id}", get(presentations::get::get))
