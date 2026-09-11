@@ -1,9 +1,19 @@
 use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub const DEFAULT_GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
 pub const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoshuaPcConfig {
+    pub host: String,
+    pub user: String,
+    pub key_path: PathBuf,
+    pub port: u16,
+    pub wake_timeout: Duration,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroqConfig {
@@ -76,6 +86,8 @@ pub struct Config {
     pub yt_dlp_bin: Option<PathBuf>,
     pub agent_timeout_secs: u64,
     pub separation_timeout_secs: u64,
+    pub remote_separation_timeout_secs: u64,
+    pub joshua_pc: Option<JoshuaPcConfig>,
 }
 
 impl Config {
@@ -138,17 +150,166 @@ impl Config {
                             "SHIRLEY_SEPARATION_TIMEOUT_SECS must be strictly positive".to_string()
                         );
                     }
-                    if parsed > 600 {
-                        return Err(
-                            "SHIRLEY_SEPARATION_TIMEOUT_SECS must not exceed 600 seconds"
-                                .to_string(),
-                        );
-                    }
                     parsed
                 }
             }
             Err(_) => 600,
         };
+
+        let joshua_pc = match env::var("JOSHUA_PC_HOST") {
+            Ok(raw_host) => {
+                let host = raw_host.trim();
+                if host.is_empty() {
+                    None
+                } else {
+                    if host.starts_with('-') {
+                        return Err("JOSHUA_PC_HOST must not start with '-'".to_string());
+                    }
+                    if host
+                        .chars()
+                        .any(|c| c.is_whitespace() || ";|&$`><\"'\\".contains(c))
+                    {
+                        return Err(
+                            "JOSHUA_PC_HOST contains invalid characters or shell metacharacters"
+                                .to_string(),
+                        );
+                    }
+
+                    let user = match env::var("JOSHUA_PC_USER") {
+                        Ok(raw_user) => {
+                            let u = raw_user.trim();
+                            if u.is_empty() {
+                                "loonbac".to_string()
+                            } else {
+                                if u.starts_with('-') {
+                                    return Err(
+                                        "JOSHUA_PC_USER must not start with '-'".to_string()
+                                    );
+                                }
+                                if u.chars()
+                                    .any(|c| c.is_whitespace() || ";|&$`><\"'\\".contains(c))
+                                {
+                                    return Err(
+                                        "JOSHUA_PC_USER contains invalid characters".to_string()
+                                    );
+                                }
+                                u.to_string()
+                            }
+                        }
+                        Err(_) => "loonbac".to_string(),
+                    };
+
+                    let key_path = env::var("JOSHUA_PC_SSH_KEY")
+                        .map(|v| {
+                            let trimmed = v.trim();
+                            if trimmed.is_empty() {
+                                PathBuf::from("/home/shirley/.ssh/id_ed25519")
+                            } else {
+                                PathBuf::from(trimmed)
+                            }
+                        })
+                        .unwrap_or_else(|_| PathBuf::from("/home/shirley/.ssh/id_ed25519"));
+
+                    let port = match env::var("JOSHUA_PC_PORT") {
+                        Ok(raw_port) => {
+                            let trimmed = raw_port.trim();
+                            if trimmed.is_empty() {
+                                22
+                            } else {
+                                let p: u16 = trimmed.parse().map_err(|e| {
+                                    format!("Invalid JOSHUA_PC_PORT '{trimmed}': {e}")
+                                })?;
+                                if p == 0 {
+                                    return Err(
+                                        "JOSHUA_PC_PORT must be strictly positive (1..=65535)"
+                                            .to_string(),
+                                    );
+                                }
+                                p
+                            }
+                        }
+                        Err(_) => 22,
+                    };
+
+                    let wake_timeout_mins = match env::var("JOSHUA_PC_WAKE_TIMEOUT_MINS") {
+                        Ok(raw_mins) => {
+                            let trimmed = raw_mins.trim();
+                            if trimmed.is_empty() {
+                                10
+                            } else {
+                                let mins: u64 = trimmed.parse().map_err(|e| {
+                                    format!("Invalid JOSHUA_PC_WAKE_TIMEOUT_MINS '{trimmed}': {e}")
+                                })?;
+                                if mins == 0 {
+                                    return Err(
+                                        "JOSHUA_PC_WAKE_TIMEOUT_MINS must be strictly positive"
+                                            .to_string(),
+                                    );
+                                }
+                                mins
+                            }
+                        }
+                        Err(_) => 10,
+                    };
+                    let wake_timeout = Duration::from_secs(wake_timeout_mins.saturating_mul(60));
+
+                    Some(JoshuaPcConfig {
+                        host: host.to_string(),
+                        user,
+                        key_path,
+                        port,
+                        wake_timeout,
+                    })
+                }
+            }
+            Err(_) => None,
+        };
+
+        let default_remote_timeout = joshua_pc
+            .as_ref()
+            .map(|j| {
+                j.wake_timeout
+                    .as_secs()
+                    .saturating_add(separation_timeout_secs)
+                    .saturating_add(300)
+            })
+            .unwrap_or_else(|| separation_timeout_secs.saturating_add(900).max(1500));
+
+        let remote_separation_timeout_secs =
+            match env::var("SHIRLEY_REMOTE_SEPARATION_TIMEOUT_SECS") {
+                Ok(val) => {
+                    let trimmed = val.trim();
+                    if trimmed.is_empty() {
+                        default_remote_timeout
+                    } else {
+                        let parsed: u64 = trimmed.parse().map_err(|e| {
+                            format!(
+                                "Invalid SHIRLEY_REMOTE_SEPARATION_TIMEOUT_SECS '{trimmed}': {e}"
+                            )
+                        })?;
+                        if parsed == 0 {
+                            return Err(
+                                "SHIRLEY_REMOTE_SEPARATION_TIMEOUT_SECS must be strictly positive"
+                                    .to_string(),
+                            );
+                        }
+                        parsed
+                    }
+                }
+                Err(_) => default_remote_timeout,
+            };
+
+        if let Some(ref jpc) = joshua_pc {
+            let min_required = jpc
+                .wake_timeout
+                .as_secs()
+                .saturating_add(separation_timeout_secs);
+            if remote_separation_timeout_secs < min_required {
+                return Err(format!(
+                    "SHIRLEY_REMOTE_SEPARATION_TIMEOUT_SECS ({remote_separation_timeout_secs}s) must be at least wake_timeout + separation_timeout ({min_required}s)"
+                ));
+            }
+        }
 
         Ok(Self {
             bind_addr,
@@ -158,6 +319,8 @@ impl Config {
             yt_dlp_bin,
             agent_timeout_secs,
             separation_timeout_secs,
+            remote_separation_timeout_secs,
+            joshua_pc,
         })
     }
 }

@@ -41,6 +41,12 @@ pub enum VocalSeparationError {
     TranscodeFailed,
     #[error("La separación vocal tardó demasiado tiempo y fue cancelada")]
     SeparationTimeout,
+    #[error("No se pudo conectar con la PC remota dentro del tiempo de espera")]
+    PcWakeTimeout,
+    #[error("Permiso denegado para ejecutar comandos requeridos en la PC remota")]
+    RemoteSudoDenied,
+    #[error("La clave SSH para conectar con la PC remota no existe o no es legible")]
+    SshKeyMissing,
     #[error("Falló el proceso de separación vocal")]
     SeparationFailed,
 }
@@ -57,6 +63,9 @@ impl VocalSeparationError {
             Self::IncompatibleStems => "incompatible_stems",
             Self::TranscodeFailed => "transcode_failed",
             Self::SeparationTimeout => "separation_timeout",
+            Self::PcWakeTimeout => "pc_wake_timeout",
+            Self::RemoteSudoDenied => "remote_sudo_denied",
+            Self::SshKeyMissing => "ssh_key_missing",
             Self::SeparationFailed => "separation_failed",
         }
     }
@@ -82,6 +91,15 @@ impl VocalSeparationError {
             Self::IncompatibleStems => "Los canales de audio producidos son incompatibles entre sí",
             Self::TranscodeFailed => "Falló la codificación final del audio a MP3",
             Self::SeparationTimeout => "La separación vocal tardó demasiado tiempo y fue cancelada",
+            Self::PcWakeTimeout => {
+                "No se pudo conectar con la PC remota dentro del tiempo de espera"
+            }
+            Self::RemoteSudoDenied => {
+                "Permiso denegado para ejecutar comandos requeridos en la PC remota"
+            }
+            Self::SshKeyMissing => {
+                "La clave SSH para conectar con la PC remota no existe o no es legible"
+            }
             Self::SeparationFailed => "Falló el proceso de separación vocal",
         }
     }

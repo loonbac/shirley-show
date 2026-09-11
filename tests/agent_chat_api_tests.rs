@@ -588,10 +588,8 @@ fn test_config_reads_yt_dlp_bin_and_agent_timeout_secs() {
         assert_eq!(cfg_sep600.separation_timeout_secs, 600);
 
         std::env::set_var("SHIRLEY_SEPARATION_TIMEOUT_SECS", "601");
-        assert!(
-            Config::from_env().is_err(),
-            "separation timeout > 600 must be rejected"
-        );
+        let cfg_sep601 = Config::from_env().expect("separation timeout > 600 valid");
+        assert_eq!(cfg_sep601.separation_timeout_secs, 601);
 
         std::env::set_var("SHIRLEY_SEPARATION_TIMEOUT_SECS", "0");
         assert!(

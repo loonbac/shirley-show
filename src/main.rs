@@ -55,8 +55,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     ));
 
-    let mut state =
-        AppState::new_with_all_components(pool, storage, staged_audio_registry, youtube_downloader);
+    let mut state = AppState::new_with_all_components_and_config(
+        pool,
+        storage,
+        staged_audio_registry,
+        youtube_downloader,
+        &config,
+    );
     state.frontend_dir = config.frontend_dir;
 
     let agent_limits = AgentLimits {

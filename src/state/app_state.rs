@@ -2,14 +2,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::agent::tool_dispatcher::AgentToolDispatcher;
-use crate::config::DEFAULT_GROQ_MODEL;
+use crate::config::{Config, DEFAULT_GROQ_MODEL};
 use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use crate::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use crate::infra::sqlite::connect::DbPool;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
-use crate::infra::vocal::{ProcessVocalSeparator, ProcessVocalSeparatorConfig};
+use crate::infra::vocal::{
+    ProcessVocalSeparator, ProcessVocalSeparatorConfig, SshVocalSeparator, SshVocalSeparatorConfig,
+};
 use crate::infra::youtube::{ProcessYoutubeDownloader, ProcessYoutubeDownloaderConfig};
 use crate::ports::chat_completion_provider::ChatCompletionProvider;
 use crate::ports::vocal_separator::VocalSeparator;
@@ -89,6 +91,33 @@ impl AppState {
         staged_audio_registry: Arc<StagedAudioRegistry>,
         youtube_downloader: Arc<dyn YoutubeDownloader>,
     ) -> Self {
+        let config = Config::from_env().unwrap_or_else(|_| Config {
+            bind_addr: "127.0.0.1:3000".parse().unwrap(),
+            data_dir: PathBuf::from("data"),
+            frontend_dir: PathBuf::from("frontend"),
+            groq: Default::default(),
+            yt_dlp_bin: None,
+            agent_timeout_secs: 120,
+            separation_timeout_secs: 600,
+            remote_separation_timeout_secs: 1500,
+            joshua_pc: None,
+        });
+        Self::new_with_all_components_and_config(
+            pool,
+            storage,
+            staged_audio_registry,
+            youtube_downloader,
+            &config,
+        )
+    }
+
+    pub fn new_with_all_components_and_config(
+        pool: DbPool,
+        storage: Arc<LocalAudioStorage>,
+        staged_audio_registry: Arc<StagedAudioRegistry>,
+        youtube_downloader: Arc<dyn YoutubeDownloader>,
+        config: &Config,
+    ) -> Self {
         let pres_repo = Arc::new(SqlitePresentationRepository::new(pool.clone()));
         let summary_repo = Arc::new(PresentationSummaryRepository::new(pool.clone()));
         let item_repo = Arc::new(SqliteShowItemRepository::new(pool.clone()));
@@ -117,12 +146,18 @@ impl AppState {
         ));
 
         let gpu_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        let vocal_separator: Arc<dyn VocalSeparator> = Arc::new(ProcessVocalSeparator::new(
-            ProcessVocalSeparatorConfig::from_env(
-                storage.vocal_work_dir().to_path_buf(),
+        let vocal_separator: Arc<dyn VocalSeparator> = match config.joshua_pc {
+            Some(ref jpc) => Arc::new(SshVocalSeparator::new(SshVocalSeparatorConfig::new(
+                jpc.clone(),
                 gpu_semaphore.clone(),
-            ),
-        ));
+            ))),
+            None => Arc::new(ProcessVocalSeparator::new(
+                ProcessVocalSeparatorConfig::from_env(
+                    storage.vocal_work_dir().to_path_buf(),
+                    gpu_semaphore.clone(),
+                ),
+            )),
+        };
 
         let separate_vocals = Arc::new(SeparateVocals::new(
             vocal_separator.clone(),

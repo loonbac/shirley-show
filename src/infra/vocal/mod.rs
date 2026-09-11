@@ -1,11 +1,19 @@
 pub mod process_vocal_separator;
 pub mod process_vocal_separator_config;
+pub mod remote_directory_guard;
 pub mod resolve_stem;
+pub mod ssh_command_builder;
+pub mod ssh_vocal_separator;
+pub mod ssh_vocal_separator_config;
+pub mod vocal_command_builder;
 pub mod vocal_process_guard;
 
 pub use process_vocal_separator::ProcessVocalSeparator;
 pub use process_vocal_separator_config::ProcessVocalSeparatorConfig;
+pub use remote_directory_guard::RemoteDirectoryGuard;
 pub use resolve_stem::resolve_stem;
-pub use vocal_process_guard::VocalProcessGuard;
-pub mod vocal_command_builder;
+pub use ssh_command_builder::SshCommandBuilder;
+pub use ssh_vocal_separator::SshVocalSeparator;
+pub use ssh_vocal_separator_config::SshVocalSeparatorConfig;
 pub use vocal_command_builder::VocalCommandBuilder;
+pub use vocal_process_guard::VocalProcessGuard;
