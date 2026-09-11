@@ -123,5 +123,33 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         },
+        ToolDefinition {
+            name: "separate_vocals".to_string(),
+            description: "Separa la voz principal de una pista de audio (modo 'chorus' para conservar coros de fondo o 'instrumental' para pista completamente instrumental) produciendo un audio preparado temporalmente.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["chorus", "instrumental"],
+                        "description": "Modo de separación: 'chorus' (conserva coros de fondo) o 'instrumental' (pista puramente instrumental)."
+                    },
+                    "staged_audio_id": {
+                        "type": "string",
+                        "description": "Identificador opcional de audio preparado en staging a separar."
+                    },
+                    "track_id": {
+                        "type": "string",
+                        "description": "Identificador opcional de una pista existente en la presentación actual a separar."
+                    },
+                    "youtube_url": {
+                        "type": "string",
+                        "description": "URL pública de YouTube opcional a descargar y separar."
+                    }
+                },
+                "required": ["mode"],
+                "additionalProperties": false
+            }),
+        },
     ]
 }

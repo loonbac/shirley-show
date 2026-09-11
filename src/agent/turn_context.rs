@@ -25,6 +25,8 @@ pub struct CommittedTurnState {
 pub struct TurnToolContext {
     pub known_presentation_ids: HashSet<String>,
     pub known_staged_audio_ids: HashSet<String>,
+    pub known_track_ids: HashSet<String>,
+    pub confirmed_destination_id: Option<String>,
     pub executed_call_ids: HashSet<String>,
     pub executed_signatures: HashMap<String, serde_json::Value>,
     pub staged_audio: Option<StagedAudioHandle>,
@@ -95,9 +97,16 @@ impl TurnToolContext {
             tracker.lock().unwrap().staged_audio_id = staged_audio_id.clone();
         }
 
+        let confirmed_destination_id = active_presentation_id
+            .as_ref()
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| id.trim().to_string());
+
         Self {
             known_presentation_ids,
             known_staged_audio_ids,
+            known_track_ids: HashSet::new(),
+            confirmed_destination_id,
             executed_call_ids: HashSet::new(),
             executed_signatures: HashMap::new(),
             staged_audio,
@@ -119,7 +128,18 @@ impl TurnToolContext {
         if let Some(ref tracker) = self.committed_tracker {
             tracker.lock().unwrap().active_presentation_id = id.clone();
         }
+        self.confirmed_destination_id = id
+            .as_ref()
+            .filter(|val| !val.trim().is_empty())
+            .map(|val| val.trim().to_string());
         self.active_presentation_id = id;
+    }
+
+    pub fn set_confirmed_destination_id(&mut self, id: Option<String>) {
+        self.confirmed_destination_id = id
+            .as_ref()
+            .filter(|val| !val.trim().is_empty())
+            .map(|val| val.trim().to_string());
     }
 
     pub fn set_staged_audio_id(&mut self, id: Option<String>) {

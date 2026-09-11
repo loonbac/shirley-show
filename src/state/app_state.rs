@@ -142,6 +142,7 @@ impl AppState {
             item_repo.clone(),
             download_youtube_audio.clone(),
             staged_audio_registry.clone(),
+            separate_vocals.clone(),
         );
 
         let limits = AgentLimits::default();

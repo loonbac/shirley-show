@@ -15,6 +15,7 @@ use crate::ports::chat_completion_provider::{ChatCompletionProvider, CompletionR
 pub struct AgentLimits {
     pub max_iterations: usize,
     pub request_timeout: Duration,
+    pub separation_timeout: Duration,
 }
 
 impl Default for AgentLimits {
@@ -22,6 +23,7 @@ impl Default for AgentLimits {
         Self {
             max_iterations: 5,
             request_timeout: Duration::from_secs(120),
+            separation_timeout: Duration::from_secs(600),
         }
     }
 }
@@ -69,7 +71,7 @@ impl AgentChat {
     }
 
     pub async fn execute(&self, input: AgentChatInput) -> AgentChatOutput {
-        self.execute_with_timeout(input, self.limits.request_timeout)
+        self.execute_dynamic(input, tokio::time::Instant::now())
             .await
     }
 
@@ -86,6 +88,25 @@ impl AgentChat {
         &self,
         input: AgentChatInput,
         deadline: tokio::time::Instant,
+    ) -> AgentChatOutput {
+        self.execute_dynamic_with_bounds(input, tokio::time::Instant::now(), Some(deadline))
+            .await
+    }
+
+    pub async fn execute_dynamic(
+        &self,
+        input: AgentChatInput,
+        start_time: tokio::time::Instant,
+    ) -> AgentChatOutput {
+        self.execute_dynamic_with_bounds(input, start_time, None)
+            .await
+    }
+
+    pub async fn execute_dynamic_with_bounds(
+        &self,
+        input: AgentChatInput,
+        start_time: tokio::time::Instant,
+        fixed_deadline: Option<tokio::time::Instant>,
     ) -> AgentChatOutput {
         let provider = match self.provider.as_ref() {
             Some(p) => p.clone(),
@@ -144,120 +165,18 @@ impl AgentChat {
             Some(tracker),
         );
 
-        let timeout_result = tokio::time::timeout_at(deadline, async {
-            for iter in 0..self.limits.max_iterations {
-                let req = CompletionRequest {
-                    model: self.model.clone(),
-                    system_prompt: full_system_prompt.clone(),
-                    messages: conversation_messages.clone(),
-                    tools: get_tool_definitions(),
-                };
+        let mut effective_budget = Duration::from_secs(30).min(self.limits.request_timeout);
+        let mut current_deadline = fixed_deadline.unwrap_or_else(|| start_time + effective_budget);
 
-                let response = match provider.complete(req).await {
-                    Ok(resp) => resp,
-                    Err(err) => {
-                        let notice = AgentNotice {
-                            code: err.code().to_string(),
-                            retryable: err.retryable(),
-                        };
-                        let message = if turn_context.actions_taken.is_empty() {
-                            err.friendly_message().to_string()
-                        } else {
-                            compose_grounded_message(
-                                &turn_context.actions_taken,
-                                Some(err.friendly_message()),
-                                turn_context.staged_audio_id.as_deref(),
-                            )
-                        };
-                        return AgentChatOutput {
-                            message,
-                            actions_taken: turn_context.actions_taken,
-                            active_presentation_id: turn_context.active_presentation_id,
-                            staged_audio_id: turn_context.staged_audio_id,
-                            notice: Some(notice),
-                        };
-                    }
-                };
-
-                if !response.tool_calls.is_empty() {
-                    conversation_messages.push(AgentMessage::Assistant {
-                        content: response.content.clone(),
-                        tool_calls: response.tool_calls.clone(),
-                    });
-
-                    for tc in response.tool_calls {
-                        let res = self.dispatcher.dispatch(&tc, &mut turn_context).await;
-                        conversation_messages.push(AgentMessage::Tool {
-                            tool_call_id: tc.id,
-                            content: res.to_string(),
-                        });
-                    }
-
-                    if iter + 1 == self.limits.max_iterations {
-                        let notice = AgentNotice {
-                            code: "iteration_limit".to_string(),
-                            retryable: true,
-                        };
-                        let message = compose_grounded_message(
-                            &turn_context.actions_taken,
-                            Some("Alcancé el límite de pasos permitidos para este turno. Si necesitas continuar, indícamelo en un nuevo mensaje."),
-                            turn_context.staged_audio_id.as_deref(),
-                        );
-                        return AgentChatOutput {
-                            message,
-                            actions_taken: turn_context.actions_taken,
-                            active_presentation_id: turn_context.active_presentation_id,
-                            staged_audio_id: turn_context.staged_audio_id,
-                            notice: Some(notice),
-                        };
-                    }
-                } else {
-                    let message = if turn_context.actions_taken.is_empty() {
-                        let raw = response
-                            .content
-                            .unwrap_or_else(|| "No pude generar una respuesta.".to_string());
-                        sanitize_ungrounded_claims(&raw)
-                    } else {
-                        compose_grounded_message(
-                            &turn_context.actions_taken,
-                            None,
-                            turn_context.staged_audio_id.as_deref(),
-                        )
-                    };
-
-                    return AgentChatOutput {
-                        message,
-                        actions_taken: turn_context.actions_taken,
-                        active_presentation_id: turn_context.active_presentation_id,
-                        staged_audio_id: turn_context.staged_audio_id,
-                        notice: None,
-                    };
-                }
-            }
-
-            AgentChatOutput {
-                message: compose_grounded_message(
-                    &turn_context.actions_taken,
-                    None,
-                    turn_context.staged_audio_id.as_deref(),
-                ),
-                actions_taken: turn_context.actions_taken,
-                active_presentation_id: turn_context.active_presentation_id,
-                staged_audio_id: turn_context.staged_audio_id,
-                notice: None,
-            }
-        })
-        .await;
-
-        match timeout_result {
-            Ok(output) => output,
-            Err(_) => {
+        for iter in 0..self.limits.max_iterations {
+            let now = tokio::time::Instant::now();
+            if now >= current_deadline {
                 let committed = tracker_for_timeout.lock().unwrap();
-                let timeout_secs = self.limits.request_timeout.as_secs();
+                let timeout_secs = effective_budget.as_secs();
                 let timeout_msg = format!(
                     "La solicitud tardó más del límite de tiempo ({timeout_secs} s) y fue cancelada."
                 );
-                AgentChatOutput {
+                return AgentChatOutput {
                     message: compose_grounded_message(
                         &committed.actions_taken,
                         Some(&timeout_msg),
@@ -270,8 +189,197 @@ impl AgentChat {
                         code: "agent_timeout".to_string(),
                         retryable: true,
                     }),
-                }
+                };
             }
+
+            let req = CompletionRequest {
+                model: self.model.clone(),
+                system_prompt: full_system_prompt.clone(),
+                messages: conversation_messages.clone(),
+                tools: get_tool_definitions(),
+            };
+
+            let remaining = current_deadline.saturating_duration_since(now);
+            let response = match tokio::time::timeout(remaining, provider.complete(req)).await {
+                Ok(Ok(resp)) => resp,
+                Ok(Err(err)) => {
+                    let notice = AgentNotice {
+                        code: err.code().to_string(),
+                        retryable: err.retryable(),
+                    };
+                    let message = if turn_context.actions_taken.is_empty() {
+                        err.friendly_message().to_string()
+                    } else {
+                        compose_grounded_message(
+                            &turn_context.actions_taken,
+                            Some(err.friendly_message()),
+                            turn_context.staged_audio_id.as_deref(),
+                        )
+                    };
+                    return AgentChatOutput {
+                        message,
+                        actions_taken: turn_context.actions_taken,
+                        active_presentation_id: turn_context.active_presentation_id,
+                        staged_audio_id: turn_context.staged_audio_id,
+                        notice: Some(notice),
+                    };
+                }
+                Err(_) => {
+                    let committed = tracker_for_timeout.lock().unwrap();
+                    let timeout_secs = effective_budget.as_secs();
+                    let timeout_msg = format!(
+                        "La solicitud tardó más del límite de tiempo ({timeout_secs} s) y fue cancelada."
+                    );
+                    return AgentChatOutput {
+                        message: compose_grounded_message(
+                            &committed.actions_taken,
+                            Some(&timeout_msg),
+                            committed.staged_audio_id.as_deref(),
+                        ),
+                        actions_taken: committed.actions_taken.clone(),
+                        active_presentation_id: committed.active_presentation_id.clone(),
+                        staged_audio_id: committed.staged_audio_id.clone(),
+                        notice: Some(AgentNotice {
+                            code: "agent_timeout".to_string(),
+                            retryable: true,
+                        }),
+                    };
+                }
+            };
+
+            if !response.tool_calls.is_empty() {
+                if fixed_deadline.is_none() {
+                    let has_separate = response.tool_calls.iter().any(|tc| tc.name == "separate_vocals");
+                    let has_download = response.tool_calls.iter().any(|tc| tc.name == "download_youtube_track");
+
+                    if has_separate {
+                        let target = self.limits.separation_timeout;
+                        if target > effective_budget {
+                            effective_budget = target;
+                            current_deadline = start_time + target;
+                        }
+                    } else if has_download {
+                        let target = Duration::from_secs(120).min(self.limits.request_timeout);
+                        if target > effective_budget {
+                            effective_budget = target;
+                            current_deadline = start_time + target;
+                        }
+                    }
+                }
+
+                conversation_messages.push(AgentMessage::Assistant {
+                    content: response.content.clone(),
+                    tool_calls: response.tool_calls.clone(),
+                });
+
+                for tc in response.tool_calls {
+                    let now = tokio::time::Instant::now();
+                    if now >= current_deadline {
+                        let committed = tracker_for_timeout.lock().unwrap();
+                        let timeout_secs = effective_budget.as_secs();
+                        let timeout_msg = format!(
+                            "La solicitud tardó más del límite de tiempo ({timeout_secs} s) y fue cancelada."
+                        );
+                        return AgentChatOutput {
+                            message: compose_grounded_message(
+                                &committed.actions_taken,
+                                Some(&timeout_msg),
+                                committed.staged_audio_id.as_deref(),
+                            ),
+                            actions_taken: committed.actions_taken.clone(),
+                            active_presentation_id: committed.active_presentation_id.clone(),
+                            staged_audio_id: committed.staged_audio_id.clone(),
+                            notice: Some(AgentNotice {
+                                code: "agent_timeout".to_string(),
+                                retryable: true,
+                            }),
+                        };
+                    }
+
+                    let remaining = current_deadline.saturating_duration_since(now);
+                    let res = match tokio::time::timeout(remaining, self.dispatcher.dispatch(&tc, &mut turn_context)).await {
+                        Ok(val) => val,
+                        Err(_) => {
+                            let committed = tracker_for_timeout.lock().unwrap();
+                            let timeout_secs = effective_budget.as_secs();
+                            let timeout_msg = format!(
+                                "La solicitud tardó más del límite de tiempo ({timeout_secs} s) y fue cancelada."
+                            );
+                            return AgentChatOutput {
+                                message: compose_grounded_message(
+                                    &committed.actions_taken,
+                                    Some(&timeout_msg),
+                                    committed.staged_audio_id.as_deref(),
+                                ),
+                                actions_taken: committed.actions_taken.clone(),
+                                active_presentation_id: committed.active_presentation_id.clone(),
+                                staged_audio_id: committed.staged_audio_id.clone(),
+                                notice: Some(AgentNotice {
+                                    code: "agent_timeout".to_string(),
+                                    retryable: true,
+                                }),
+                            };
+                        }
+                    };
+
+                    conversation_messages.push(AgentMessage::Tool {
+                        tool_call_id: tc.id,
+                        content: res.to_string(),
+                    });
+                }
+
+                if iter + 1 == self.limits.max_iterations {
+                    let notice = AgentNotice {
+                        code: "iteration_limit".to_string(),
+                        retryable: true,
+                    };
+                    let message = compose_grounded_message(
+                        &turn_context.actions_taken,
+                        Some("Alcancé el límite de pasos permitidos para este turno. Si necesitas continuar, indícamelo en un nuevo mensaje."),
+                        turn_context.staged_audio_id.as_deref(),
+                    );
+                    return AgentChatOutput {
+                        message,
+                        actions_taken: turn_context.actions_taken,
+                        active_presentation_id: turn_context.active_presentation_id,
+                        staged_audio_id: turn_context.staged_audio_id,
+                        notice: Some(notice),
+                    };
+                }
+            } else {
+                let message = if turn_context.actions_taken.is_empty() {
+                    let raw = response
+                        .content
+                        .unwrap_or_else(|| "No pude generar una respuesta.".to_string());
+                    sanitize_ungrounded_claims(&raw)
+                } else {
+                    compose_grounded_message(
+                        &turn_context.actions_taken,
+                        None,
+                        turn_context.staged_audio_id.as_deref(),
+                    )
+                };
+
+                return AgentChatOutput {
+                    message,
+                    actions_taken: turn_context.actions_taken,
+                    active_presentation_id: turn_context.active_presentation_id,
+                    staged_audio_id: turn_context.staged_audio_id,
+                    notice: None,
+                };
+            }
+        }
+
+        AgentChatOutput {
+            message: compose_grounded_message(
+                &turn_context.actions_taken,
+                None,
+                turn_context.staged_audio_id.as_deref(),
+            ),
+            actions_taken: turn_context.actions_taken,
+            active_presentation_id: turn_context.active_presentation_id,
+            staged_audio_id: turn_context.staged_audio_id,
+            notice: None,
         }
     }
 }
@@ -357,6 +465,10 @@ fn sanitize_ungrounded_claims(content: &str) -> String {
         "he descargado",
         "audio descargado",
         "video descargado",
+        "separé las voces",
+        "he separado las voces",
+        "separé los coros",
+        "voces separadas",
         "agregué la pista",
         "he agregado la pista",
         "pista agregada",

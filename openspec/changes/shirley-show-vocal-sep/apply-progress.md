@@ -5,18 +5,18 @@
 ```json
 {
   "changeName": "shirley-show-vocal-sep",
-  "slice": "vsep-s3-usecase-staging",
+  "slice": "vsep-s4-agent-frontend",
   "executionMode": "auto",
   "artifactStore": "openspec",
   "reviewBudgetLines": 400,
   "chainStrategy": "stacked-to-main",
-  "workUnit": "vsep-s3-usecase-staging",
-  "token": "sha256:23063d57207a78a28c3a5abac8ebf0a4f422cef50e79e6a820e211b0c10e52e0",
-  "request": "v3-acquire-001",
+  "workUnit": "vsep-s4-agent-frontend",
+  "token": "sha256:0dc290d87ed5ca80519ba7b355cfa6747e267082331f591c4f57dafcae1da972",
+  "request": "v4-acquire-001",
   "completedSliceTasks": 4,
   "totalSliceTasks": 4,
-  "completedChangeTasks": 12,
-  "remainingChangeTasks": 4
+  "completedChangeTasks": 16,
+  "remainingChangeTasks": 0
 }
 ```
 
@@ -61,7 +61,43 @@ Slice 3 implements the use case orchestration, staging lifecycle extension, and 
    - Validated integration with `UploadTrack` / `add_track_from_staged` to create canonical show tracks from separated outputs.
 4. `AppState`: wired `separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>` in `new_with_all_components`, `with_vocal_separator`, and `with_youtube_downloader`.
 
-## Completed Tasks (Slices 1, 2 & 3)
+## Slice 4 Implementation Summary (`vsep-s4-agent-frontend`)
+
+Slice 4 integrates the vocal separation capability into the conversational agent, API layer, timeouts, and frontend:
+1. `separate_vocals` tool schema in `src/agent/tool_schemas.rs`:
+   - Exact 8 tools allowlist (`create_presentation`, `list_presentations`, `get_presentation`, `add_lyrics`, `add_note`, `add_track_from_staged`, `download_youtube_track`, `separate_vocals`).
+   - Strict parameters: `mode` (`"chorus"` | `"instrumental"`, required), `staged_audio_id`, `track_id`, `youtube_url` (optional), `additionalProperties: false`.
+2. Tool Dispatcher & Grounding in `src/agent/tool_dispatcher.rs`:
+   - Enforces `confirmed_destination_id` precondition before GPU or use case invocation (returns `destination_required` if destination presentation is not confirmed).
+   - Validates `track_id` against `known_track_ids` loaded from `get_presentation` (returns `unauthorized_track_id`).
+   - Validates `staged_audio_id` against `known_staged_audio_ids` in `TurnToolContext`.
+   - Records structured `ToolAction` receipt with presentation ID and details upon success.
+   - Deduplicates identical calls within the same turn without running secondary GPU pipelines.
+3. Turn Context & Grounding in `src/agent/turn_context.rs`:
+   - Tracks `confirmed_destination_id` (initialized from `active_presentation_id` or set upon creation/retrieval).
+   - Tracks `known_track_ids` dynamically loaded on `get_presentation`.
+4. Ressy Prompt in `src/agent/system_prompt.rs`:
+   - Added Rule 16: Ask mode and destination presentation before touching the GPU.
+   - Same-turn chaining when destination is confirmed (`separate_vocals` followed by `add_track_from_staged`).
+   - Strict 3-stage differentiation in conversational responses: "fuente preparada" (downloaded), "separación terminada" (separated in staging), and "pista agregada" (committed track).
+   - Polite explanation when PolarFormer is unconfigured, offering chorus mode or keeping audio within 15-minute TTL.
+5. Dynamic Deadline Policy in `src/use_cases/agent_chat.rs`, `src/config.rs`, and `src/handlers/agent/chat.rs`:
+   - Config adds `SHIRLEY_SEPARATION_TIMEOUT_SECS` (default 600s).
+   - Standard conversational turns maintain 30s base budget; YouTube downloads expand to 120s; `separate_vocals` expands to 600s.
+   - Request parsing enforces 30s bounded timeout.
+   - Uncaught timeout produces grounded message with prior committed actions and formatted elapsed budget.
+6. Frontend Micro-Modules & Headless State:
+   - Created pure micro-utility `frontend/js/utils/validation/is-vocal-separation-intent.js`.
+   - Updated `frontend/js/core/state/chat-state.js` with `vocalSeparationPending` flag and qualitative `pendingLabel = 'Ressy está separando voces… (tarda unos minutos)'`.
+   - Ephemeral in-memory retention of `stagedAudioId` across conversational turns (strictly zero `localStorage`).
+   - Clean restoration of composer and pending label upon resolution, error, timeout, or cancellation.
+   - Removed generic wait timers in `frontend/js/controllers/agent-chat-controller.js` to ensure the headless state owns the label without race conditions or overwrites.
+7. Real GPU Verification with `karaoke-separator`:
+   - Discovered and resolved runtime stem resolution for `karaoke-separator` (which produces FLAC stems `_(other)_` and `_(vocals)_`), converting stems to PCM 24-bit WAV for `avg_wave` processing.
+   - Fixed `ffprobe` post-verify to read stream-level codec bitrate (`320000`) rather than container format bitrate with muxing overhead.
+   - Successfully ran end-to-end chorus separation on NVIDIA GeForce RTX 3060 via `karaoke-separator` with an ffmpeg-generated test audio, verified valid MP3 CBR 320 kbps output with ffprobe, and purged all temporary files.
+
+## Completed Tasks (All Slices 1, 2, 3 & 4)
 
 ### Slice 1 (`vsep-s1-domain-dsp`)
 - [x] RED: Escribir pruebas unitarias en `tests/avg_wave_tests.rs` para `VocalSeparationMode` (parsing JSON `"chorus"`/`"instrumental"`, rechazo de alias/desconocidos) y `avg_wave` con fixtures sintéticos generados en memoria (promedio float de 3 WAVs mono/estéreo a 16-bit/24-bit/32-bit float, clamp ante picos +1.0/-1.0, rechazo de disparidad en sample rate/canales/longitud y purga del archivo de salida ante fallos). <!-- sdd-owner: implementation -->
@@ -81,6 +117,12 @@ Slice 3 implements the use case orchestration, staging lifecycle extension, and 
 - [x] TRIANGULATE: Añadir pruebas de robustez en `tests/separate_vocals_tests.rs` (intento de separar con fuente inexistente o ya consumida, fallo al descargar de YouTube antes de llegar a la separación, fuente que excede el límite de duración, y validación de que el audio resultante puede ser consumido por `UploadTrack`/`add_track_from_staged` para crear una pista canónica). <!-- sdd-owner: implementation -->
 - [x] REFACTOR: Desacoplar la resolución de fuente en funciones privadas puras, validar que `SeparateVocals` siga el principio de 1 struct por caso de uso, y asegurar el aislamiento de las capas de dominio frente a detalles de I/O. <!-- sdd-owner: implementation -->
 
+### Slice 4 (`vsep-s4-agent-frontend`)
+- [x] RED: Escribir pruebas unitarias y de integración para backend y frontend (en `tests/agent_tools_tests.rs`, `tests/agent_chat_tests.rs` y `tests/agent-chat-state.test.mjs`) que verifiquen: esquema estricto de `separate_vocals`; rechazo en dispatcher/context si falta destino confirmado; rechazo si el modo es inválido; flujo conversacional en dos turnos donde Shirley pregunta modo y destino antes de ejecutar GPU; encadenamiento en el mismo turno cuando la presentación activa ya existe (`separate_vocals` seguido de `add_track_from_staged`); deduplicación de llamadas idénticas; deadline dinámico de hasta 600 segundos para separación; y en el frontend, activación del label "separando voces…" en el estado del chat al detectar intención vocal, preservación de `stagedAudioId` en memoria y restauración limpia del composer en éxito, error o timeout. <!-- sdd-owner: implementation -->
+- [x] GREEN: Declarar `separate_vocals` en `tool_schemas.rs`, despacharlo en `tool_dispatcher.rs`, proteger la precondición de destino confirmado en `turn_context.rs`, actualizar instrucciones en `system_prompt.rs`, implementar la política de deadline dinámico en `agent_chat.rs` y `config.rs`, e implementar `is-vocal-separation-intent.js`, la gestión de estado en `chat-state.js` y el controlador en `agent-chat-controller.js`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE: Añadir pruebas de integración completas (en `tests/agent_chat_api_tests.rs` e integración frontend) que verifiquen: turno con timeout a los 600s reportando acciones previas y liberando GPU; respuesta amable ante PolarFormer ausente sin agregar pista fantasma; llamada repetida ignorada sin segunda ejecución en GPU; desconexión de cliente abortando la petición; y persistencia en un solo paso hacia el show activo cuando todos los parámetros están presentes. <!-- sdd-owner: implementation -->
+- [x] REFACTOR: Revisar que no queden temporizadores genéricos en el controlador pisando el label "separando voces…", asegurar la micro-modularidad de las funciones frontend, verificar accesibilidad con `aria-live="polite"` y comprobar que la suite completa de tests de Rust y Node pasa sin regresiones. <!-- sdd-owner: implementation -->
+
 ## Strict TDD Cycle Evidence
 
 | Slice | Phase | Target / Scope | Test Command / Action | Result |
@@ -97,40 +139,54 @@ Slice 3 implements the use case orchestration, staging lifecycle extension, and 
 | S3 | GREEN | Implemented `StagedAudioLeaseGuard`, added `reserve_guarded` and `commit_processed` to `StagedAudioRegistry`, implemented `SeparateVocals`, wired in `AppState` | `cargo test --test staged_audio_registry_tests` & `cargo test --test separate_vocals_tests` | 11 registry tests passed; 6 separate vocals tests passed |
 | S3 | TRIANGULATE | Added robustness tests: nonexistent/already consumed staged audio, nonexistent track, non-track item, youtube download failure aborts before separator, duration exceeded preserves source, output consumed by `UploadTrack` into canonical show track | `cargo test --test separate_vocals_tests` | All 13 separate vocals tests passed |
 | S3 | REFACTOR | Decoupled source resolution into private helpers (`resolve_staged_source`, `resolve_track_source`, `resolve_youtube_source`), validated 1-struct use case adherence, checked zero regressions | `cargo test && node --test tests/*.mjs` | All 178 Rust tests and 18 Node tests passed cleanly |
+| S4 | RED | Schema allowlist 8, `separate_vocals`, dispatcher destination check, dynamic deadline, frontend intent & label | `cargo test --test agent_tools_tests`, `cargo test --test agent_chat_tests`, `node tests/agent-chat-state.test.mjs` | Failed with expected schema mismatch (7 vs 8), unknown tool in dispatcher, missing `separation_timeout` in `AgentLimits`, and missing `is-vocal-separation-intent.js` |
+| S4 | GREEN | Schema declaration, dispatcher destination enforcement, `AgentLimits.separation_timeout`, dynamic deadline, `is-vocal-separation-intent.js`, `chatState.vocalSeparationPending` | `cargo test --test agent_tools_tests`, `cargo test --test agent_chat_tests`, `node tests/agent-chat-state.test.mjs` | All unit tests in tools, agent chat, and frontend state passed |
+| S4 | TRIANGULATE | HTTP integration in `agent_chat_api_tests` (single step canonical persistence, PolarFormer absent, duplicate call ignored, timeout preserving prior actions & GPU permit), frontend typing indicator integration | `cargo test --test agent_chat_api_tests`, `node --test tests/*.mjs` | All 21 API integration tests and 5 Node test suites passed |
+| S4 | REFACTOR | Eliminated generic 3s wait timer in controller, verified `aria-live="polite"`, ensured O(1) streaming and FLAC stem support | `cargo test` & `node --test tests/*.mjs` | All 194 Rust tests and 5 Node test suites passed cleanly |
+| S4 | E2E GPU REAL | Manual real GPU chorus separation with `karaoke-separator` on NVIDIA GeForce RTX 3060 | `cargo test --test e2e_real_gpu_test -- --ignored --nocapture` | Completed in 34.13s; output MP3 CBR 320 kbps validated via ffprobe; clean disk teardown |
 
-## Files Changed (Slice 3)
+## Files Changed (Slice 4)
 
-- `src/state/staged_audio_lease_guard.rs` (new module: RAII lease guard with auto-release on drop, `commit_consumed`, `commit_processed`, and `defuse`)
-- `src/state/staged_audio_registry.rs` (added `reserve_guarded` returning `StagedAudioLeaseGuard`, and `commit_processed` deleting source file from disk while retaining tombstone)
-- `src/state/mod.rs` (exported `StagedAudioLeaseGuard`)
-- `src/use_cases/separate_vocals.rs` (new use case: `SeparateVocals`, `VocalAudioSource`, `SeparateVocalsInput`, `SeparateVocalsOutput`, `SeparateVocalsError`, decoupled source resolvers, staging management)
-- `src/use_cases/mod.rs` (exported `SeparateVocals` and types)
-- `src/state/app_state.rs` (wired `separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>`, updated `with_vocal_separator` and `with_youtube_downloader`)
-- `tests/staged_audio_registry_tests.rs` (added tests for `reserve_guarded` auto-release on drop, `commit_processed` file deletion and tombstone retention)
-- `tests/separate_vocals_tests.rs` (new test suite: 13 tests covering staged, track, youtube sources, priority, failures, degradation, and canonical promotion via `UploadTrack`)
-- `openspec/changes/shirley-show-vocal-sep/tasks.md` (marked S3 checkboxes `- [x]`)
+- `src/agent/tool_schemas.rs`: declared `separate_vocals` tool in exact 8 tools allowlist.
+- `src/agent/turn_context.rs`: added `confirmed_destination_id` and `known_track_ids` fields and methods.
+- `src/agent/tool_dispatcher.rs`: implemented `separate_vocals` tool dispatching, destination confirmation validation, `track_id` permission check, deduplication, and chained track creation.
+- `src/agent/system_prompt.rs`: added Rule 16 covering mode/destination confirmation before GPU, 3-stage differentiation, same-turn chaining, and polite fallback for missing PolarFormer.
+- `src/config.rs`: added `SHIRLEY_SEPARATION_TIMEOUT_SECS` configuration with default 600s.
+- `src/main.rs`: wired `separation_timeout` in `AgentLimits`.
+- `src/state/app_state.rs`: passed `separate_vocals` into `AgentToolDispatcher::from_components`.
+- `src/use_cases/agent_chat.rs`: implemented dynamic deadline policy (30s baseline, 120s YouTube, 600s separation) and updated false claim sanitization for vocal separation terms.
+- `src/handlers/agent/chat.rs`: updated chat handler with 30s request parsing timeout and dynamic deadline dispatch.
+- `src/infra/vocal/resolve_stem.rs`: added model token aliases (`gabox`, `becruily`) and allowed `.flac` stems as output by `karaoke-separator`.
+- `src/infra/vocal/process_vocal_separator.rs`: converted FLAC stems to PCM WAV for `avg_wave` processing, and adjusted post-verification to read stream codec bitrate (`320000`).
+- `frontend/js/utils/validation/is-vocal-separation-intent.js`: new pure micro-utility classifying user vocal separation intent.
+- `frontend/js/core/state/chat-state.js`: added `vocalSeparationPending` flag, qualitative `pendingLabel = 'Ressy está separando voces… (tarda unos minutos)'`, and in-memory `stagedAudioId` lifecycle management.
+- `frontend/js/controllers/agent-chat-controller.js`: eliminated generic 3-second wait timer to let headless chat state exclusively own the label.
+- `tests/agent_tools_tests.rs`: added unit tests for schema, destination rejection, invalid mode, unauthorized track, success chaining, and deduplication.
+- `tests/agent_chat_tests.rs`: added unit tests for two-turn question flow before GPU, same-turn chaining, and extended 600s deadline.
+- `tests/agent_chat_api_tests.rs`: added integration tests for single-step canonical persistence, PolarFormer absent response, duplicate call deduplication, and timeout preserving prior actions and releasing GPU permit.
+- `tests/agent-chat-state.test.mjs`: added unit tests for `isVocalSeparationIntent` and vocal separation chat state lifecycle.
+- `tests/agent-chat-integration.test.mjs`: added integration test for vocal separation typing indicator and composer lifecycle.
+- `tests/e2e_real_gpu_test.rs`: real manual GPU chorus separation test against `karaoke-separator` on NVIDIA GPU with ffprobe verification.
+- `openspec/changes/shirley-show-vocal-sep/tasks.md`: marked all Slice 4 tasks `- [x]`.
 
 ## Deviations from Design
 
-None. The implementation strictly adheres to `design.md`:
-- Source resolution strictly prioritizes `staged_audio_id` -> `track_id` -> `youtube_url`.
-- `track_id` reads managed track items in read-only mode and never mutates or deletes the managed file.
-- Temporary staged sources are deleted via `commit_processed` only upon successful registration of the result.
-- Separator failure preserves the source staged file and its registry entry for subsequent retries.
-- Resulting MP3 is registered in `StagedAudioRegistry` with 15-minute TTL and title suffix.
+None. The implementation strictly adheres to `design.md` and spec requirements:
+- Mode and destination presentation are strictly verified before acquiring GPU or executing separation.
+- Destination confirmed is tracked in `TurnToolContext` and required by `AgentToolDispatcher`.
+- Allowlist contains exactly 8 tools.
+- Dynamic deadline scales up to 600s specifically for separation turns while maintaining 30s conversational baseline.
+- `pendingLabel` is owned exclusively by headless chat state with `"Ressy está separando voces… (tarda unos minutos)"` and composer is restored cleanly on all outcomes.
+- Real GPU separation verified against physical NVIDIA GPU with `karaoke-separator`.
 
-## Remaining Tasks (Slice 4)
+## Remaining Tasks
 
-The following 4 implementation tasks remain for Slice 4 (PR4):
-
-- [ ] RED: Escribir pruebas unitarias y de integración para backend y frontend (en `tests/agent_tools_tests.rs`, `tests/agent_chat_tests.rs` y `tests/agent-chat-state.test.mjs`) que verifiquen: esquema estricto de `separate_vocals`; rechazo en dispatcher/context si falta destino confirmado; rechazo si el modo es inválido; flujo conversacional en dos turnos donde Shirley pregunta modo y destino antes de ejecutar GPU; encadenamiento en el mismo turno cuando la presentación activa ya existe (`separate_vocals` seguido de `add_track_from_staged`); deduplicación de llamadas idénticas; deadline dinámico de hasta 600 segundos para separación; y en el frontend, activación del label "separando voces…" en el estado del chat al detectar intención vocal, preservación de `stagedAudioId` en memoria y restauración limpia del composer en éxito, error o timeout. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Declarar `separate_vocals` en `tool_schemas.rs`, despacharlo en `tool_dispatcher.rs`, proteger la precondición de destino confirmado en `turn_context.rs`, actualizar instrucciones en `system_prompt.rs`, implementar la política de deadline dinámico en `agent_chat.rs` y `config.rs`, e implementar `is-vocal-separation-intent.js`, la gestión de estado en `chat-state.js` y el controlador en `agent-chat-controller.js`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE: Añadir pruebas de integración completas (en `tests/agent_chat_api_tests.rs` e integración frontend) que verifiquen: turno con timeout a los 600s reportando acciones previas y liberando GPU; respuesta amable ante PolarFormer ausente sin agregar pista fantasma; llamada repetida ignorada sin segunda ejecución en GPU; desconexión de cliente abortando la petición; y persistencia en un solo paso hacia el show activo cuando todos los parámetros están presentes. <!-- sdd-owner: implementation -->
-- [ ] REFACTOR: Revisar que no queden temporizadores genéricos en el controlador pisando el label "separando voces…", asegurar la micro-modularidad de las funciones frontend, verificar accesibilidad con `aria-live="polite"` y comprobar que la suite completa de tests de Rust y Node pasa sin regresiones. <!-- sdd-owner: implementation -->
+Zero unchecked implementation tasks remain across the entire change `shirley-show-vocal-sep`. (16/16 complete).
 
 ## Workload & PR Boundary
 
 - PR 1: `vsep-s1-domain-dsp` (merged/committed) — `VocalSeparationMode`, `avg_wave`, `encode_mp3_320k`.
 - PR 2: `vsep-s2-infra-gpu` (merged/committed) — `VocalSeparator` port, `ProcessVocalSeparator`, `VocalProcessGuard`, `resolve_stem`, `ProcessVocalSeparatorConfig`, `LocalAudioStorage.vocal_work_dir`, `reconcile_audio_files`, `AppState.gpu_semaphore`.
-- PR 3 (current slice): `vsep-s3-usecase-staging` — `SeparateVocals` use case, `StagedAudioLeaseGuard`, `StagedAudioRegistry` (`reserve_guarded`, `commit_processed`), `AppState.separate_vocals`. Cohesive and isolated use case and staging layer.
-- PR 4: Slice 4 (Tool `separate_vocals`, Prompt Ressy, Timeout 600s y Frontend).
+- PR 3: `vsep-s3-usecase-staging` (merged/committed) — `SeparateVocals` use case, `StagedAudioLeaseGuard`, `StagedAudioRegistry` (`reserve_guarded`, `commit_processed`), `AppState.separate_vocals`.
+- PR 4 (current slice): `vsep-s4-agent-frontend` — Tool `separate_vocals`, Ressy system prompt, dynamic deadline policy (30s/120s/600s), `is-vocal-separation-intent.js`, `chat-state.js` vocal separation pending state, controller cleanup, full integration tests, and manual real GPU validation.
+- All four PR slices of `shirley-show-vocal-sep` are complete. Next recommended phase: `sdd-verify`.

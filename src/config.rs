@@ -75,6 +75,7 @@ pub struct Config {
     pub groq: GroqConfig,
     pub yt_dlp_bin: Option<PathBuf>,
     pub agent_timeout_secs: u64,
+    pub separation_timeout_secs: u64,
 }
 
 impl Config {
@@ -123,6 +124,26 @@ impl Config {
             Err(_) => 120,
         };
 
+        let separation_timeout_secs = match env::var("SHIRLEY_SEPARATION_TIMEOUT_SECS") {
+            Ok(val) => {
+                let trimmed = val.trim();
+                if trimmed.is_empty() {
+                    600
+                } else {
+                    let parsed: u64 = trimmed.parse().map_err(|e| {
+                        format!("Invalid SHIRLEY_SEPARATION_TIMEOUT_SECS '{trimmed}': {e}")
+                    })?;
+                    if parsed == 0 {
+                        return Err(
+                            "SHIRLEY_SEPARATION_TIMEOUT_SECS must be strictly positive".to_string()
+                        );
+                    }
+                    parsed
+                }
+            }
+            Err(_) => 600,
+        };
+
         Ok(Self {
             bind_addr,
             data_dir,
@@ -130,6 +151,7 @@ impl Config {
             groq,
             yt_dlp_bin,
             agent_timeout_secs,
+            separation_timeout_secs,
         })
     }
 }

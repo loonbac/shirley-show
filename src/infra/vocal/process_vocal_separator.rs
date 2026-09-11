@@ -172,11 +172,10 @@ impl ProcessVocalSeparator {
             _ => return Err(VocalSeparationError::TranscodeFailed),
         };
 
-        let bitrate_val = parsed
-            .format
-            .as_ref()
-            .and_then(|f| f.bit_rate.clone())
-            .or_else(|| stream.bit_rate.clone());
+        let bitrate_val = stream
+            .bit_rate
+            .clone()
+            .or_else(|| parsed.format.as_ref().and_then(|f| f.bit_rate.clone()));
         let bitrate_num = match bitrate_val {
             Some(serde_json::Value::Number(n)) => {
                 n.as_u64().ok_or(VocalSeparationError::TranscodeFailed)?
@@ -337,9 +336,37 @@ impl VocalSeparator for ProcessVocalSeparator {
                         stems.push(stem);
                     }
 
+                    // Convert any non-wav stem to wav using ffmpeg so avg_wave (hound) can process it
+                    let mut wav_stems = Vec::new();
+                    for stem in &stems {
+                        if stem.extension().and_then(|e| e.to_str()) == Some("wav") {
+                            wav_stems.push(stem.clone());
+                        } else {
+                            let wav_path = stem.with_extension("wav");
+                            let mut conv = Command::new(&this.config.ffmpeg_bin);
+                            conv.args([
+                                "-v", "error",
+                                "-y",
+                                "-i", stem.to_str().unwrap(),
+                                "-c:a", "pcm_s24le",
+                                wav_path.to_str().unwrap(),
+                            ]);
+                            conv.stdin(Stdio::null());
+                            conv.stdout(Stdio::null());
+                            conv.stderr(Stdio::null());
+                            match conv.status().await {
+                                Ok(s) if s.success() => wav_stems.push(wav_path),
+                                _ => {
+                                    guard.kill_and_wait().await;
+                                    return Err(VocalSeparationError::TranscodeFailed);
+                                }
+                            }
+                        }
+                    }
+
                     // Blend with avg_wave
                     let avg_output = work_dir.join("avg_output.wav");
-                    match avg_wave([&stems[0], &stems[1], &stems[2]], &avg_output) {
+                    match avg_wave([&wav_stems[0], &wav_stems[1], &wav_stems[2]], &avg_output) {
                         Ok(()) => {}
                         Err(AvgWaveError::MismatchedChannels)
                         | Err(AvgWaveError::MismatchedSampleRate)

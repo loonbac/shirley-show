@@ -102,18 +102,6 @@ export function createAgentChatController(deps) {
 
     const presentationId = priorState.activeContext ? priorState.activeContext.id : null;
 
-    // >3s wait timer: update typing indicator label if request takes >3s and contains YouTube URL;
-    // otherwise preserve standard thinking label
-    const waitTimer = setTimeout(() => {
-      if (chatState.get().pending) {
-        if (containsYouTubeUrl(userMessage)) {
-          panel.update({ pendingLabel: 'Ressy está descargando el audio…' });
-        } else {
-          panel.update({ pendingLabel: 'Ressy está pensando...' });
-        }
-      }
-    }, 3000);
-
     try {
       const response = await sendAgentChatMessage({
         message: userMessage,
@@ -153,8 +141,6 @@ export function createAgentChatController(deps) {
         generationId: turn.generationId,
         error: err,
       });
-    } finally {
-      clearTimeout(waitTimer);
     }
   }
 

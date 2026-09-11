@@ -7,6 +7,8 @@ use crate::agent::tool_signature::canonical_tool_signature;
 use crate::agent::turn_context::{StagedAudioHandle, TurnToolContext};
 use crate::domain::agent_tool::{ToolAction, ToolCall};
 use crate::domain::audio_format::AudioFormat;
+use crate::domain::show_item_kind::ShowItemKind;
+use crate::domain::vocal_separation_mode::VocalSeparationMode;
 use crate::handlers::dto::ShowItemResponse;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
@@ -20,6 +22,9 @@ use crate::use_cases::create_presentation::CreatePresentation;
 use crate::use_cases::download_youtube_audio::DownloadYouTubeAudio;
 use crate::use_cases::get_presentation::GetPresentation;
 use crate::use_cases::list_presentations::ListPresentations;
+use crate::use_cases::separate_vocals::{
+    SeparateVocals, SeparateVocalsInput, VocalAudioSource,
+};
 use crate::use_cases::upload_track::UploadTrack;
 
 #[derive(Deserialize)]
@@ -58,6 +63,18 @@ struct DownloadYouTubeTrackArgs {
     title: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SeparateVocalsArgs {
+    mode: String,
+    #[serde(default)]
+    staged_audio_id: Option<String>,
+    #[serde(default)]
+    track_id: Option<String>,
+    #[serde(default)]
+    youtube_url: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct AgentToolDispatcher {
     create_presentation: Arc<CreatePresentation<SqlitePresentationRepository>>,
@@ -69,6 +86,7 @@ pub struct AgentToolDispatcher {
     item_repo: Arc<SqliteShowItemRepository>,
     download_youtube_audio: Arc<DownloadYouTubeAudio>,
     staged_audio_registry: Arc<StagedAudioRegistry>,
+    separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>,
 }
 
 impl AgentToolDispatcher {
@@ -87,6 +105,7 @@ impl AgentToolDispatcher {
         item_repo: Arc<SqliteShowItemRepository>,
         download_youtube_audio: Arc<DownloadYouTubeAudio>,
         staged_audio_registry: Arc<StagedAudioRegistry>,
+        separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>,
     ) -> Self {
         Self {
             create_presentation,
@@ -98,6 +117,7 @@ impl AgentToolDispatcher {
             item_repo,
             download_youtube_audio,
             staged_audio_registry,
+            separate_vocals,
         }
     }
 
@@ -112,6 +132,7 @@ impl AgentToolDispatcher {
             state.item_repo.clone(),
             state.download_youtube_audio.clone(),
             state.staged_audio_registry.clone(),
+            state.separate_vocals.clone(),
         )
     }
 
@@ -253,10 +274,16 @@ impl AgentToolDispatcher {
 
                 match self.get_presentation.execute(pres_id) {
                     Ok(pres) => {
+                        context.set_confirmed_destination_id(Some(pres.id.clone()));
                         let items = self
                             .item_repo
                             .list_by_presentation(pres_id)
                             .unwrap_or_default();
+                        for item in &items {
+                            if item.kind() == ShowItemKind::Track {
+                                context.known_track_ids.insert(item.id.clone());
+                            }
+                        }
                         let items_json: Vec<Value> = items
                             .iter()
                             .map(|item| {
@@ -626,6 +653,117 @@ impl AgentToolDispatcher {
                                 "staged_audio_id": output.staged_audio_id,
                                 "duration_secs": output.duration_secs,
                             })),
+                        });
+
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => {
+                        json!({
+                            "error": e.code(),
+                            "message": e.message()
+                        })
+                    }
+                }
+            }
+
+            "separate_vocals" => {
+                let args: SeparateVocalsArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => {
+                        return json!({
+                            "error": "validation_error",
+                            "message": "Parámetros de herramienta inválidos"
+                        });
+                    }
+                };
+
+                let mode = match args.mode.as_str() {
+                    "chorus" => VocalSeparationMode::Coros,
+                    "instrumental" => VocalSeparationMode::Instrumental,
+                    _ => {
+                        return json!({
+                            "error": "validation_error",
+                            "message": "El modo debe ser 'chorus' o 'instrumental'"
+                        });
+                    }
+                };
+
+                if context.confirmed_destination_id.is_none() {
+                    return json!({
+                        "error": "destination_required",
+                        "message": "Se requiere una presentación de destino confirmada antes de separar voces"
+                    });
+                }
+
+                let source = match VocalAudioSource::resolve(
+                    args.staged_audio_id,
+                    args.track_id,
+                    args.youtube_url,
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return json!({
+                            "error": e.code(),
+                            "message": e.message(),
+                        });
+                    }
+                };
+
+                if let VocalAudioSource::TrackId(ref tid) = source {
+                    if !context.known_track_ids.contains(tid) {
+                        return json!({
+                            "error": "unauthorized_track_id",
+                            "message": "Pista no autorizada o no encontrada en la presentación activa"
+                        });
+                    }
+                }
+
+                if let VocalAudioSource::StagedAudioId(ref sid) = source {
+                    if !context.known_staged_audio_ids.contains(sid) {
+                        return json!({
+                            "error": "staged_audio_not_found",
+                            "message": "Identificador de audio preparado no encontrado o no autorizado"
+                        });
+                    }
+                }
+
+                match self
+                    .separate_vocals
+                    .execute(SeparateVocalsInput { source, mode })
+                    .await
+                {
+                    Ok(output) => {
+                        context.set_staged_audio_id(Some(output.staged_audio_id.clone()));
+
+                        let mode_str = match output.mode {
+                            VocalSeparationMode::Coros => "chorus",
+                            VocalSeparationMode::Instrumental => "instrumental",
+                        };
+
+                        let mode_label = match output.mode {
+                            VocalSeparationMode::Coros => "Coros",
+                            VocalSeparationMode::Instrumental => "Instrumental",
+                        };
+
+                        let res = json!({
+                            "staged_audio_id": output.staged_audio_id,
+                            "mode": mode_str,
+                            "title": output.title,
+                            "duration_secs": output.duration_secs,
+                            "size_bytes": output.size_bytes,
+                        });
+
+                        context.record_action(ToolAction {
+                            tool: "separate_vocals".to_string(),
+                            presentation_id: context.confirmed_destination_id.clone(),
+                            summary: format!(
+                                "Separación vocal ({}) completada para «{}»",
+                                mode_label, output.title
+                            ),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
                         });
 
                         context.executed_call_ids.insert(call.id.clone());

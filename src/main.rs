@@ -62,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let agent_limits = AgentLimits {
         max_iterations: 5,
         request_timeout: std::time::Duration::from_secs(config.agent_timeout_secs),
+        separation_timeout: std::time::Duration::from_secs(config.separation_timeout_secs),
     };
 
     if config.groq.api_key.is_some() {

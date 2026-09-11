@@ -13,10 +13,46 @@ use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::domain::youtube_url::YouTubeUrl;
 use shirley_show::infra::filesystem::{LocalAudioStorage, StagingFileGuard};
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
+use shirley_show::ports::vocal_separator::{
+    SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
+};
 use shirley_show::ports::youtube_downloader::{
     DownloadedYoutubeAudio, YoutubeDownloadError, YoutubeDownloadTarget, YoutubeDownloader,
 };
 use shirley_show::state::AppState;
+
+#[derive(Clone)]
+struct FakeVocalSeparator {
+    fail_with_error: Arc<std::sync::Mutex<Option<VocalSeparationError>>>,
+}
+
+impl FakeVocalSeparator {
+    fn new() -> Self {
+        Self {
+            fail_with_error: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+}
+
+impl VocalSeparator for FakeVocalSeparator {
+    fn separate(
+        &self,
+        request: VocalSeparationRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>> {
+        if let Some(err) = self.fail_with_error.lock().unwrap().clone() {
+            return Box::pin(async move { Err(err) });
+        }
+        let out_path = request.output_path;
+        Box::pin(async move {
+            std::fs::write(&out_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
+                .expect("write fake separated mp3");
+            Ok(SeparatedAudio {
+                duration_secs: 180,
+                size_bytes: 7200000,
+            })
+        })
+    }
+}
 
 struct FakeDownloader {
     metadata_title: String,
@@ -90,9 +126,9 @@ fn setup_test_state() -> (AppState, TempDir) {
 }
 
 #[test]
-fn test_tool_schemas_strictly_seven_tools_with_exact_signatures() {
+fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     let tools = get_tool_definitions();
-    assert_eq!(tools.len(), 7, "Must expose exactly 7 tools");
+    assert_eq!(tools.len(), 8, "Must expose exactly 8 tools");
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"create_presentation"));
@@ -102,6 +138,7 @@ fn test_tool_schemas_strictly_seven_tools_with_exact_signatures() {
     assert!(names.contains(&"add_note"));
     assert!(names.contains(&"add_track_from_staged"));
     assert!(names.contains(&"download_youtube_track"));
+    assert!(names.contains(&"separate_vocals"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -142,6 +179,19 @@ fn test_tool_schemas_strictly_seven_tools_with_exact_signatures() {
                 let props = params["properties"].as_object().unwrap();
                 assert!(props.contains_key("url"));
                 assert!(props.contains_key("title"));
+            }
+            "separate_vocals" => {
+                let required = params["required"].as_array().unwrap();
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("mode")));
+                let props = params["properties"].as_object().unwrap();
+                assert!(props.contains_key("mode"));
+                assert!(props.contains_key("staged_audio_id"));
+                assert!(props.contains_key("track_id"));
+                assert!(props.contains_key("youtube_url"));
+                let mode_enum = props["mode"]["enum"].as_array().unwrap();
+                assert!(mode_enum.contains(&json!("chorus")));
+                assert!(mode_enum.contains(&json!("instrumental")));
             }
             _ => panic!("Unexpected tool name: {}", tool.name),
         }
@@ -696,4 +746,191 @@ async fn test_dispatcher_add_track_from_staged_rejects_unauthorized_staged_audio
     let res = dispatcher.dispatch(&bad_staged_call, &mut context).await;
     assert_eq!(res["error"], "staged_audio_not_found");
     assert!(context.actions_taken.is_empty());
+}
+
+#[tokio::test]
+async fn test_dispatcher_separate_vocals_rejected_without_confirmed_destination() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+    // Context with NO confirmed destination (None)
+    let mut context = TurnToolContext::default();
+
+    let call = ToolCall {
+        id: "call_sep_no_dest".to_string(),
+        name: "separate_vocals".to_string(),
+        arguments: json!({
+            "mode": "chorus",
+            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        })
+        .to_string(),
+    };
+
+    let res = dispatcher.dispatch(&call, &mut context).await;
+    assert_eq!(res["error"], "destination_required");
+    assert!(context.actions_taken.is_empty());
+}
+
+#[tokio::test]
+async fn test_dispatcher_separate_vocals_rejects_invalid_mode() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Destino").unwrap();
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::new(Some(pres.id.clone()), None);
+
+    let call = ToolCall {
+        id: "call_sep_bad_mode".to_string(),
+        name: "separate_vocals".to_string(),
+        arguments: json!({
+            "mode": "acapella",
+            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        })
+        .to_string(),
+    };
+
+    let res = dispatcher.dispatch(&call, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+    assert!(res["message"].as_str().unwrap().contains("chorus"));
+    assert!(context.actions_taken.is_empty());
+}
+
+#[tokio::test]
+async fn test_dispatcher_separate_vocals_rejects_unauthorized_track_id() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Destino").unwrap();
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::new(Some(pres.id.clone()), None);
+
+    let call = ToolCall {
+        id: "call_sep_unauth_track".to_string(),
+        name: "separate_vocals".to_string(),
+        arguments: json!({
+            "mode": "chorus",
+            "track_id": "track-unauthorized-999"
+        })
+        .to_string(),
+    };
+
+    let res = dispatcher.dispatch(&call, &mut context).await;
+    assert_eq!(res["error"], "unauthorized_track_id");
+    assert!(context.actions_taken.is_empty());
+}
+
+#[tokio::test]
+async fn test_dispatcher_separate_vocals_success_and_chained_with_add_track_from_staged() {
+    let (state, _tmp) = setup_test_state();
+    let fake_separator = Arc::new(FakeVocalSeparator::new());
+    let state = state.with_vocal_separator(fake_separator);
+
+    let pres = state.create_presentation.execute("Show En Vivo").unwrap();
+
+    // Stage a source audio in registry
+    let staged_source_part = state.storage.staging_dir().join("src123.part");
+    std::fs::write(&staged_source_part, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state
+        .staged_audio_registry
+        .register(
+            "stage-src-1".to_string(),
+            staged_source_part,
+            "Canción Fuente".to_string(),
+            180,
+            5000000,
+        );
+
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+    let mut context = TurnToolContext::with_staged_audio_id(
+        Some(pres.id.clone()),
+        None,
+        Some(reg_entry.staged_audio_id.clone()),
+    );
+
+    // 1. Dispatch separate_vocals
+    let sep_call = ToolCall {
+        id: "call_sep_1".to_string(),
+        name: "separate_vocals".to_string(),
+        arguments: json!({
+            "mode": "chorus",
+            "staged_audio_id": reg_entry.staged_audio_id
+        })
+        .to_string(),
+    };
+
+    let sep_res = dispatcher.dispatch(&sep_call, &mut context).await;
+    assert!(sep_res.get("staged_audio_id").is_some());
+    let new_staged_id = sep_res["staged_audio_id"].as_str().unwrap();
+    assert_eq!(context.actions_taken.len(), 1);
+    assert_eq!(context.actions_taken[0].tool, "separate_vocals");
+    assert_eq!(context.staged_audio_id.as_deref(), Some(new_staged_id));
+
+    // 2. Chain add_track_from_staged using the separated staged_audio_id
+    let add_call = ToolCall {
+        id: "call_add_chained".to_string(),
+        name: "add_track_from_staged".to_string(),
+        arguments: json!({
+            "presentation_id": pres.id,
+            "title": "Canción Fuente (Coros)"
+        })
+        .to_string(),
+    };
+
+    let add_res = dispatcher.dispatch(&add_call, &mut context).await;
+    assert_eq!(add_res["kind"], "track");
+    assert_eq!(context.actions_taken.len(), 2);
+    assert_eq!(context.actions_taken[1].tool, "add_track_from_staged");
+    assert_eq!(context.staged_audio_id, None);
+}
+
+#[tokio::test]
+async fn test_dispatcher_separate_vocals_deduplication_ignored() {
+    let (state, _tmp) = setup_test_state();
+    let fake_separator = Arc::new(FakeVocalSeparator::new());
+    let state = state.with_vocal_separator(fake_separator);
+    let pres = state.create_presentation.execute("Show Dedup").unwrap();
+
+    let staged_part = state.storage.staging_dir().join("dedup.part");
+    std::fs::write(&staged_part, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state
+        .staged_audio_registry
+        .register(
+            "stage-dedup-1".to_string(),
+            staged_part,
+            "Tema Dedup".to_string(),
+            120,
+            3000000,
+        );
+
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::with_staged_audio_id(
+        Some(pres.id.clone()),
+        None,
+        Some(reg_entry.staged_audio_id.clone()),
+    );
+
+    let call = ToolCall {
+        id: "call_sep_d1".to_string(),
+        name: "separate_vocals".to_string(),
+        arguments: json!({
+            "mode": "chorus",
+            "staged_audio_id": reg_entry.staged_audio_id
+        })
+        .to_string(),
+    };
+
+    let res1 = dispatcher.dispatch(&call, &mut context).await;
+    assert!(res1.get("staged_audio_id").is_some());
+    assert_eq!(context.actions_taken.len(), 1);
+
+    // Identical duplicate call
+    let call_dup = ToolCall {
+        id: "call_sep_d2".to_string(),
+        name: "separate_vocals".to_string(),
+        arguments: json!({
+            "mode": "chorus",
+            "staged_audio_id": reg_entry.staged_audio_id
+        })
+        .to_string(),
+    };
+
+    let res2 = dispatcher.dispatch(&call_dup, &mut context).await;
+    assert_eq!(res2["warning"], "duplicate_call_ignored");
+    assert_eq!(context.actions_taken.len(), 1);
 }

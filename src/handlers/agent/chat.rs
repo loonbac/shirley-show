@@ -13,10 +13,10 @@ pub async fn chat(
     State(state): State<AppState>,
     request: Request,
 ) -> Result<(StatusCode, Json<AgentChatOutput>), AppError> {
-    let total_timeout = state.agent_chat.limits.request_timeout;
-    let deadline = tokio::time::Instant::now() + total_timeout;
+    let start_time = tokio::time::Instant::now();
+    let parse_deadline = start_time + std::time::Duration::from_secs(30);
 
-    let parse_result = tokio::time::timeout_at(deadline, async {
+    let parse_result = tokio::time::timeout_at(parse_deadline, async {
         let content_type = request
             .headers()
             .get(header::CONTENT_TYPE)
@@ -54,13 +54,10 @@ pub async fn chat(
         Ok(Ok(input)) => input,
         Ok(Err(err)) => return Err(err),
         Err(_) => {
-            let secs = total_timeout.as_secs();
             return Ok((
                 StatusCode::OK,
                 Json(AgentChatOutput {
-                    message: format!(
-                        "La solicitud tardó más del límite de tiempo ({secs} s) y fue cancelada."
-                    ),
+                    message: "La solicitud tardó más del límite de tiempo (30 s) y fue cancelada.".to_string(),
                     actions_taken: vec![],
                     active_presentation_id: None,
                     staged_audio_id: None,
@@ -73,6 +70,6 @@ pub async fn chat(
         }
     };
 
-    let output = state.agent_chat.execute_until(input, deadline).await;
+    let output = state.agent_chat.execute_dynamic(input, start_time).await;
     Ok((StatusCode::OK, Json(output)))
 }

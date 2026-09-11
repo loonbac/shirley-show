@@ -17,6 +17,9 @@ use shirley_show::infra::groq::error::ProviderError;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
 use shirley_show::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
 use shirley_show::ports::show_item_reader::ShowItemReader;
+use shirley_show::ports::vocal_separator::{
+    SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
+};
 use shirley_show::ports::youtube_downloader::{
     DownloadedYoutubeAudio, YoutubeDownloadError, YoutubeDownloadTarget, YoutubeDownloader,
 };
@@ -346,6 +349,7 @@ async fn test_agent_chat_iteration_limit_5() {
     let limits = AgentLimits {
         max_iterations: 5,
         request_timeout: Duration::from_secs(10),
+        separation_timeout: Duration::from_secs(600),
     };
     let agent_chat = AgentChat::new(
         Some(Arc::new(InfiniteProvider)),
@@ -381,6 +385,7 @@ async fn test_agent_chat_deadline_timeout() {
     let limits = AgentLimits {
         max_iterations: 5,
         request_timeout: Duration::from_millis(50),
+        separation_timeout: Duration::from_secs(600),
     };
     let agent_chat = AgentChat::new(Some(provider), dispatcher, limits, "model".to_string());
 
@@ -1012,4 +1017,207 @@ async fn test_agent_chat_download_error_timeout_returns_friendly_message() {
     assert!(!output.message.contains("kill-and-wait"));
     assert!(!output.message.contains("SIGKILL"));
     assert!(!output.message.contains("/staging/"));
+}
+
+#[derive(Clone)]
+struct FakeVocalSeparator {
+    delay: Option<Duration>,
+}
+
+impl FakeVocalSeparator {
+    fn new() -> Self {
+        Self { delay: None }
+    }
+    fn with_delay(delay: Duration) -> Self {
+        Self { delay: Some(delay) }
+    }
+}
+
+impl VocalSeparator for FakeVocalSeparator {
+    fn separate(
+        &self,
+        request: VocalSeparationRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>> {
+        let delay = self.delay;
+        let out_path = request.output_path;
+        Box::pin(async move {
+            if let Some(d) = delay {
+                tokio::time::sleep(d).await;
+            }
+            std::fs::write(&out_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
+                .expect("write fake separated mp3");
+            Ok(SeparatedAudio {
+                duration_secs: 180,
+                size_bytes: 7200000,
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_agent_chat_separation_flow_asks_destination_before_gpu() {
+    let (state, _tmp) = setup_test_state();
+    let state = state.with_vocal_separator(Arc::new(FakeVocalSeparator::new()));
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    // Turn where destination is not active, Shirley asks for mode/destination without calling separate_vocals
+    let provider = Arc::new(StubChatProvider::new(vec![Ok(CompletionResponse {
+        content: Some("¿Quieres conservar coros o dejarla instrumental, y en qué presentación la guardo?".to_string()),
+        tool_calls: vec![],
+    })]));
+
+    let agent_chat = AgentChat::new(
+        Some(provider),
+        dispatcher,
+        AgentLimits::default(),
+        "model".to_string(),
+    );
+
+    let input = AgentChatInput {
+        message: "Separa coros para el show".to_string(),
+        history: vec![],
+        presentation_id: None,
+        staged_audio_id: None,
+        staged_audio: None,
+        staged_filename: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+    assert_eq!(output.actions_taken.len(), 0);
+    assert!(output.message.contains("presentación"));
+    assert_eq!(output.staged_audio_id, None);
+}
+
+#[tokio::test]
+async fn test_agent_chat_separation_chains_when_destination_active() {
+    let (state, _tmp) = setup_test_state();
+    let state = state.with_vocal_separator(Arc::new(FakeVocalSeparator::new()));
+    let pres = state.create_presentation.execute("Show Activo").unwrap();
+
+    // Stage a source audio file
+    let staged_src = state.storage.staging_dir().join("source.part");
+    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state.staged_audio_registry.register("stage-demo-1".to_string(), staged_src, "Canción Demo".to_string(), 180, 7200000);
+
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+
+    // Provider responds with:
+    // Iteration 1: calls separate_vocals
+    // Iteration 2: calls add_track_from_staged
+    // Iteration 3: final message
+    let provider = Arc::new(StubChatProvider::new(vec![
+        Ok(CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_sep".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "chorus",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        }),
+        Ok(CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_add".to_string(),
+                name: "add_track_from_staged".to_string(),
+                arguments: json!({
+                    "presentation_id": pres.id,
+                    "title": "Canción Demo (Coros)"
+                })
+                .to_string(),
+            }],
+        }),
+        Ok(CompletionResponse {
+            content: Some("Separé los coros y añadí la pista al show.".to_string()),
+            tool_calls: vec![],
+        }),
+    ]));
+
+    let agent_chat = AgentChat::new(
+        Some(provider),
+        dispatcher,
+        AgentLimits::default(),
+        "model".to_string(),
+    );
+
+    let input = AgentChatInput {
+        message: "Separa coros y agrégalo".to_string(),
+        history: vec![],
+        presentation_id: Some(pres.id.clone()),
+        staged_audio_id: Some(reg_entry.staged_audio_id),
+        staged_audio: None,
+        staged_filename: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+    assert_eq!(output.actions_taken.len(), 2);
+    assert_eq!(output.actions_taken[0].tool, "separate_vocals");
+    assert_eq!(output.actions_taken[1].tool, "add_track_from_staged");
+    // Audio was consumed into canonical track, staged_audio_id is None
+    assert_eq!(output.staged_audio_id, None);
+    assert!(output.message.contains("añadida") || output.message.contains("Separación vocal"));
+}
+
+#[tokio::test]
+async fn test_agent_chat_separation_extended_deadline_600s() {
+    let (state, _tmp) = setup_test_state();
+    // Separator that finishes in 200ms
+    let state = state.with_vocal_separator(Arc::new(FakeVocalSeparator::with_delay(Duration::from_millis(200))));
+    let pres = state.create_presentation.execute("Show Largo").unwrap();
+
+    let staged_src = state.storage.staging_dir().join("slow_source.part");
+    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state.staged_audio_registry.register("stage-long-1".to_string(), staged_src, "Canción Larga".to_string(), 180, 7200000);
+
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let provider = Arc::new(StubChatProvider::new(vec![
+        Ok(CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_sep_slow".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "chorus",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        }),
+        Ok(CompletionResponse {
+            content: Some("Separación completada con éxito.".to_string()),
+            tool_calls: vec![],
+        }),
+    ]));
+
+    // Agent limits with separation timeout 600s
+    let limits = AgentLimits {
+        max_iterations: 5,
+        request_timeout: Duration::from_secs(600),
+        separation_timeout: Duration::from_secs(600),
+    };
+
+    let agent_chat = AgentChat::new(
+        Some(provider),
+        dispatcher,
+        limits,
+        "model".to_string(),
+    );
+
+    let input = AgentChatInput {
+        message: "Separa coros de esta canción".to_string(),
+        history: vec![],
+        presentation_id: Some(pres.id),
+        staged_audio_id: Some(reg_entry.staged_audio_id),
+        staged_audio: None,
+        staged_filename: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+    assert_eq!(output.actions_taken.len(), 1);
+    assert_eq!(output.actions_taken[0].tool, "separate_vocals");
+    assert!(output.notice.is_none());
 }

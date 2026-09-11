@@ -1,5 +1,6 @@
 import { containsYouTubeUrl } from '../../utils/validation/contains-youtube-url.js';
 import { isStagedAudioUnrelated } from '../../utils/validation/is-staged-audio-unrelated.js';
+import { isVocalSeparationIntent } from '../../utils/validation/is-vocal-separation-intent.js';
 
 /**
  * Creates the in-memory chat state manager for Shirley Show AI Agent.
@@ -13,6 +14,7 @@ export function createChatState(initialState = {}) {
     isOpen: false,
     pending: false,
     pendingLabel: 'Ressy está pensando...',
+    vocalSeparationPending: false,
     draft: '',
     attachment: null,
     stagedAudioId: null,
@@ -106,9 +108,18 @@ export function createChatState(initialState = {}) {
       activeStagedAudioId = null;
     }
 
+    let isVocalIntent = isVocalSeparationIntent(message);
+    if (!isVocalIntent && state.vocalSeparationPending) {
+      if (!isStagedAudioUnrelated(message, attachment)) {
+        isVocalIntent = true;
+      }
+    }
+
     let turnPendingLabel = pendingLabel;
     if (!turnPendingLabel) {
-      if (containsYouTubeUrl(message)) {
+      if (isVocalIntent) {
+        turnPendingLabel = 'Ressy está separando voces… (tarda unos minutos)';
+      } else if (containsYouTubeUrl(message)) {
         turnPendingLabel = 'Ressy está descargando el audio…';
       } else {
         turnPendingLabel = 'Ressy está pensando...';
@@ -127,6 +138,7 @@ export function createChatState(initialState = {}) {
       ...state,
       pending: true,
       pendingLabel: turnPendingLabel,
+      vocalSeparationPending: isVocalIntent,
       stagedAudioId: activeStagedAudioId,
       notice: null,
       messages: [...state.messages, userMessage],
@@ -192,6 +204,7 @@ export function createChatState(initialState = {}) {
       ...state,
       pending: false,
       pendingLabel: 'Ressy está pensando...',
+      vocalSeparationPending: false,
       stagedAudioId: nextStagedAudioId,
       draft: isProviderNotice ? state.draft : '',
       attachment: hasConsumedTrack ? null : state.attachment,
@@ -218,6 +231,7 @@ export function createChatState(initialState = {}) {
       ...state,
       pending: false,
       pendingLabel: 'Ressy está pensando...',
+      vocalSeparationPending: false,
       notice,
       // Draft and attachment are strictly preserved
     };
@@ -231,8 +245,8 @@ export function createChatState(initialState = {}) {
       currentAbortController = null;
     }
     currentGenerationId += 1;
-    if (state.pending) {
-      state = { ...state, pending: false, pendingLabel: 'Ressy está pensando...' };
+    if (state.pending || state.vocalSeparationPending) {
+      state = { ...state, pending: false, pendingLabel: 'Ressy está pensando...', vocalSeparationPending: false };
       notify();
     }
   }

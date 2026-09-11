@@ -11,7 +11,14 @@ use crate::ports::vocal_separator::VocalSeparationError;
 /// 4. Exactly one non-vocal stem (not containing `vocal` case-insensitively) must be present.
 /// 5. Missing, extra, duplicate, or ambiguous files cause immediate rejection.
 pub fn resolve_stem(dir: &Path, model_token: &str) -> Result<PathBuf, VocalSeparationError> {
-    resolve_stem_with_tokens(dir, &[model_token])
+    let tokens: &[&str] = match model_token {
+        "gabox-invertido" => &["gabox-invertido", "gabox"],
+        "frazer-becruily" => &["frazer-becruily", "becruily"],
+        "anvuew" => &["anvuew"],
+        "polarformer" => &["polarformer"],
+        other => &[other],
+    };
+    resolve_stem_with_tokens(dir, tokens)
 }
 
 pub fn resolve_stem_with_tokens(
@@ -43,12 +50,12 @@ pub fn resolve_stem_with_tokens(
             return Err(VocalSeparationError::InvalidSeparatorOutput);
         }
 
-        // Must be a .wav file
+        // Must be a .wav or .flac file
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_ascii_lowercase());
-        if ext.as_deref() != Some("wav") {
+        if ext.as_deref() != Some("wav") && ext.as_deref() != Some("flac") {
             return Err(VocalSeparationError::InvalidSeparatorOutput);
         }
 

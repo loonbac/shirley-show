@@ -363,4 +363,51 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   console.log('✓ 8. 3s timer typing indicator specializes only for YouTube URLs');
 }
 
+// 9. Vocal separation intent displays specialized typing indicator and restores composer
+{
+  const state = createChatState();
+  let resolveFetch;
+  globalThis.fetch = () =>
+    new Promise((res) => {
+      resolveFetch = () =>
+        res({
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          json: async () => ({
+            message: 'Separación terminada.',
+            actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+            staged_audio_id: 'staged-int-vsep-999',
+          }),
+        });
+    });
+
+  const ctrl = createAgentChatController({ chatState: state });
+  const pendingPromise = ctrl.sendAndOpen('Separa los coros de esta pista');
+
+  const typingEl = ctrl.panelEl.querySelector('.agent-typing-indicator');
+  assert.ok(typingEl !== null, 'Typing indicator must be present while pending');
+  assert.equal(typingEl.getAttribute('aria-live'), 'polite', 'Must have aria-live=polite');
+  assert.ok(
+    typingEl.getAttribute('aria-label').includes('separando voces…'),
+    `aria-label must include 'separando voces…', got: ${typingEl.getAttribute('aria-label')}`
+  );
+  assert.ok(
+    typingEl.textContent.includes('separando voces…'),
+    `textContent must include 'separando voces…', got: ${typingEl.textContent}`
+  );
+
+  // After resolution: typing indicator removed, composer enabled
+  resolveFetch();
+  await pendingPromise;
+
+  const postTypingEl = ctrl.panelEl.querySelector('.agent-typing-indicator');
+  assert.equal(postTypingEl, null, 'Typing indicator must be removed after resolution');
+  const textarea = ctrl.panelEl.querySelector('.agent-composer-textarea');
+  assert.equal(textarea.hasAttribute('disabled'), false, 'Composer must be re-enabled');
+
+  ctrl.destroy();
+  console.log('✓ 9. Vocal separation intent displays specialized typing indicator and restores composer');
+}
+
 console.log('All Agent Chat Route and Composition integration tests passed!');

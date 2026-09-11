@@ -16,6 +16,10 @@ use shirley_show::domain::agent_tool::ToolCall;
 use shirley_show::infra::filesystem::LocalAudioStorage;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
 use shirley_show::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
+use shirley_show::ports::show_item_reader::ShowItemReader;
+use shirley_show::ports::vocal_separator::{
+    SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
+};
 use shirley_show::router::create_router;
 use shirley_show::state::AppState;
 use shirley_show::use_cases::agent_chat::AgentLimits;
@@ -739,6 +743,7 @@ async fn test_chat_api_unified_deadline_preserves_actions_and_returns_200_on_tim
     let limits = AgentLimits {
         max_iterations: 5,
         request_timeout: Duration::from_millis(150),
+        separation_timeout: Duration::from_millis(150),
     };
     let state =
         state.with_agent_provider(Some(provider), limits, "openai/gpt-oss-120b".to_string());
@@ -788,4 +793,431 @@ async fn test_chat_api_unified_deadline_preserves_actions_and_returns_200_on_tim
         !message.contains("(30 s)"),
         "Message must not hardcode (30 s)"
     );
+}
+
+#[derive(Clone)]
+struct FakeVocalSeparator {
+    fail_with_error: Arc<std::sync::Mutex<Option<VocalSeparationError>>>,
+    execution_count: Arc<std::sync::atomic::AtomicUsize>,
+    delay: Option<Duration>,
+}
+
+impl FakeVocalSeparator {
+    fn new() -> Self {
+        Self {
+            fail_with_error: Arc::new(std::sync::Mutex::new(None)),
+            execution_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            delay: None,
+        }
+    }
+
+    fn failing(err: VocalSeparationError) -> Self {
+        Self {
+            fail_with_error: Arc::new(std::sync::Mutex::new(Some(err))),
+            execution_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            delay: None,
+        }
+    }
+
+    fn with_delay(delay: Duration) -> Self {
+        Self {
+            fail_with_error: Arc::new(std::sync::Mutex::new(None)),
+            execution_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            delay: Some(delay),
+        }
+    }
+}
+
+impl VocalSeparator for FakeVocalSeparator {
+    fn separate(
+        &self,
+        request: VocalSeparationRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>,
+    > {
+        self.execution_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let err_opt = self.fail_with_error.lock().unwrap().clone();
+        let delay = self.delay;
+        let out_path = request.output_path;
+        Box::pin(async move {
+            if let Some(d) = delay {
+                tokio::time::sleep(d).await;
+            }
+            if let Some(err) = err_opt {
+                return Err(err);
+            }
+            std::fs::write(&out_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
+                .expect("write fake mp3 part");
+            Ok(SeparatedAudio {
+                duration_secs: 180,
+                size_bytes: 7200000,
+            })
+        })
+    }
+}
+
+#[derive(Clone)]
+struct MultiStepMockProvider {
+    responses: Arc<std::sync::Mutex<std::collections::VecDeque<CompletionResponse>>>,
+}
+
+impl MultiStepMockProvider {
+    fn new(responses: Vec<CompletionResponse>) -> Self {
+        Self {
+            responses: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from(
+                responses,
+            ))),
+        }
+    }
+}
+
+impl ChatCompletionProvider for MultiStepMockProvider {
+    fn complete(
+        &self,
+        _request: CompletionRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<CompletionResponse, shirley_show::infra::groq::error::ProviderError>,
+                > + Send,
+        >,
+    > {
+        let next = self
+            .responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| CompletionResponse {
+                content: Some("Final default".to_string()),
+                tool_calls: vec![],
+            });
+        Box::pin(async move { Ok(next) })
+    }
+}
+
+#[tokio::test]
+async fn test_chat_api_separation_single_step_persists_to_active_presentation() {
+    let (_app, state, _tmp) = setup_test_app();
+    let fake_sep = Arc::new(FakeVocalSeparator::new());
+    let state = state.with_vocal_separator(fake_sep.clone());
+    let pres = state
+        .create_presentation
+        .execute("Show Activo API")
+        .unwrap();
+
+    let staged_src = state.storage.staging_dir().join("api_src.part");
+    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-api-src".to_string(),
+        staged_src,
+        "Tema API".to_string(),
+        180,
+        5000000,
+    );
+
+    let provider = Arc::new(MultiStepMockProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_sep_api".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "chorus",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_add_api".to_string(),
+                name: "add_track_from_staged".to_string(),
+                arguments: json!({
+                    "presentation_id": pres.id,
+                    "title": "Tema API (Coros)"
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: Some("Pista separada y añadida al show.".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let state = state.with_agent_provider(
+        Some(provider),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state.clone());
+
+    let payload = json!({
+        "message": "Separa coros y agrégalo al show",
+        "presentation_id": pres.id,
+        "staged_audio_id": reg_entry.staged_audio_id
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    let actions = json["actions_taken"].as_array().unwrap();
+    assert_eq!(actions.len(), 2);
+    assert_eq!(actions[0]["tool"], "separate_vocals");
+    assert_eq!(actions[1]["tool"], "add_track_from_staged");
+    assert!(json["staged_audio_id"].is_null());
+
+    let items = state.item_repo.list_by_presentation(&pres.id).unwrap();
+    assert_eq!(items.len(), 1);
+    match &items[0].payload {
+        shirley_show::domain::show_item::ShowItemPayload::Track(t) => {
+            assert_eq!(t.title, "Tema API (Coros)");
+        }
+        _ => panic!("expected track"),
+    }
+    assert_eq!(fake_sep.execution_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn test_chat_api_separation_polarformer_absent_returns_friendly_error_no_phantom_track() {
+    let (_app, state, _tmp) = setup_test_app();
+    let fake_sep = Arc::new(FakeVocalSeparator::failing(
+        VocalSeparationError::InstrumentalUnavailable,
+    ));
+    let state = state.with_vocal_separator(fake_sep);
+    let pres = state.create_presentation.execute("Show Polar").unwrap();
+
+    let staged_src = state.storage.staging_dir().join("polar_src.part");
+    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-polar-src".to_string(),
+        staged_src,
+        "Tema Polar".to_string(),
+        180,
+        5000000,
+    );
+
+    let provider = Arc::new(MultiStepMockProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_sep_polar".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "instrumental",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: Some(
+                "El modo instrumental no está configurado en este servidor. Puedes optar por la versión con coros o conservar el audio en staging.".to_string(),
+            ),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let state = state.with_agent_provider(
+        Some(provider),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state.clone());
+
+    let payload = json!({
+        "message": "Separa instrumental",
+        "presentation_id": pres.id,
+        "staged_audio_id": reg_entry.staged_audio_id
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    let actions = json["actions_taken"].as_array().unwrap();
+    assert_eq!(actions.len(), 0, "No actions should be recorded on failure");
+
+    let items = state.item_repo.list_by_presentation(&pres.id).unwrap();
+    assert_eq!(items.len(), 0, "Zero phantom tracks persisted");
+}
+
+#[tokio::test]
+async fn test_chat_api_separation_duplicate_call_ignored_single_gpu_execution() {
+    let (_app, state, _tmp) = setup_test_app();
+    let fake_sep = Arc::new(FakeVocalSeparator::new());
+    let state = state.with_vocal_separator(fake_sep.clone());
+    let pres = state.create_presentation.execute("Show Dedup API").unwrap();
+
+    let staged_src = state.storage.staging_dir().join("dedup_api.part");
+    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-dedup-api".to_string(),
+        staged_src,
+        "Tema Dedup API".to_string(),
+        180,
+        5000000,
+    );
+
+    let provider = Arc::new(MultiStepMockProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![
+                ToolCall {
+                    id: "call_d1".to_string(),
+                    name: "separate_vocals".to_string(),
+                    arguments: json!({
+                        "mode": "chorus",
+                        "staged_audio_id": reg_entry.staged_audio_id
+                    })
+                    .to_string(),
+                },
+                ToolCall {
+                    id: "call_d2".to_string(),
+                    name: "separate_vocals".to_string(),
+                    arguments: json!({
+                        "mode": "chorus",
+                        "staged_audio_id": reg_entry.staged_audio_id
+                    })
+                    .to_string(),
+                },
+            ],
+        },
+        CompletionResponse {
+            content: Some("Listo.".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let state = state.with_agent_provider(
+        Some(provider),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state);
+
+    let payload = json!({
+        "message": "Separa coros dos veces",
+        "presentation_id": pres.id,
+        "staged_audio_id": reg_entry.staged_audio_id
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(fake_sep.execution_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn test_chat_api_separation_timeout_preserves_prior_actions_and_releases_gpu() {
+    let (_app, state, _tmp) = setup_test_app();
+    let fake_sep = Arc::new(FakeVocalSeparator::with_delay(Duration::from_millis(500)));
+    let state = state.with_vocal_separator(fake_sep);
+    let pres = state.create_presentation.execute("Show Timeout API").unwrap();
+
+    let staged_src = state.storage.staging_dir().join("timeout_api.part");
+    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-timeout-api".to_string(),
+        staged_src,
+        "Tema Timeout".to_string(),
+        180,
+        5000000,
+    );
+
+    let provider = Arc::new(MultiStepMockProvider::new(vec![
+        // Step 1: Add a note (commits action)
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_note".to_string(),
+                name: "add_note".to_string(),
+                arguments: json!({
+                    "presentation_id": pres.id,
+                    "text": "Nota antes de separar"
+                })
+                .to_string(),
+            }],
+        },
+        // Step 2: separate_vocals takes 500ms
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_sep_timeout".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "chorus",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        },
+    ]));
+
+    // Limit timeout to 150ms: note succeeds, separation times out
+    let limits = AgentLimits {
+        max_iterations: 5,
+        request_timeout: Duration::from_millis(150),
+        separation_timeout: Duration::from_millis(150),
+    };
+
+    let state = state.with_agent_provider(
+        Some(provider),
+        limits,
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state.clone());
+
+    let payload = json!({
+        "message": "Agrega nota y separa coros",
+        "presentation_id": pres.id,
+        "staged_audio_id": reg_entry.staged_audio_id
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(json["notice"]["code"], "agent_timeout");
+    let actions = json["actions_taken"].as_array().unwrap();
+    assert_eq!(actions.len(), 1, "Prior committed note action must be preserved");
+    assert_eq!(actions[0]["tool"], "add_note");
+    // GPU permit must be available (released)
+    assert_eq!(state.gpu_semaphore.available_permits(), 1);
 }

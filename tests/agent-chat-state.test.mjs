@@ -26,6 +26,16 @@ const { containsYouTubeUrl } = await import(pathToFileURL(ytUrlModulePath).href)
 const unrelatedModulePath = resolve(process.cwd(), 'frontend/js/utils/validation/is-staged-audio-unrelated.js');
 const { isStagedAudioUnrelated } = await import(pathToFileURL(unrelatedModulePath).href);
 
+const vocalIntentModulePath = resolve(process.cwd(), 'frontend/js/utils/validation/is-vocal-separation-intent.js');
+let isVocalSeparationIntent;
+try {
+  const mod = await import(pathToFileURL(vocalIntentModulePath).href);
+  isVocalSeparationIntent = mod.isVocalSeparationIntent;
+} catch (e) {
+  // Expected to fail in RED phase before utility exists
+  isVocalSeparationIntent = () => { throw new Error("MODULE_MISSING: is-vocal-separation-intent.js does not exist yet"); };
+}
+
 console.log('Running Agent Chat State and API Client Unit Tests...');
 
 // 1. Format bytes utility
@@ -456,6 +466,82 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   assert.equal(lastFetchOpts.body.get('staged_audio_id'), 'staged-yt-test-multipart');
 
   console.log('✓ 13. sendAgentChatMessage propagates staged_audio_id in JSON and FormData');
+}
+
+// 14. isVocalSeparationIntent pure utility
+{
+  assert.equal(isVocalSeparationIntent('Separa las voces de esta pista'), true);
+  assert.equal(isVocalSeparationIntent('Quiero separar coros para el show de mañana'), true);
+  assert.equal(isVocalSeparationIntent('Deja la pista instrumental'), true);
+  assert.equal(isVocalSeparationIntent('Haz una versión karaoke de la canción'), true);
+  assert.equal(isVocalSeparationIntent('Separa coros y agrégalo al show'), true);
+  assert.equal(isVocalSeparationIntent('quitar la voz principal'), true);
+
+  // Negative cases
+  assert.equal(isVocalSeparationIntent('Hola Ressy, ¿cómo estás?'), false);
+  assert.equal(isVocalSeparationIntent('Crea una nueva presentación para el viernes'), false);
+  assert.equal(isVocalSeparationIntent('Agrega una nota Recordar el solo'), false);
+  assert.equal(isVocalSeparationIntent('Descarga https://www.youtube.com/watch?v=dQw4w9WgXcQ'), false);
+  assert.equal(isVocalSeparationIntent(''), false);
+  assert.equal(isVocalSeparationIntent(null), false);
+  console.log('✓ 14. isVocalSeparationIntent detects vocal separation queries accurately');
+}
+
+// 15. Vocal separation pending state, typing indicator label, and lifecycle
+{
+  const state = createChatState();
+  assert.equal(state.get().vocalSeparationPending, false);
+
+  // 15a. beginTurn with vocal separation intent sets pendingLabel and vocalSeparationPending
+  const turn1 = state.beginTurn({ message: 'Separa coros de esta canción' });
+  assert.equal(state.get().pending, true);
+  assert.equal(state.get().vocalSeparationPending, true);
+  assert.ok(
+    state.get().pendingLabel.includes('separando voces…'),
+    `pendingLabel must include 'separando voces…', got: ${state.get().pendingLabel}`
+  );
+  assert.equal(state.get().pendingLabel, 'Ressy está separando voces… (tarda unos minutos)');
+
+  // 15b. Staged audio ID returned from separation response is preserved in ephemeral memory
+  state.resolveTurn({
+    generationId: turn1.generationId,
+    response: {
+      message: 'Separación terminada. ¿A qué show la agrego?',
+      actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+      staged_audio_id: 'staged-vsep-777',
+    },
+  });
+
+  assert.equal(state.get().pending, false);
+  assert.equal(state.get().vocalSeparationPending, false);
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+  assert.equal(state.get().stagedAudioId, 'staged-vsep-777');
+  assert.equal(typeof globalThis.localStorage, 'undefined', 'Never touch localStorage');
+
+  // 15c. Turn that adds track clears stagedAudioId
+  const turn2 = state.beginTurn({ message: 'Agrégala al show Peña' });
+  state.resolveTurn({
+    generationId: turn2.generationId,
+    response: {
+      message: 'Pista agregada.',
+      actions_taken: [{ tool: 'add_track_from_staged', status: 'success' }],
+      staged_audio_id: null,
+    },
+  });
+  assert.equal(state.get().stagedAudioId, null);
+
+  // 15d. Error or cancellation cleans up vocalSeparationPending and pendingLabel
+  const turn3 = state.beginTurn({ message: 'Separa coros' });
+  assert.equal(state.get().vocalSeparationPending, true);
+  state.failTurn({
+    generationId: turn3.generationId,
+    error: { code: 'agent_timeout', message: 'Timeout de separación' },
+  });
+  assert.equal(state.get().pending, false);
+  assert.equal(state.get().vocalSeparationPending, false);
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  console.log('✓ 15. Vocal separation state lifecycle and typing indicator label');
 }
 
 console.log('All Agent Chat State and API Client unit tests passed!');
