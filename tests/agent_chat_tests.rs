@@ -520,6 +520,10 @@ fn test_system_prompt_never_assumes_intent_and_never_fetches_lyrics() {
         SHIRLEY_SYSTEM_PROMPT.contains("NO ejecutes nada y pregúntale"),
         "el prompt debe exigir título y presentación antes de agregar"
     );
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("estaré aquí para cuando me necesites"),
+        "el prompt debe aceptar el 'mejor ya no' con calidez y sin insistir"
+    );
 }
 
 #[tokio::test]
