@@ -4,6 +4,7 @@ use uuid::Uuid;
 use crate::domain::audio_format::AudioFormat;
 use crate::error::AppError;
 use crate::infra::filesystem::generated_audio_key::GeneratedAudioKey;
+use crate::infra::filesystem::staged_promotion_guard::StagedPromotionGuard;
 
 #[derive(Debug, Clone)]
 pub struct LocalAudioStorage {
@@ -42,11 +43,11 @@ impl LocalAudioStorage {
         Ok((stage_id, path))
     }
 
-    pub fn promote_staged_file(
+    pub fn promote_staged_file_guarded(
         &self,
         stage_id: &str,
         format: AudioFormat,
-    ) -> Result<GeneratedAudioKey, AppError> {
+    ) -> Result<(GeneratedAudioKey, StagedPromotionGuard), AppError> {
         let stage_path = self.staging_dir.join(format!("{stage_id}.part"));
         if !stage_path.exists() {
             return Err(AppError::NotFound {
@@ -61,6 +62,17 @@ impl LocalAudioStorage {
         std::fs::rename(&stage_path, &dest_path)
             .map_err(|e| AppError::Internal(format!("Failed to promote staged audio file: {e}")))?;
 
+        let guard = StagedPromotionGuard::new(stage_path, dest_path);
+        Ok((key, guard))
+    }
+
+    pub fn promote_staged_file(
+        &self,
+        stage_id: &str,
+        format: AudioFormat,
+    ) -> Result<GeneratedAudioKey, AppError> {
+        let (key, mut guard) = self.promote_staged_file_guarded(stage_id, format)?;
+        guard.defuse();
         Ok(key)
     }
 

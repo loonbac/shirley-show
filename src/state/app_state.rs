@@ -9,13 +9,17 @@ use crate::infra::sqlite::connect::DbPool;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
+use crate::infra::youtube::{ProcessYoutubeDownloader, ProcessYoutubeDownloaderConfig};
 use crate::ports::chat_completion_provider::ChatCompletionProvider;
+use crate::ports::youtube_downloader::YoutubeDownloader;
+use crate::state::staged_audio_registry::StagedAudioRegistry;
 use crate::use_cases::add_lyrics::AddLyrics;
 use crate::use_cases::add_note::AddNote;
 use crate::use_cases::agent_chat::{AgentChat, AgentLimits};
 use crate::use_cases::create_presentation::CreatePresentation;
 use crate::use_cases::delete_item::DeleteItem;
 use crate::use_cases::delete_presentation::DeletePresentation;
+use crate::use_cases::download_youtube_audio::DownloadYouTubeAudio;
 use crate::use_cases::get_presentation::GetPresentation;
 use crate::use_cases::list_presentations::ListPresentations;
 use crate::use_cases::open_track_audio::OpenTrackAudio;
@@ -50,6 +54,9 @@ pub struct AppState {
     pub update_show_item: Arc<UpdateShowItem<SqliteShowItemRepository, SqliteShowItemRepository>>,
     pub delete_item: Arc<DeleteItem<SqliteShowItemRepository, SqliteCleanupRepository>>,
     pub open_track_audio: Arc<OpenTrackAudio<SqliteShowItemRepository>>,
+    pub staged_audio_registry: Arc<StagedAudioRegistry>,
+    pub youtube_downloader: Arc<dyn YoutubeDownloader>,
+    pub download_youtube_audio: Arc<DownloadYouTubeAudio>,
     pub agent_runtime: AgentRuntime,
     pub agent_chat: Arc<AgentChat>,
 }
@@ -63,6 +70,19 @@ impl AppState {
     }
 
     pub fn new_with_items(pool: DbPool, storage: Arc<LocalAudioStorage>) -> Self {
+        let staged_audio_registry = Arc::new(StagedAudioRegistry::new());
+        let youtube_downloader: Arc<dyn YoutubeDownloader> = Arc::new(ProcessYoutubeDownloader::new(
+            ProcessYoutubeDownloaderConfig::default(),
+        ));
+        Self::new_with_all_components(pool, storage, staged_audio_registry, youtube_downloader)
+    }
+
+    pub fn new_with_all_components(
+        pool: DbPool,
+        storage: Arc<LocalAudioStorage>,
+        staged_audio_registry: Arc<StagedAudioRegistry>,
+        youtube_downloader: Arc<dyn YoutubeDownloader>,
+    ) -> Self {
         let pres_repo = Arc::new(SqlitePresentationRepository::new(pool.clone()));
         let summary_repo = Arc::new(PresentationSummaryRepository::new(pool.clone()));
         let item_repo = Arc::new(SqliteShowItemRepository::new(pool.clone()));
@@ -84,6 +104,11 @@ impl AppState {
             cleanup_repo.clone(),
         ));
         let open_track_audio = Arc::new(OpenTrackAudio::new(item_repo.clone(), storage.clone()));
+        let download_youtube_audio = Arc::new(DownloadYouTubeAudio::new(
+            youtube_downloader.clone(),
+            storage.clone(),
+            staged_audio_registry.clone(),
+        ));
 
         let dispatcher = AgentToolDispatcher::from_components(
             create_presentation.clone(),
@@ -127,9 +152,22 @@ impl AppState {
             update_show_item,
             delete_item,
             open_track_audio,
+            staged_audio_registry,
+            youtube_downloader,
+            download_youtube_audio,
             agent_runtime,
             agent_chat,
         }
+    }
+
+    pub fn with_youtube_downloader(mut self, downloader: Arc<dyn YoutubeDownloader>) -> Self {
+        self.youtube_downloader = downloader.clone();
+        self.download_youtube_audio = Arc::new(DownloadYouTubeAudio::new(
+            downloader,
+            self.storage.clone(),
+            self.staged_audio_registry.clone(),
+        ));
+        self
     }
 
     pub fn with_agent_provider(

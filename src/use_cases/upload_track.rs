@@ -24,16 +24,15 @@ impl<W: ShowItemWriter> UploadTrack<W> {
         format: AudioFormat,
         byte_size: i64,
     ) -> Result<ShowItem, AppError> {
-        // 1. Promote staged file to managed files directory
-        let key = self.storage.promote_staged_file(stage_id, format)?;
+        // 1. Promote staged file with reversion guard
+        let (key, mut guard) = self.storage.promote_staged_file_guarded(stage_id, format)?;
 
         // 2. Build track payload
         let payload_result = TrackPayload::new(title, key.as_str(), format.media_type(), byte_size);
         let payload = match payload_result {
             Ok(p) => p,
             Err(e) => {
-                // Compensation: remove promoted file
-                let _ = self.storage.delete_file(key.as_str());
+                // Guard automatically rolls back promoted file to staging path on drop
                 return Err(e);
             }
         };
@@ -43,10 +42,13 @@ impl<W: ShowItemWriter> UploadTrack<W> {
             .writer
             .append(presentation_id, ShowItemPayload::Track(payload))
         {
-            Ok(item) => Ok(item),
+            Ok(item) => {
+                // Defuse guard upon successful database commit
+                guard.defuse();
+                Ok(item)
+            }
             Err(e) => {
-                // Compensation: remove promoted file from disk
-                let _ = self.storage.delete_file(key.as_str());
+                // Guard automatically rolls back promoted file to staging path on drop
                 Err(e)
             }
         }

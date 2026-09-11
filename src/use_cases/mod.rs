@@ -4,6 +4,7 @@ pub mod agent_chat;
 pub mod create_presentation;
 pub mod delete_item;
 pub mod delete_presentation;
+pub mod download_youtube_audio;
 pub mod get_presentation;
 pub mod list_presentations;
 pub mod open_track_audio;
@@ -18,6 +19,9 @@ pub use agent_chat::{AgentChat, AgentChatInput, AgentChatOutput, AgentLimits};
 pub use create_presentation::CreatePresentation;
 pub use delete_item::{DeleteItem, DeleteItemOutput};
 pub use delete_presentation::DeletePresentation;
+pub use download_youtube_audio::{
+    DownloadYouTubeAudio, DownloadYouTubeAudioError, DownloadYouTubeAudioOutput,
+};
 pub use get_presentation::GetPresentation;
 pub use list_presentations::ListPresentations;
 pub use open_track_audio::{OpenTrackAudio, OpenedAudioTrack};

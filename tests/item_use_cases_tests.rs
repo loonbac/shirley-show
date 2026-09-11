@@ -118,16 +118,17 @@ fn test_upload_track_success_and_compensation_on_failure() {
     assert!(err.is_err());
 
     // Staged file must not exist and promoted file must have been purged by compensation!
-    assert!(!stage_path2.exists());
+    assert!(stage_path2.exists());
     let entries = std::fs::read_dir(ctx.storage.files_dir()).unwrap();
     // Only the first valid audio file should exist in files_dir
     let files: Vec<_> = entries.filter_map(|e| e.ok()).collect();
     assert_eq!(files.len(), 1);
 
     // 3. Compensation case: Empty title rejected
-    let (stage_id3, _stage_path3) = ctx.storage.create_staging_file().unwrap();
+    let (stage_id3, stage_path3) = ctx.storage.create_staging_file().unwrap();
     let err3 = upload_track.execute(&pres.id, "   ", &stage_id3, AudioFormat::Mp3, 50);
     assert!(err3.is_err());
+    assert!(stage_path3.exists());
     let entries_after = std::fs::read_dir(ctx.storage.files_dir()).unwrap();
     let files_after: Vec<_> = entries_after.filter_map(|e| e.ok()).collect();
     assert_eq!(
