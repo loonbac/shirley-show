@@ -1,7 +1,5 @@
 import { createElement } from '../utils/dom/create-element.js';
 import { createAppTopbar } from '../components/organisms/app-topbar.js';
-import { createButton } from '../components/atoms/button.js';
-import { createIcon } from '../components/atoms/icon.js';
 import { createPresentationsView } from '../components/views/presentations-view.js';
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
@@ -45,16 +43,9 @@ export function createPresentationsController(deps) {
     }
   }
 
-  const newPresBtn = createButton({
-    text: 'Nueva Presentación',
-    variant: 'primary',
-    icon: createIcon({ name: 'plus', size: 'sm' }),
-    onClick: () => openCreateDialog(),
-  });
-
+  // La acción de crear vive en el welcome-header (una sola vía, sin duplicar en el topbar).
   const topbar = createAppTopbar({
     title: 'Shirley Show',
-    actions: [newPresBtn.el],
   });
 
   const view = createPresentationsView({
