@@ -32,6 +32,7 @@ pub struct AgentChatInput {
     pub message: String,
     pub history: Vec<HistoryMessage>,
     pub presentation_id: Option<String>,
+    pub event_id: Option<String>,
     pub staged_audio_id: Option<String>,
     pub staged_audio: Option<StagedAudioHandle>,
     pub staged_filename: Option<String>,
@@ -42,6 +43,8 @@ pub struct AgentChatOutput {
     pub message: String,
     pub actions_taken: Vec<ToolAction>,
     pub active_presentation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_event_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub staged_audio_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -130,6 +133,7 @@ impl AgentChat {
                     message: "Para hablar conmigo y gestionar tus shows con IA, necesitas configurar la variable de entorno GROQ_API_KEY en el servidor. Todas las funciones manuales siguen operando con normalidad.".to_string(),
                     actions_taken: vec![],
                     active_presentation_id: input.presentation_id,
+                    active_event_id: input.event_id,
                     staged_audio_id: None,
                     notice: Some(AgentNotice {
                         code: "agent_unconfigured".to_string(),
@@ -142,10 +146,12 @@ impl AgentChat {
         let has_staged_audio = input.staged_audio.is_some();
         let staged_filename = input.staged_filename.clone();
         let initial_presentation_id = input.presentation_id.clone();
+        let initial_event_id = input.event_id.clone();
         let user_message = input.message.trim().to_string();
 
         let context_prompt = build_context_system_prompt(
             initial_presentation_id.as_deref(),
+            initial_event_id.as_deref(),
             has_staged_audio,
             staged_filename.as_deref(),
             input.staged_audio_id.as_deref(),
@@ -169,12 +175,14 @@ impl AgentChat {
         let tracker = Arc::new(Mutex::new(CommittedTurnState {
             actions_taken: Vec::new(),
             active_presentation_id: initial_presentation_id.clone(),
+            active_event_id: initial_event_id.clone(),
             staged_audio_id: input.staged_audio_id.clone(),
         }));
         let tracker_for_timeout = tracker.clone();
 
-        let mut turn_context = TurnToolContext::with_full_context(
+        let mut turn_context = TurnToolContext::with_event_context(
             initial_presentation_id,
+            initial_event_id,
             input.staged_audio,
             input.staged_audio_id,
             Some(tracker),
@@ -199,6 +207,7 @@ impl AgentChat {
                     ),
                     actions_taken: committed.actions_taken.clone(),
                     active_presentation_id: committed.active_presentation_id.clone(),
+                    active_event_id: committed.active_event_id.clone(),
                     staged_audio_id: committed.staged_audio_id.clone(),
                     notice: Some(AgentNotice {
                         code: "agent_timeout".to_string(),
@@ -235,6 +244,7 @@ impl AgentChat {
                         message,
                         actions_taken: turn_context.actions_taken,
                         active_presentation_id: turn_context.active_presentation_id,
+                    active_event_id: turn_context.active_event_id.clone(),
                         staged_audio_id: turn_context.staged_audio_id,
                         notice: Some(notice),
                     };
@@ -253,6 +263,7 @@ impl AgentChat {
                         ),
                         actions_taken: committed.actions_taken.clone(),
                         active_presentation_id: committed.active_presentation_id.clone(),
+                    active_event_id: committed.active_event_id.clone(),
                         staged_audio_id: committed.staged_audio_id.clone(),
                         notice: Some(AgentNotice {
                             code: "agent_timeout".to_string(),
@@ -309,6 +320,7 @@ impl AgentChat {
                             ),
                             actions_taken: committed.actions_taken.clone(),
                             active_presentation_id: committed.active_presentation_id.clone(),
+                    active_event_id: committed.active_event_id.clone(),
                             staged_audio_id: committed.staged_audio_id.clone(),
                             notice: Some(AgentNotice {
                                 code: "agent_timeout".to_string(),
@@ -339,6 +351,7 @@ impl AgentChat {
                                 ),
                                 actions_taken: committed.actions_taken.clone(),
                                 active_presentation_id: committed.active_presentation_id.clone(),
+                    active_event_id: committed.active_event_id.clone(),
                                 staged_audio_id: committed.staged_audio_id.clone(),
                                 notice: Some(AgentNotice {
                                     code: "agent_timeout".to_string(),
@@ -359,6 +372,7 @@ impl AgentChat {
                                 message: msg.to_string(),
                                 actions_taken: turn_context.actions_taken,
                                 active_presentation_id: turn_context.active_presentation_id,
+                    active_event_id: turn_context.active_event_id.clone(),
                                 staged_audio_id: turn_context.staged_audio_id,
                                 notice: Some(AgentNotice {
                                     code: "wake_wait".to_string(),
@@ -371,6 +385,7 @@ impl AgentChat {
                                 message: msg.to_string(),
                                 actions_taken: turn_context.actions_taken,
                                 active_presentation_id: turn_context.active_presentation_id,
+                    active_event_id: turn_context.active_event_id.clone(),
                                 staged_audio_id: turn_context.staged_audio_id,
                                 notice: Some(AgentNotice {
                                     code: "pc_wake_timeout".to_string(),
@@ -402,6 +417,7 @@ impl AgentChat {
                         message,
                         actions_taken: turn_context.actions_taken,
                         active_presentation_id: turn_context.active_presentation_id,
+                    active_event_id: turn_context.active_event_id.clone(),
                         staged_audio_id: turn_context.staged_audio_id,
                         notice: Some(notice),
                     };
@@ -433,6 +449,7 @@ impl AgentChat {
                     message,
                     actions_taken: turn_context.actions_taken,
                     active_presentation_id: turn_context.active_presentation_id,
+                    active_event_id: turn_context.active_event_id.clone(),
                     staged_audio_id: turn_context.staged_audio_id,
                     notice: None,
                 };
@@ -458,6 +475,7 @@ impl AgentChat {
             message,
             actions_taken: turn_context.actions_taken,
             active_presentation_id: turn_context.active_presentation_id,
+                    active_event_id: turn_context.active_event_id.clone(),
             staged_audio_id: turn_context.staged_audio_id,
             notice: None,
         }

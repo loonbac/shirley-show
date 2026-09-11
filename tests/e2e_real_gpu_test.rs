@@ -106,7 +106,7 @@ async fn test_real_gpu_chorus_separation_with_karaoke_separator() {
     let bitrate_str = parsed["streams"][0]["bit_rate"].as_str().unwrap_or("0");
     let bitrate: u64 = bitrate_str.parse().unwrap_or(0);
     assert!(
-        bitrate >= 310000 && bitrate <= 330000,
+        (310000..=330000).contains(&bitrate),
         "Bitrate must be ~320k, got: {bitrate}"
     );
 

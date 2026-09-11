@@ -61,6 +61,7 @@ pub async fn chat(
                         .to_string(),
                     actions_taken: vec![],
                     active_presentation_id: None,
+                    active_event_id: None,
                     staged_audio_id: None,
                     notice: Some(AgentNotice {
                         code: "agent_timeout".to_string(),

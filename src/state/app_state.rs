@@ -181,6 +181,11 @@ impl AppState {
             .with_timeout(separation_timeout),
         );
 
+        let ticketing_repo = Arc::new(SqliteTicketingRepository::new(pool.clone()));
+        let posters_dir = config.data_dir.join("posters");
+        let poster_storage = Arc::new(LocalPosterStorage::new(posters_dir));
+        let ticketing = TicketingServices::new(ticketing_repo, poster_storage);
+
         let dispatcher = AgentToolDispatcher::from_components(
             create_presentation.clone(),
             list_presentations.clone(),
@@ -192,7 +197,9 @@ impl AppState {
             download_youtube_audio.clone(),
             staged_audio_registry.clone(),
             separate_vocals.clone(),
-        );
+        )
+        .with_ticketing(ticketing.clone())
+        .with_public_base_url(std::env::var("SHIRLEY_PUBLIC_BASE_URL").ok());
 
         let limits = AgentLimits {
             max_iterations: 5,
@@ -213,12 +220,6 @@ impl AppState {
             agent_chat: agent_chat.clone(),
             limits,
         };
-
-        let ticketing_repo = Arc::new(SqliteTicketingRepository::new(pool.clone()));
-        let posters_dir = config.data_dir.join("posters");
-        let poster_storage = Arc::new(LocalPosterStorage::new(posters_dir));
-        let ticketing = TicketingServices::new(ticketing_repo, poster_storage);
-
         Self {
             pool,
             storage,

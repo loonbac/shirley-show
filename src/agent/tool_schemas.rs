@@ -4,6 +4,7 @@ use crate::domain::agent_tool::ToolDefinition;
 
 pub fn get_tool_definitions() -> Vec<ToolDefinition> {
     vec![
+        // Presentation tools (8)
         ToolDefinition {
             name: "create_presentation".to_string(),
             description: "Crea una nueva presentación o repertorio de canciones con el nombre indicado.".to_string(),
@@ -148,6 +149,246 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["mode"],
+                "additionalProperties": false
+            }),
+        },
+
+        // Ticketing tools (8)
+        ToolDefinition {
+            name: "crear_evento".to_string(),
+            description: "Crea un nuevo evento musical o show con fecha, lugar y tipos de entrada configurados.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "nombre": {
+                        "type": "string",
+                        "description": "Nombre o título del evento."
+                    },
+                    "fecha_hora": {
+                        "type": "string",
+                        "description": "Fecha y hora del evento en formato ISO 8601 (YYYY-MM-DDTHH:MM)."
+                    },
+                    "lugar": {
+                        "type": "string",
+                        "description": "Lugar, recinto o dirección del evento."
+                    },
+                    "tipos_de_entrada": {
+                        "type": "array",
+                        "description": "Lista de tipos de entrada para el evento.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nombre": {
+                                    "type": "string",
+                                    "description": "Nombre del tipo o zona de entrada (ej: 'General', 'VIP', 'Cortesía')."
+                                },
+                                "precio": {
+                                    "type": "number",
+                                    "minimum": 0.0,
+                                    "description": "Precio unitario en soles (S/)."
+                                },
+                                "capacidad": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Capacidad o aforo disponible para este tipo."
+                                }
+                            },
+                            "required": ["nombre", "precio", "capacidad"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["nombre", "fecha_hora", "lugar", "tipos_de_entrada"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "listar_eventos".to_string(),
+            description: "Lista todos los eventos disponibles con sus detalles y estado.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "incluir_finalizados": {
+                        "type": "boolean",
+                        "description": "Si es verdadero, incluye eventos finalizados en la lista. Por defecto falso."
+                    }
+                },
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "vender_entradas".to_string(),
+            description: "Vende o emite una o más entradas para un evento activo.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento."
+                    },
+                    "nombre_comprador": {
+                        "type": "string",
+                        "description": "Nombre del comprador o titular de las entradas."
+                    },
+                    "contacto": {
+                        "type": "string",
+                        "description": "Teléfono o celular del comprador para envío de entrada."
+                    },
+                    "tipo_entrada": {
+                        "type": "string",
+                        "description": "Nombre exacto del tipo de entrada a vender."
+                    },
+                    "cantidad": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Cantidad de entradas a emitir."
+                    },
+                    "medio_pago": {
+                        "type": "string",
+                        "enum": ["Yape", "Efectivo", "Cortesía"],
+                        "description": "Medio de pago: 'Yape', 'Efectivo' o 'Cortesía'."
+                    },
+                    "estado_pago": {
+                        "type": "string",
+                        "enum": ["Pagado", "Pendiente"],
+                        "description": "Estado de la entrada: 'Pagado' (pagado o cortesía) o 'Pendiente' (reserva)."
+                    }
+                },
+                "required": [
+                    "evento_id",
+                    "nombre_comprador",
+                    "contacto",
+                    "tipo_entrada",
+                    "cantidad",
+                    "medio_pago",
+                    "estado_pago"
+                ],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "confirmar_pago_entrada".to_string(),
+            description: "Confirma el pago de una entrada previamente en estado 'Pendiente' cambiándola a 'Pagado'.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "entrada_id": {
+                        "type": "string",
+                        "description": "Identificador único de la entrada a confirmar."
+                    }
+                },
+                "required": ["entrada_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "registrar_gasto".to_string(),
+            description: "Registra un gasto o desembolso financiero asociado a un evento específico.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento."
+                    },
+                    "categoria": {
+                        "type": "string",
+                        "enum": [
+                            "Local/Alquiler",
+                            "Sonido/Luces",
+                            "Músicos/Personal",
+                            "Publicidad/Marketing",
+                            "Bebidas/Catering",
+                            "Transporte",
+                            "Otros"
+                        ],
+                        "description": "Categoría contable del gasto."
+                    },
+                    "monto": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "description": "Monto del gasto en soles (S/)."
+                    },
+                    "descripcion": {
+                        "type": "string",
+                        "description": "Descripción o detalle del gasto realizado."
+                    },
+                    "fecha": {
+                        "type": "string",
+                        "description": "Fecha del gasto en formato YYYY-MM-DD (opcional, por defecto fecha actual)."
+                    }
+                },
+                "required": ["evento_id", "categoria", "monto", "descripcion"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "resumen_evento".to_string(),
+            description: "Obtiene el resumen financiero y operativo consolidado de un evento (ingresos, cobranzas, pendientes, balance y gastos).".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento."
+                    }
+                },
+                "required": ["evento_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "registrar_interesado".to_string(),
+            description: "Registra una persona interesada o reserva potencial para un evento.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento."
+                    },
+                    "nombre": {
+                        "type": "string",
+                        "description": "Nombre de la persona interesada."
+                    },
+                    "contacto": {
+                        "type": "string",
+                        "description": "Teléfono o celular de contacto."
+                    },
+                    "canal": {
+                        "type": "string",
+                        "description": "Canal por el cual se comunicó (ej: WhatsApp, Instagram, Personal)."
+                    },
+                    "personas": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Número de personas estimadas en el grupo."
+                    },
+                    "promotora": {
+                        "type": "string",
+                        "description": "Nombre de la promotora o persona responsable del contacto."
+                    }
+                },
+                "required": ["evento_id", "nombre", "contacto", "canal", "personas", "promotora"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "checkin_entrada".to_string(),
+            description: "Valida en puerta el código QR secreto de 32 caracteres hexadecimales de una entrada.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento."
+                    },
+                    "codigo": {
+                        "type": "string",
+                        "description": "Código secreto QR de 32 caracteres hexadecimales."
+                    }
+                },
+                "required": ["evento_id", "codigo"],
                 "additionalProperties": false
             }),
         },

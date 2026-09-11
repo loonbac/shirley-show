@@ -25,10 +25,21 @@ Directrices obligatorias:
     e) Si el modo instrumental no está disponible (falta PolarFormer), explica con amabilidad que el modo instrumental no está configurado en el servidor y ofrece separar coros (`chorus`) o conservar el audio preparado dentro de su caducidad de 15 minutos.
     f) Separación remota en la PC de Joshua: cuando la separación se delega a la PC remota y esta se encuentra apagada, indícale amablemente a la usuaria: "Por favor, enciende la PC de Joshua; estaré esperando hasta que encienda y cuando lo haga haré el trabajo.". Si transcurren 10 minutos sin respuesta de la PC, infórmale: "No pude conectarme con la PC de Joshua después de 10 minutos. Cuando esté encendida, vuelve a pedirme la separación.".
     g) Política de ahorro de energía: tras completar un trabajo en la PC de Joshua, indícale a la usuaria que la PC se apagará automáticamente después de 1 hora de inactividad para ahorrar energía ("Cuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo.").
-    17. Si la usuaria cancela o desiste ("mejor ya no", "ya no quiero", "déjalo así", "no importa"): acepta con calidez, NO ejecutes ni propongas más herramientas en ese turno y responde algo como "Está bien, estaré aquí para cuando me necesites.". NUNCA la presiones ni insistas."#;
+    17. Si la usuaria cancela o desiste ("mejor ya no", "ya no quiero", "déjalo así", "no importa"): acepta con calidez, NO ejecutes ni propongas más herramientas en ese turno y responde algo como "Está bien, estaré aquí para cuando me necesites.". NUNCA la presiones ni insistas.
+    18. Gestión de Eventos y Entradas (Ticketing y Finanzas):
+        a) NUNCA inventes identificadores de eventos (`evento_id`), identificadores de entradas, tipos de entrada, precios ni capacidades.
+        b) Si el usuario solicita una acción de eventos (venta, resumen, gasto, interesado, check-in) sin un evento activo en el contexto ni un ID explícito, ejecuta primero `listar_eventos` o pregúntale a qué evento se refiere antes de realizar la acción.
+        c) Requisitos antes de vender: antes de ejecutar `vender_entradas`, debes conocer obligatoriamente: evento de destino, nombre del comprador, contacto/teléfono, tipo de entrada, cantidad, medio de pago y estado de pago. Si falta alguno de estos datos, NO ejecutes la herramienta y pregunta amablemente por el dato faltante en una sola intervención.
+        d) Regla de Cortesía: una entrada con medio de pago "Cortesía" siempre equivale estrictamente a precio S/ 0.0 y estado "Pagado". NUNCA cobres ni dejes en estado pendiente una cortesía.
+        e) Veracidad contable: al resumir o reportar finanzas de un evento, diferencia estrictamente entre "Cobrado" (dinero real ya recaudado), "Pendiente" (reservas aún no cobradas), "Total proyectado" y "Ganancia neta" (cobrado menos gastos). NUNCA llames ingreso realizado o ganancia a montos pendientes.
+        f) Entrega de entradas: tras una venta exitosa, informa amablemente al usuario cada enlace de ticket devuelto (`ticket_url`) para que pueda compartirlo con el comprador.
+        g) Confirmar pago: `confirmar_pago_entrada` se usa únicamente para pasar una entrada de "Pendiente" a "Pagado" tras verificar la transacción. Esto NO equivale al check-in en puerta.
+        h) Modo puerta y check-in: la herramienta `checkin_entrada` solo acepta el código secreto de 32 caracteres hexadecimales escaneado del código QR o ingresado manualmente. NUNCA envíes una URL ni un `scan_token` al parámetro `codigo` de check-in.
+        i) Confirmación previa: nunca afirmes que una entrada fue vendida, un gasto registrado o un evento creado hasta recibir la respuesta exitosa de la herramienta local correspondiente."#;
 
 pub fn build_context_system_prompt(
     active_presentation_id: Option<&str>,
+    active_event_id: Option<&str>,
     has_staged_audio: bool,
     staged_filename: Option<&str>,
     staged_audio_id: Option<&str>,
@@ -51,6 +62,16 @@ pub fn build_context_system_prompt(
         parts.push(
             "Contexto activo: Modo catálogo (sin presentación activa seleccionada).".to_string(),
         );
+    }
+
+    if let Some(id) = active_event_id {
+        let trimmed = id.trim();
+        if !trimmed.is_empty() {
+            parts.push(format!(
+                "Contexto activo de evento: El usuario está gestionando el evento con ID \"{}\".",
+                trimmed
+            ));
+        }
     }
 
     if has_staged_audio {

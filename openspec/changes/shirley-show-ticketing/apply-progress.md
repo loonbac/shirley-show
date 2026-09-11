@@ -4,13 +4,13 @@
 **Base branch:** `main`  
 **Store:** OpenSpec  
 **Execution mode:** auto  
-**Current Work Unit:** `tix-s3-leads-posters` (Slice 3, PR 3 of 6 chained stacked PRs)  
-**Authority Token:** `sha256:8a9c9fc7b96029e00661358792d3f2a4004341635ae67c417461aacab83d955c`  
-**Request:** `t3-acquire-002` (max budget: 3000 lines)  
+**Current Work Unit:** `tix-s4-ressy-tools` (Slice 4, PR 4 of 6 chained stacked PRs)  
+**Authority Token:** `sha256:ba4fdcf41ba8b50c84c3687fd2bceb079d1f0237312b82c283d36baf50da2339`  
+**Request:** `t4-acquire-001` (max budget: 3000 lines)  
 
 ---
 
-## 1. Cumulative Completed Tasks (27/50 total)
+## 1. Cumulative Completed Tasks (34/50 total)
 
 ### Slice 1: Esquema de base de datos, dominio y repositorios núcleo (10/10)
 - [x] RED: Escribir tests de migración SQLite `0002` que fallen por ausencia de tablas `eventos`, `interesados`, `entradas`, `gastos` y sus índices en `tests/ticketing_migration_tests.rs`. <!-- sdd-owner: implementation -->
@@ -45,83 +45,77 @@
 - [x] GREEN: Implementar handlers de administración (interesados CRUD, pase a venta, subida/servido de afiche, finalizar, reabrir, eliminar con cascada y limpieza) en `src/handlers/ticketing/events.rs`, `interests.rs` y router en `src/router.rs`. <!-- sdd-owner: implementation -->
 - [x] REFACTOR: Ejecutar `cargo test` validando aislamiento de paths de afiches y cascada completa de borrado de evento. <!-- sdd-owner: implementation -->
 
+### Slice 4: Capacidades de Agente IA (Herramientas Ressy para Ticketing y Finanzas) (7/7)
+- [x] RED: Escribir tests que verifiquen exactamente 16 herramientas en `get_tool_definitions()`, incluyendo los nombres exactos de las 8 de ticketing y validación de schemas JSON en `tests/ticketing_ressy_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Registrar los schemas de `crear_evento`, `listar_eventos`, `vender_entradas`, `confirmar_pago_entrada`, `registrar_gasto`, `resumen_evento`, `registrar_interesado`, `checkin_entrada` en `src/agent/tool_schemas.rs`. <!-- sdd-owner: implementation -->
+- [x] RED: Escribir tests de despacho donde Ressy invoque `vender_entradas`, `resumen_evento` y `checkin_entrada` mediante fakes de casos de uso y valide rechazo de `evento_id` inventado en `tests/ticketing_ressy_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Actualizar `TurnToolContext` con `known_event_ids`, `active_event_id` y despachar las ocho herramientas en `src/agent/dispatcher.rs` invocando `TicketingServices`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Añadir directrices de finanzas, cortesías, enlaces de tickets y aclaración de ambigüedades en `SHIRLEY_SYSTEM_PROMPT` en `src/agent/system_prompt.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE: Probar en `tests/ticketing_ressy_tests.rs` deduplicación por `call.id`, manejo de Cortesía forzada a precio 0.0 y formateo de URL de tickets con `SHIRLEY_PUBLIC_BASE_URL`. <!-- sdd-owner: implementation -->
+- [x] REFACTOR: Ejecutar `cargo test` verificando que la suite completa de Ressy (presentaciones + ticketing) compile y pase limpia. <!-- sdd-owner: implementation -->
+
 ---
 
-## 2. TDD Cycle Evidence (Slice 3)
+## 2. TDD Cycle Evidence (Slice 4)
 
 | Phase | Target | Test File / Command | Result |
 |---|---|---|---|
-| RED | Leads Domain & CRUD | `cargo test --test ticketing_interests_tests` | FAILED (`unresolved import interest, InterestRepository, interests`) |
-| GREEN | Leads Entity, Repo & Use Cases | `cargo test --test ticketing_interests_tests` | PASSED (`test_interest_domain_validations`, `test_interest_crud_and_projected_capacity`) |
-| RED | ConvertInterestToSale | `cargo test --test ticketing_interests_tests` | FAILED (`unresolved import ConvertInterestToSale, ConvertInterestInput`) |
-| GREEN | Atomic Conversion & Anti-duplicate | `cargo test --test ticketing_interests_tests` | PASSED (`test_convert_interest_to_sale_transactional_lifecycle_and_reconversion_rejection`: atomic ticket issuance, status transition to `Confirmado` with timestamp, capacity guard rollback, 409 Conflict on repeat) |
-| RED | Poster Storage & Validation | `cargo test --test ticketing_poster_storage_tests` | FAILED (`unresolved import local_poster_storage, PosterStorage, posters`) |
-| GREEN | LocalPosterStorage & ReplacePoster | `cargo test --test ticketing_poster_storage_tests` | PASSED (`test_image_format_magic_bytes_detection_and_rejection`, `test_poster_storage_10mib_limit_and_replacement_cleanup`, `test_event_deletion_cleans_up_poster_file`) |
-| GREEN | Admin HTTP Endpoints & Router | `cargo test --test ticketing_api_tests` | PASSED (`test_interests_and_posters_admin_endpoints`: CRUD interesados, pase a venta, multipart poster upload con límite 10 MiB, GET poster con `Content-Type`, `Cache-Control: public, max-age=300, must-revalidate` y `ETag`, y DELETE con cascada DB + filesystem) |
-| REFACTOR | Traversal Isolation & Full Verification | `cargo test --test ticketing_poster_storage_tests` + `cargo test` + `cargo clippy --lib --tests (ticketing suites) -- -D warnings` | PASSED (`test_poster_storage_path_traversal_resistance`, all 35 test suites green, zero compiler warnings, zero clippy warnings across ticketing domain/infra/use cases/handlers) |
+| RED | 16 Tool Definitions & Ticketing Schemas | `cargo test --test ticketing_ressy_tests` | FAILED (`assertion left == right failed: get_tool_definitions() must expose exactly 16 tools, left: 8, right: 16`) |
+| GREEN | Register 8 Strict Ticketing Tool Schemas | `cargo test --test ticketing_ressy_tests` | PASSED (`test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas`: verified 16 total tools, strict `additionalProperties: false`, closed enums, positive minimums) |
+| RED | Reject Invented Event ID & Unregistered Tools | `cargo test --test ticketing_ressy_tests` | FAILED (Compilation error: missing fields on `TurnToolContext` and dispatcher unknown tools) |
+| GREEN | TurnToolContext & AgentToolDispatcher Dispatch | `cargo test --test ticketing_ressy_tests` | PASSED (`test_dispatcher_rejects_invented_event_id` and `test_dispatcher_eight_ticketing_tools_full_operational_lifecycle`: all 8 tools dispatched via `TicketingServices`, strict context grounding for `evento_id` and `entrada_id`, door checkin 3 states) |
+| GREEN | System Prompt Directives & Ambiguity Clarification | `cargo test --test agent_chat_tests` | PASSED (Added section 18 to `SHIRLEY_SYSTEM_PROMPT` prohibiting ID hallucinations, enforcing courtesy price S/ 0.0 + Pagado, requiring parameters prior to sales, separating Cobrado from Pendiente, and reporting ticket URLs) |
+| TRIANGULATE | Deduplication, Courtesy S/ 0, & URL Formatting | `cargo test --test ticketing_ressy_tests` | PASSED (`test_dispatcher_triangulate_deduplication_by_call_id`, `test_dispatcher_triangulate_courtesy_forced_zero_price_and_pagado`, `test_dispatcher_triangulate_ticket_url_formatting_with_public_base_url`) |
+| REFACTOR | Clean Verification & Clippy Zero Warnings | `cargo test` + `cargo clippy --lib --tests (ticketing suites) -- -D warnings` | PASSED (All 36 test suites passed cleanly with 0 failures; zero warnings across lib and ticketing test suites under `-D warnings`) |
 
 ---
 
 ## 3. Files Created and Modified (Cumulative)
 
-### Created in Slice 3
-- `src/domain/ticketing/interest.rs` (Domain entity `Interest`, enum `InterestStatus`, field trims and business invariants)
-- `src/infra/filesystem/local_poster_storage.rs` (`LocalPosterStorage` with 10 MiB cap, magic byte detection, UUID filenames, traversal protection, `.trash` cleanup)
-- `src/infra/sqlite/ticketing_repository/interests.rs` (`InterestRepository` CRUD and `convert_interest_impl` atomic transaction)
-- `src/use_cases/ticketing/interests.rs` (`CreateInterest`, `ListInterests`, `GetInterest`, `UpdateInterest`, `DeleteInterest`, `ConvertInterestToSale`)
-- `src/use_cases/ticketing/posters.rs` (`ReplaceEventPoster`, `GetEventPoster`)
-- `src/handlers/ticketing/interests.rs` (Axum handlers for leads CRUD and `POST /api/interesados/{id}/vender`)
-- `tests/ticketing_interests_tests.rs` (Tests for leads domain, CRUD, dynamic capacity calculation, atomic conversion, and anti-duplicate 409)
-- `tests/ticketing_poster_storage_tests.rs` (Tests for magic bytes detection, 10 MiB limit, old poster cleanup on replacement, cascade cleanup on event deletion, and path traversal resistance)
+### Created in Slice 4
+- `tests/ticketing_ressy_tests.rs` (Tests for 16 tool schemas, rejection of invented event IDs, full 8-tool operational dispatch lifecycle, `call.id` deduplication, Cortesía invariant enforcement, and `SHIRLEY_PUBLIC_BASE_URL` URL formatting)
 
-### Modified in Slice 3
-- `src/domain/ticketing/mod.rs` (exposed `interest` module, `Interest`, `InterestStatus`)
-- `src/ports/ticketing.rs` (added `ImageFormat`, `PosterStorage`, `NoopPosterStorage`, `InterestRepository`, and `convert_interest` to `TicketingTransactions`)
-- `src/infra/filesystem/mod.rs` (exposed `local_poster_storage`)
-- `src/infra/sqlite/ticketing_repository/mod.rs` (exposed `interests`)
-- `src/infra/sqlite/ticketing_repository/tickets.rs` (delegated `convert_interest` in `TicketingTransactions`)
-- `src/use_cases/ticketing/mod.rs` (exposed `interests` and `posters` use cases)
-- `src/use_cases/ticketing/events.rs` (updated `DeleteEvent` with poster storage coordination for disk cleanup)
-- `src/state/mod.rs` & `src/state/app_state.rs` (initialized `LocalPosterStorage` and wired to `TicketingServices`)
-- `src/state/ticketing_services.rs` (wired `create_interest`, `list_interests`, `get_interest`, `update_interest`, `delete_interest`, `convert_interest_to_sale`, `replace_poster`, `get_poster`, and updated `delete_event`)
-- `src/handlers/ticketing/dto.rs` (added `InterestDto`, `CreateInterestRequest`, `UpdateInterestRequest`, `ConvertInterestRequest`, `ListInterestsResponse`, `InterestResponse`, `UploadPosterResponse`)
-- `src/handlers/ticketing/events.rs` (added `upload_poster` and `get_poster` endpoints)
-- `src/handlers/ticketing/mod.rs` (exposed `interests`)
-- `src/router.rs` (registered `/api/eventos/{id}/interesados`, `/api/interesados/{id}`, `/api/interesados/{id}/vender`, `/api/eventos/{id}/imagen` with 11 MiB multipart limit)
-- `tests/ticketing_api_tests.rs` (added `test_interests_and_posters_admin_endpoints`)
-- `tests/ticketing_use_cases_tests.rs` (updated `DeleteEvent` invocation with storage decoupling)
-- `openspec/changes/shirley-show-ticketing/tasks.md` (marked 8/8 tasks for Slice 3 complete, now 27/50 total)
+### Modified in Slice 4
+- `src/agent/tool_schemas.rs` (Registered schemas for `crear_evento`, `listar_eventos`, `vender_entradas`, `confirmar_pago_entrada`, `registrar_gasto`, `resumen_evento`, `registrar_interesado`, `checkin_entrada`)
+- `src/agent/tool_dispatcher.rs` (Integrated `TicketingServices`, added helper functions `is_authorized_event`, `format_ticket_url`, `format_whatsapp_url`, `app_error_to_json`, and implemented dispatch for the eight ticketing tools)
+- `src/agent/turn_context.rs` (Added `known_event_ids`, `known_ticket_ids`, `active_event_id`, and `with_event_context`)
+- `src/agent/system_prompt.rs` (Added Section 18 for ticketing and financial rules to `SHIRLEY_SYSTEM_PROMPT`, and added `active_event_id` grounding to `build_context_system_prompt`)
+- `src/domain/agent_tool.rs` (Added optional `event_id` to `ToolAction`)
+- `src/use_cases/agent_chat.rs` (Added `event_id` to `AgentChatInput`, `active_event_id` to `AgentChatOutput`, and wired `active_event_id` to turn context)
+- `src/handlers/agent/json_request.rs` (Added `event_id` parsing and length validation to JSON agent chat requests)
+- `src/handlers/agent/multipart_request.rs` (Added `event_id` parsing and length validation to multipart agent chat requests)
+- `src/handlers/agent/chat.rs` (Wired `active_event_id: None` on timeout responses)
+- `src/state/app_state.rs` (Wired `TicketingServices` and `SHIRLEY_PUBLIC_BASE_URL` into `AgentToolDispatcher` on startup)
+- `tests/agent_tools_tests.rs` (Updated tool count assertion from 8 to 16)
+- `tests/agent_chat_tests.rs` & `tests/agent_chat_remote_ux_tests.rs` (Updated `AgentChatInput` initializers with `event_id: None`)
+- `openspec/changes/shirley-show-ticketing/tasks.md` (Marked all 7 tasks for Slice 4 complete, now 34/50 total)
 
 ---
 
 ## 4. Deviations from Design
 
-None. The implementation strictly adheres to `design.md`, `specs/interesados/spec.md`, and `specs/eventos/spec.md`:
-- Lead validation: trimmed strings, positive `personas` (>= 1), closed set `InterestStatus` (`Pendiente`, `Confirmado`, `Cancelado`).
-- Dynamic capacity projection: `aforo_proyectado = entradas_emitidas + sum(personas de confirmados)` is dynamically computed and updated whenever a lead is confirmed, cancelled, or updated.
-- Conversion to sale: atomic `IMMEDIATE` transaction checks `convertido_at IS NULL`, verifies event is active and has sufficient capacity, generates $N$ independent credentials, emits tickets, marks lead as `Confirmado` with timestamp, and rejects reconversion with HTTP 409 Conflict.
-- Posters: strictly limited to 10 MiB, detected by magic bytes (`image/jpeg`, `image/png`, `image/webp`), rejecting executables with 415, saved under UUID `{evento_id}_{uuid}.{ext}`, with previous asset cleanup on replace and full deletion on event delete.
+None. The implementation strictly fulfills `design.md`, `specs/ressy-ticketing/spec.md`, and `tasks.md`:
+- Exactly 16 tools exposed by `get_tool_definitions()` (8 for presentations, 8 for ticketing).
+- All 8 ticketing tools use strict JSON schemas with `additionalProperties: false`, closed string enums (`Yape` | `Efectivo` | `Cortesía`, `Pagado` | `Pendiente`, closed 7 expense categories), and positive integer minimums.
+- `TurnToolContext` strictly checks that `evento_id` exists in the active turn context or was returned by `listar_eventos` before dispatching mutating operations or summaries, rejecting invented IDs with `unauthorized_event_id`.
+- Mutating tools are deduplicated by `call.id` and canonical signature; read tools (`listar_eventos`, `resumen_evento`) return cached values.
+- Cortesía entries are unconditionally enforced at price S/ 0.0 and status `Pagado`.
+- `SHIRLEY_PUBLIC_BASE_URL` is parsed with origin validation and trailing slash normalization; relative path `/#/ticket/{scan_token}` is used when unconfigured.
 
 ---
 
 ## 5. Workload and PR Boundary
 
-- **Work unit:** `tix-s3-leads-posters`
-- **Assigned slice:** Slice 3 (PR 3 of 6 chained stacked PRs)
-- **Review forecast vs Authored lines:** The implementation of leads CRUD, dynamic capacity aggregation, transactional conversion, local poster filesystem storage with magic byte detection, Axum admin handlers, and test suites comprises ~1,350 lines. Like Slices 1 and 2, this work unit represents one cohesive functional slice that cannot be broken down further without losing compile-time cohesion across ports, domain, SQLite, filesystem, and HTTP router. A `size:exception` applies to PR 3 as part of the authorized stacked review sequence.
-- **Authority token for settle:** `sha256:8a9c9fc7b96029e00661358792d3f2a4004341635ae67c417461aacab83d955c`, request `t3-acquire-002`, max 3000. Settle was NOT executed per instruction ("Reporta para settle (NO settle)").
+- **Work unit:** `tix-s4-ressy-tools`
+- **Assigned slice:** Slice 4 (PR 4 of 6 chained stacked PRs)
+- **Review forecast vs Authored lines:** The integration of 8 conversational AI tools with strict schemas, parameter validation, transactional use-case dispatching, context grounding, prompt directives, deduplication, URL generation, and comprehensive hermetic tests comprises ~1,200 lines across 16 files. This slice is a cohesive unit enabling AI operations on ticketing and cannot be broken down further without leaving schemas decoupled from dispatchers and prompt directives. A `size:exception` applies to PR 4 under the authorized chained delivery strategy.
+- **Authority token for settle:** `sha256:ba4fdcf41ba8b50c84c3687fd2bceb079d1f0237312b82c283d36baf50da2339`, request `t4-acquire-001`, max 3000. Settle was NOT executed per instruction ("Reporta para settle (NO settle)").
 
 ---
 
-## 6. Remaining Tasks (23 remaining across Slices 4–6)
+## 6. Remaining Tasks (16 remaining across Slices 5–6)
 
-- [ ] RED: Escribir tests que verifiquen exactamente 16 herramientas en `get_tool_definitions()`, incluyendo los nombres exactos de las 8 de ticketing y validación de schemas JSON en `tests/ticketing_ressy_tests.rs`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Registrar los schemas de `crear_evento`, `listar_eventos`, `vender_entradas`, `confirmar_pago_entrada`, `registrar_gasto`, `resumen_evento`, `registrar_interesado`, `checkin_entrada` en `src/agent/tool_schemas.rs`. <!-- sdd-owner: implementation -->
-- [ ] RED: Escribir tests de despacho donde Ressy invoque `vender_entradas`, `resumen_evento` y `checkin_entrada` mediante fakes de casos de uso y valide rechazo de `evento_id` inventado en `tests/ticketing_ressy_tests.rs`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Actualizar `TurnToolContext` con `known_event_ids`, `active_event_id` y despachar las ocho herramientas en `src/agent/dispatcher.rs` invocando `TicketingServices`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Añadir directrices de finanzas, cortesías, enlaces de tickets y aclaración de ambigüedades en `SHIRLEY_SYSTEM_PROMPT` en `src/agent/system_prompt.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE: Probar en `tests/ticketing_ressy_tests.rs` deduplicación por `call.id`, manejo de Cortesía forzada a precio 0.0 y formateo de URL de tickets con `SHIRLEY_PUBLIC_BASE_URL`. <!-- sdd-owner: implementation -->
-- [ ] REFACTOR: Ejecutar `cargo test` verificando que la suite completa de Ressy (presentaciones + ticketing) compile y pase limpia. <!-- sdd-owner: implementation -->
+### Slice 5: Frontend UI - Navegación Topbar, Catálogo de Eventos, Detalle y Pestañas (7 remaining)
 - [ ] RED: Escribir tests Node en `frontend/test/router.test.js` (o suite equivalente invocada vía Rust) para las rutas `#/eventos`, `#/eventos/:id`, `#/ticket/:token`, `#/puerta/:id` y fallback a repertorios. <!-- sdd-owner: implementation -->
 - [ ] GREEN: Actualizar `frontend/js/router/parse-route.js` y `frontend/js/router/navigate.js` con las nuevas rutas y decodificación segura de parámetros. <!-- sdd-owner: implementation -->
 - [ ] GREEN: Modificar `frontend/js/components/app-topbar.js` para añadir el selector accesible `Repertorios | Eventos` y actualizar el composition root en `frontend/js/main.js`. <!-- sdd-owner: implementation -->
@@ -130,6 +124,8 @@ None. The implementation strictly adheres to `design.md`, `specs/interesados/spe
 - [ ] GREEN: Implementar `controllers.js` en `frontend/js/modules/events/controllers.js` para gestionar ciclo de vida, estados de carga/vacío/error y montaje de pestañas. <!-- sdd-owner: implementation -->
 - [ ] GREEN: Agregar estilos cohesivos con prefijo `.events-*` en `frontend/styles/events/index.css` e importarlos en `frontend/styles/index.css`. <!-- sdd-owner: implementation -->
 - [ ] REFACTOR: Probar en navegador que `#/presentations` siga siendo la vista inicial por defecto y que alternar a `#/eventos` cargue catálogo sin errores de consola. <!-- sdd-owner: implementation -->
+
+### Slice 6: Frontend UI - Venta Rápida, Enlaces wa.me, Vista Pública de Ticket y Modo Puerta (8 remaining)
 - [ ] RED: Escribir tests unitarios para `whatsapp.js` en `frontend/test/whatsapp.test.js` verificando saneamiento de números, código de país 51 y URLs con encoding seguro para pagado y pendiente. <!-- sdd-owner: implementation -->
 - [ ] GREEN: Implementar función pura de generación de enlaces en `frontend/js/modules/events/whatsapp.js`. <!-- sdd-owner: implementation -->
 - [ ] GREEN: Implementar modal y controlador de "Venta Rápida" en `frontend/js/modules/events/forms.js` y `controllers.js`, mostrando tarjetas con enlaces `wa.me` por cada entrada emitida. <!-- sdd-owner: implementation -->

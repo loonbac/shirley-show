@@ -19,6 +19,8 @@ pub struct ToolAction {
     pub tool: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presentation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
     pub summary: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
