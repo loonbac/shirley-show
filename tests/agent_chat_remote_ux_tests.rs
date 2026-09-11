@@ -21,6 +21,7 @@ use tempfile::TempDir;
 struct MockRemoteVocalSeparator {
     probe_online: bool,
     fail_wake_timeout: bool,
+    signal_wake_wait: bool,
     delay: Option<Duration>,
 }
 
@@ -29,6 +30,7 @@ impl MockRemoteVocalSeparator {
         Self {
             probe_online,
             fail_wake_timeout: false,
+            signal_wake_wait: !probe_online,
             delay: None,
         }
     }
@@ -37,6 +39,7 @@ impl MockRemoteVocalSeparator {
         Self {
             probe_online: true,
             fail_wake_timeout: true,
+            signal_wake_wait: false,
             delay: None,
         }
     }
@@ -45,6 +48,7 @@ impl MockRemoteVocalSeparator {
         Self {
             probe_online: true,
             fail_wake_timeout: false,
+            signal_wake_wait: false,
             delay: Some(delay),
         }
     }
@@ -61,16 +65,20 @@ impl VocalSeparator for MockRemoteVocalSeparator {
         request: VocalSeparationRequest,
     ) -> Pin<Box<dyn Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>> {
         let fail_wake_timeout = self.fail_wake_timeout;
+        let signal_wake_wait = self.signal_wake_wait;
         let delay = self.delay;
         let out_path = request.output_path;
         Box::pin(async move {
             if let Some(d) = delay {
                 tokio::time::sleep(d).await;
             }
+            if signal_wake_wait {
+                return Err(VocalSeparationError::WakeWait);
+            }
             if fail_wake_timeout {
                 return Err(VocalSeparationError::PcWakeTimeout);
             }
-            std::fs::write(&out_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
+            std::fs::write(&out_path, [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
                 .expect("write mock separated mp3");
             Ok(SeparatedAudio {
                 duration_secs: 180,
@@ -137,7 +145,7 @@ async fn test_agent_chat_remote_pc_offline_returns_wake_wait_notice_and_contract
     let staged_src = state.storage.staging_dir().join("source_track.part");
     std::fs::write(
         &staged_src,
-        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+        [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
     )
     .unwrap();
     let reg_entry = state.staged_audio_registry.register(
@@ -184,7 +192,7 @@ async fn test_agent_chat_remote_pc_offline_returns_wake_wait_notice_and_contract
     );
     let notice = output.notice.unwrap();
     assert_eq!(notice.code, "wake_wait");
-    assert_eq!(notice.retryable, true);
+    assert!(notice.retryable);
 
     assert_eq!(
         output.staged_audio_id,
@@ -226,7 +234,7 @@ async fn test_agent_chat_remote_pc_wake_timeout_returns_give_up_copy() {
     let staged_src = state.storage.staging_dir().join("source_timeout.part");
     std::fs::write(
         &staged_src,
-        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+        [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
     )
     .unwrap();
     let reg_entry = state.staged_audio_registry.register(
@@ -273,7 +281,7 @@ async fn test_agent_chat_remote_pc_wake_timeout_returns_give_up_copy() {
     );
     let notice = output.notice.unwrap();
     assert_eq!(notice.code, "pc_wake_timeout");
-    assert_eq!(notice.retryable, true);
+    assert!(notice.retryable);
 
     assert_eq!(
         output.staged_audio_id,
@@ -300,7 +308,7 @@ async fn test_agent_chat_remote_separation_success_appends_idle_shutdown_notice(
     let staged_src = state.storage.staging_dir().join("source_success.part");
     std::fs::write(
         &staged_src,
-        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+        [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
     )
     .unwrap();
     let reg_entry = state.staged_audio_registry.register(
@@ -373,7 +381,7 @@ async fn test_agent_chat_composed_deadline_1500s_not_clamped_to_600s() {
     let staged_src = state.storage.staging_dir().join("source_1500.part");
     std::fs::write(
         &staged_src,
-        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+        [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
     )
     .unwrap();
     let reg_entry = state.staged_audio_registry.register(
@@ -449,9 +457,13 @@ impl VocalSeparator for DynamicProbeSeparator {
         &self,
         request: VocalSeparationRequest,
     ) -> Pin<Box<dyn Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>> {
+        let is_online = self.is_online.clone();
         let out_path = request.output_path;
         Box::pin(async move {
-            std::fs::write(&out_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
+            if !is_online.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(VocalSeparationError::WakeWait);
+            }
+            std::fs::write(&out_path, [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
                 .expect("write mock separated mp3");
             Ok(SeparatedAudio {
                 duration_secs: 180,
@@ -477,7 +489,7 @@ async fn test_agent_chat_remote_ux_multi_turn_offline_then_boot_success() {
     let staged_src = state.storage.staging_dir().join("source_multi.part");
     std::fs::write(
         &staged_src,
-        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+        [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
     )
     .unwrap();
     let reg_entry = state.staged_audio_registry.register(
@@ -603,4 +615,123 @@ async fn test_agent_chat_remote_ux_multi_turn_offline_then_boot_success() {
         "Turn 2 success must append idle shutdown copy, got: «{}»",
         output_t2.message
     );
+}
+
+#[derive(Clone)]
+struct PcBootsMidWaitSeparator {
+    waited_and_booted: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl VocalSeparator for PcBootsMidWaitSeparator {
+    fn probe(&self, _timeout: Duration) -> Pin<Box<dyn Future<Output = bool> + Send>> {
+        // Initial probe returns false (PC currently off)
+        Box::pin(async move { false })
+    }
+
+    fn separate(
+        &self,
+        request: VocalSeparationRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>> {
+        let waited_and_booted = self.waited_and_booted.clone();
+        let out_path = request.output_path;
+        Box::pin(async move {
+            // Simulates backoff wait where Joshua's PC boots at simulated minute 3
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            waited_and_booted.store(true, std::sync::atomic::Ordering::SeqCst);
+            std::fs::write(&out_path, [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
+                .expect("write mock separated mp3");
+            Ok(SeparatedAudio {
+                duration_secs: 180,
+                size_bytes: 7200000,
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_agent_chat_remote_pc_boots_mid_wait_same_turn_completes_separation() {
+    let (state, _tmp) = setup_test_state();
+    let waited_and_booted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let separator = Arc::new(PcBootsMidWaitSeparator {
+        waited_and_booted: waited_and_booted.clone(),
+    });
+    let state = state.with_vocal_separator(separator);
+    let pres = state
+        .create_presentation
+        .execute("Show Espera Real")
+        .unwrap();
+
+    let staged_src = state.storage.staging_dir().join("source_boot_mid.part");
+    std::fs::write(
+        &staged_src,
+        [0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-boot-mid-1".to_string(),
+        staged_src,
+        "Canción Espera Real".to_string(),
+        180,
+        7200000,
+    );
+
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let provider = Arc::new(SimpleMockChatProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_boot_mid".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "instrumental",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: Some("Separación instrumental lista en el mismo turno.".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let limits = AgentLimits::default();
+    let agent_chat = AgentChat::new(Some(provider), dispatcher, limits, "model".to_string())
+        .with_remote_vocal_enabled(true);
+
+    let input = AgentChatInput {
+        message: "Separa instrumental para el show".to_string(),
+        history: vec![],
+        presentation_id: Some(pres.id),
+        staged_audio_id: Some(reg_entry.staged_audio_id.clone()),
+        staged_audio: None,
+        staged_filename: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+
+    // The SAME turn must complete the separation when PC boots mid-wait:
+    // 1. Must NOT abort early with wake_wait notice
+    assert!(
+        output.notice.is_none(),
+        "Expected no error/wait notice on same-turn completion, got: {:?}",
+        output.notice
+    );
+    // 2. Action must be recorded with success
+    assert_eq!(
+        output.actions_taken.len(),
+        1,
+        "Must execute separate_vocals in same turn"
+    );
+    assert_eq!(output.actions_taken[0].tool, "separate_vocals");
+    assert_eq!(output.actions_taken[0].status, "success");
+    // 3. Staged audio ID must be set to the resulting separated audio
+    assert!(output.staged_audio_id.is_some());
+    assert_ne!(
+        output.staged_audio_id.as_ref(),
+        Some(&reg_entry.staged_audio_id)
+    );
+    // 4. Separator must have performed the wait and completed
+    assert!(waited_and_booted.load(std::sync::atomic::Ordering::SeqCst));
 }

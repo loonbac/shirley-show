@@ -16,7 +16,8 @@ services:
       - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-120b}
       - GROQ_BASE_URL=${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
       - YT_DLP_BIN=${YT_DLP_BIN:-yt-dlp}
-      - JOSHUA_PC_HOST=${JOSHUA_PC_HOST:-100.73.247.39}
+      # Default vacío = fallback local (sin GPU remota). Para GPU remota vía Tailscale, definir IP (ej: 100.73.247.39).
+      - JOSHUA_PC_HOST=${JOSHUA_PC_HOST:-}
       - JOSHUA_PC_USER=${JOSHUA_PC_USER:-loonbac}
       - JOSHUA_PC_SSH_KEY=${JOSHUA_PC_SSH_KEY:-/home/shirley/.ssh/id_ed25519}
       - JOSHUA_PC_PORT=${JOSHUA_PC_PORT:-22}

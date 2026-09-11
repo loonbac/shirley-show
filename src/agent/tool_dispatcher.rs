@@ -709,32 +709,21 @@ impl AgentToolDispatcher {
                     }
                 };
 
-                if let VocalAudioSource::TrackId(ref tid) = source {
-                    if !context.known_track_ids.contains(tid) {
-                        return json!({
-                            "error": "unauthorized_track_id",
-                            "message": "Pista no autorizada o no encontrada en la presentación activa"
-                        });
-                    }
-                }
-
-                if let VocalAudioSource::StagedAudioId(ref sid) = source {
-                    if !context.known_staged_audio_ids.contains(sid) {
-                        return json!({
-                            "error": "staged_audio_not_found",
-                            "message": "Identificador de audio preparado no encontrado o no autorizado"
-                        });
-                    }
-                }
-
-                if !self
-                    .separate_vocals
-                    .probe(std::time::Duration::from_secs(3))
-                    .await
+                if let VocalAudioSource::TrackId(ref tid) = source
+                    && !context.known_track_ids.contains(tid)
                 {
                     return json!({
-                        "error": "wake_wait",
-                        "message": "Por favor, enciende la PC de Joshua; estaré esperando hasta que encienda y cuando lo haga haré el trabajo. Cuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo."
+                        "error": "unauthorized_track_id",
+                        "message": "Pista no autorizada o no encontrada en la presentación activa"
+                    });
+                }
+
+                if let VocalAudioSource::StagedAudioId(ref sid) = source
+                    && !context.known_staged_audio_ids.contains(sid)
+                {
+                    return json!({
+                        "error": "staged_audio_not_found",
+                        "message": "Identificador de audio preparado no encontrado o no autorizado"
                     });
                 }
 

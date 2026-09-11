@@ -32,7 +32,7 @@ ENV SHIRLEY_BIND=0.0.0.0:3000 \
     SHIRLEY_FRONTEND_DIR=/app/frontend
 
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:3000/api/presentations || exit 1
 
 CMD ["/app/shirley-show"]

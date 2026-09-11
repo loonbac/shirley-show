@@ -7,9 +7,14 @@ import { isVocalSeparationIntent } from '../../utils/validation/is-vocal-separat
  * Completely decoupled from DOM nodes.
  *
  * @param {Object} [initialState={}]
+ * @param {Object} [options={}]
+ * @param {number} [options.remoteWaitDelayMs=3000] Delay before pending vocal separation switches label to waiting PC
  * @returns {Object} Chat state manager with command and subscription methods.
  */
-export function createChatState(initialState = {}) {
+export function createChatState(initialState = {}, options = {}) {
+  const remoteWaitDelayMs = options.remoteWaitDelayMs !== undefined ? options.remoteWaitDelayMs : 3000;
+  let wakeWaitTimer = null;
+
   let state = {
     isOpen: false,
     pending: false,
@@ -27,6 +32,13 @@ export function createChatState(initialState = {}) {
   const listeners = new Set();
   let currentGenerationId = 0;
   let currentAbortController = null;
+
+  function clearWakeWaitTimer() {
+    if (wakeWaitTimer) {
+      clearTimeout(wakeWaitTimer);
+      wakeWaitTimer = null;
+    }
+  }
 
   function notify() {
     for (const listener of listeners) {
@@ -57,6 +69,7 @@ export function createChatState(initialState = {}) {
 
   function close() {
     if (!state.isOpen) return;
+    clearWakeWaitTimer();
     state = { ...state, isOpen: false, pendingLabel: 'Ressy está pensando...' };
     notify();
   }
@@ -95,6 +108,7 @@ export function createChatState(initialState = {}) {
   }
 
   function beginTurn({ message, attachment = null, pendingLabel = null }) {
+    clearWakeWaitTimer();
     if (state.pending && currentAbortController) {
       currentAbortController.abort();
     }
@@ -151,6 +165,18 @@ export function createChatState(initialState = {}) {
     };
     notify();
 
+    if (isVocalIntent && turnPendingLabel !== 'esperando la PC de Joshua…' && remoteWaitDelayMs >= 0) {
+      wakeWaitTimer = setTimeout(() => {
+        if (currentGenerationId === generationId && state.pending && state.vocalSeparationPending) {
+          state = {
+            ...state,
+            pendingLabel: 'esperando la PC de Joshua…',
+          };
+          notify();
+        }
+      }, remoteWaitDelayMs);
+    }
+
     return {
       generationId,
       abortController: currentAbortController,
@@ -162,6 +188,7 @@ export function createChatState(initialState = {}) {
     if (generationId !== currentGenerationId) {
       return;
     }
+    clearWakeWaitTimer();
 
     const actions = (response && response.actions_taken) || [];
     const hasConsumedTrack = actions.some((act) => act.tool === 'add_track_from_staged' && act.status === 'success');
@@ -226,6 +253,7 @@ export function createChatState(initialState = {}) {
     if (generationId !== currentGenerationId) {
       return;
     }
+    clearWakeWaitTimer();
 
     const notice = {
       code: (error && error.code) || 'agent_error',
@@ -246,6 +274,7 @@ export function createChatState(initialState = {}) {
   }
 
   function cancelTurn() {
+    clearWakeWaitTimer();
     if (currentAbortController) {
       currentAbortController.abort();
       currentAbortController = null;

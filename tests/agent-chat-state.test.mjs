@@ -606,4 +606,77 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   console.log('✓ 16. Remote offline notices (wake_wait / pc_offline) set typing indicator label to "esperando la PC de Joshua…" and restore cleanly');
 }
 
+// 17. Typing indicator shows "esperando la PC de Joshua…" after N seconds of pending separation even on first attempt, and restores cleanly
+{
+  const state = createChatState({}, { remoteWaitDelayMs: 30 });
+
+  // 17a. First attempt: beginTurn with vocal intent starts with 'separando voces…'
+  const turn = state.beginTurn({ message: 'Separa la voz de esta pista' });
+  assert.equal(state.get().pending, true);
+  assert.equal(state.get().vocalSeparationPending, true);
+  assert.equal(state.get().pendingLabel, 'separando voces…');
+
+  // 17b. While request remains pending after N ms, label updates to 'esperando la PC de Joshua…'
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(state.get().pending, true);
+  assert.equal(
+    state.get().pendingLabel,
+    'esperando la PC de Joshua…',
+    `Expected pendingLabel to update to 'esperando la PC de Joshua…' after N ms, got: '${state.get().pendingLabel}'`
+  );
+
+  // 17c. When turn resolves, pendingLabel restores to 'Ressy está pensando...'
+  state.resolveTurn({
+    generationId: turn.generationId,
+    response: {
+      message: 'Separación completada.',
+      actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+      staged_audio_id: 'staged-123',
+    },
+  });
+  assert.equal(state.get().pending, false);
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  // 17d. Fast turn: if resolved before N ms, timer is cleared and label restores cleanly
+  const fastTurn = state.beginTurn({ message: 'Separa coros' });
+  assert.equal(state.get().pendingLabel, 'separando voces…');
+  state.resolveTurn({
+    generationId: fastTurn.generationId,
+    response: {
+      message: 'Listo',
+      actions_taken: [{ tool: 'separate_vocals', status: 'success' }],
+    },
+  });
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  // 17e. If turn fails, timer is cleared and label restores cleanly
+  const failTurnObj = state.beginTurn({ message: 'Separa coros' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+  state.failTurn({
+    generationId: failTurnObj.generationId,
+    error: { code: 'pc_wake_timeout', message: 'Timeout' },
+  });
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  // 17f. If turn is canceled, timer is cleared and label restores cleanly
+  state.beginTurn({ message: 'Separa la pista' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+  state.cancelTurn();
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  // 17g. If panel is closed mid-wait, timer is cleared and label restores cleanly
+  state.open();
+  state.beginTurn({ message: 'Separa la pista' });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(state.get().pendingLabel, 'esperando la PC de Joshua…');
+  state.close();
+  assert.equal(state.get().pendingLabel, 'Ressy está pensando...');
+
+  console.log('✓ 17. Typing indicator shows "esperando la PC de Joshua…" after N seconds of pending separation even on first attempt, and restores cleanly');
+}
+
 console.log('All Agent Chat State and API Client unit tests passed!');
