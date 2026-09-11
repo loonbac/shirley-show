@@ -55,7 +55,7 @@ export function createWelcomeHeader(props = {}) {
   // 2. Chat Hero Composer (The central protagonist)
   const chatInput = createElement('textarea', {
     class: 'welcome-header-chat-input',
-    placeholder: 'Escríbeme… ej: créame la presentación Cumpleaños Rosa',
+    placeholder: 'Escríbeme… ej: créame la presentación Gala Acústica',
     rows: '2',
     'aria-label': 'Escribe una instrucción o mensaje para Shirley',
   });
@@ -123,7 +123,7 @@ export function createWelcomeHeader(props = {}) {
   // Quick suggestion chips for singer shortcuts
   const hintsLabel = createElement('span', { class: 'welcome-header-hints-label' }, ['Prueba pidiéndome:']);
   const suggestionItems = [
-    'Créame la presentación Cumpleaños Rosa',
+    'Créame la presentación Noche de Serenata',
     'Agrega la letra de Sabor a Mí',
     'Prepara un repertorio para el sábado',
   ];
