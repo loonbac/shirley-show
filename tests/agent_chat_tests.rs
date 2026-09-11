@@ -427,3 +427,20 @@ async fn test_agent_chat_history_truncation_strict_char_cap_and_system_note() {
         other => panic!("Expected current user message, got {:?}", other),
     }
 }
+
+#[test]
+fn test_system_prompt_never_assumes_intent_and_never_fetches_lyrics() {
+    use shirley_show::agent::system_prompt::SHIRLEY_SYSTEM_PROMPT;
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("NUNCA busques ni inventes letras"),
+        "el prompt debe prohibir buscar/inventar letras"
+    );
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("NUNCA sobreentiendas su intención"),
+        "el prompt debe exigir preguntar ante la duda"
+    );
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("NO ejecutes nada y pregúntale"),
+        "el prompt debe exigir título y presentación antes de agregar"
+    );
+}
