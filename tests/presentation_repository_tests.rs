@@ -140,3 +140,61 @@ fn test_delete_presentation_and_cascade_with_audio_queue() {
         .expect("count pending deletions");
     assert_eq!(pending_count, 1, "Track audio_key should be queued in pending_audio_deletions");
 }
+
+#[test]
+fn test_delete_presentation_physical_audio_cleanup() {
+    let (repo, f) = setup_repo();
+    let audio_dir = tempfile::tempdir().expect("audio dir");
+    let storage = std::sync::Arc::new(shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage::new(
+        audio_dir.path().join("audio"),
+    ));
+    let repo = repo.with_storage(storage.clone());
+
+    let p = Presentation::new("Live Album").expect("presentation");
+    repo.create(&p).expect("create");
+
+    // Stage and promote a real audio file
+    let (stage_id, stage_path) = storage.create_staging_file().expect("stage file");
+    std::fs::write(&stage_path, &[0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB])
+        .expect("write staged audio");
+    let key = storage
+        .promote_staged_file(&stage_id, shirley_show::domain::audio_format::AudioFormat::Mp3)
+        .expect("promote audio");
+
+    let file_path = storage.resolve_path(&key);
+    assert!(file_path.exists(), "Audio file must exist on disk");
+
+    // Insert track item into DB
+    {
+        let conn = rusqlite::Connection::open(f.path()).expect("open raw conn");
+        conn.execute(
+            "INSERT INTO show_items (id, presentation_id, position, kind, title, audio_key, media_type, byte_size, created_at)
+             VALUES ('item-track-1', ?1, 0, 'track', 'Encore', ?2, 'audio/mpeg', 12, '2026-03-22T00:00:00Z');",
+            [&p.id, key.as_str()],
+        ).expect("insert track item");
+    }
+
+    let del_res = repo.delete(&p.id).expect("delete presentation");
+    assert_eq!(del_res.deleted_id, p.id);
+    assert_eq!(del_res.cleanup_pending, false);
+
+    // Assert physical file removed
+    assert!(!file_path.exists(), "Audio file must be physically deleted post-commit");
+
+    // Assert DB cascade
+    let conn = rusqlite::Connection::open(f.path()).expect("open raw conn");
+    let items_count: i32 = conn
+        .query_row("SELECT count(*) FROM show_items WHERE presentation_id = ?1;", [&p.id], |r| r.get(0))
+        .expect("count show_items");
+    assert_eq!(items_count, 0, "Show items must be cascade deleted");
+
+    // Assert pending queue is completed (deleted)
+    let pending_count: i32 = conn
+        .query_row(
+            "SELECT count(*) FROM pending_audio_deletions WHERE audio_key = ?1;",
+            [key.as_str()],
+            |r| r.get(0),
+        )
+        .expect("count pending deletions");
+    assert_eq!(pending_count, 0, "Pending queue must have 0 entries after successful cleanup");
+}

@@ -215,3 +215,61 @@ async fn test_error_response_format_and_status_codes() {
     assert_eq!(json_422_patch["error"]["code"], "title_required");
     assert_eq!(json_422_patch["error"]["field"], "title");
 }
+
+
+fn setup_app_with_storage() -> (axum::Router, std::sync::Arc<shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage>, shirley_show::infra::sqlite::connect::DbPool, TempDir) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let pool = init_pool(dir.path().join("test.sqlite3").to_str().unwrap()).expect("init pool");
+    migrate_pool(&pool).expect("migrate pool");
+    let storage = std::sync::Arc::new(shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage::new(dir.path().join("audio")));
+    let state = AppState::new_with_items(pool.clone(), storage.clone());
+    (create_router(state), storage, pool, dir)
+}
+
+#[tokio::test]
+async fn test_delete_presentation_with_cascade_audio_file_cleanup() {
+    let (app, storage, pool, _dir) = setup_app_with_storage();
+
+    // 1. Create presentation
+    let req = Request::builder().method("POST").uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Concert Show" }).to_string())).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let pres_id = body_to_json(res.into_body()).await["presentation"]["id"].as_str().unwrap().to_string();
+
+    // 2. Upload track with audio file
+    let boundary = "testDelCascadeBoundary123";
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nSolo\r\n").as_bytes());
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"solo.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
+    body.extend_from_slice(&[0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xAA, 0xBB]);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    let req_upload = Request::builder().method("POST").uri(format!("/api/presentations/{pres_id}/tracks"))
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(body)).unwrap();
+    let res_upload = app.clone().oneshot(req_upload).await.unwrap();
+    assert_eq!(res_upload.status(), StatusCode::CREATED);
+    let item_id = body_to_json(res_upload.into_body()).await["id"].as_str().unwrap().to_string();
+
+    let conn = pool.get().unwrap();
+    let audio_key: String = conn.query_row("SELECT audio_key FROM show_items WHERE id = ?1;", [&item_id], |r| r.get(0)).unwrap();
+    let audio_file_path = storage.resolve_path_str(&audio_key).expect("resolve path");
+    assert!(audio_file_path.exists(), "Audio file must exist before presentation deletion");
+
+    // 3. Delete presentation
+    let req_del = Request::builder().method("DELETE").uri(format!("/api/presentations/{pres_id}")).body(Body::empty()).unwrap();
+    let res_del = app.clone().oneshot(req_del).await.unwrap();
+    assert_eq!(res_del.status(), StatusCode::OK);
+    let del_json = body_to_json(res_del.into_body()).await;
+    assert_eq!(del_json["deleted_id"], pres_id);
+    assert_eq!(del_json["cleanup_pending"], false);
+
+    // 4. Assert physical audio file is deleted post-commit & DB cascade clean
+    assert!(!audio_file_path.exists(), "Audio file must be physically removed from storage");
+    let items_count: i64 = conn.query_row("SELECT count(*) FROM show_items WHERE presentation_id = ?1;", [&pres_id], |r| r.get(0)).unwrap();
+    assert_eq!(items_count, 0, "Show items must be cascade deleted in DB");
+    let pending_count: i64 = conn.query_row("SELECT count(*) FROM pending_audio_deletions WHERE audio_key = ?1;", [&audio_key], |r| r.get(0)).unwrap();
+    assert_eq!(pending_count, 0, "Pending queue must be 0 after successful physical cleanup");
+}

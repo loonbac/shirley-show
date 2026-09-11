@@ -1,20 +1,34 @@
+use std::sync::Arc;
+
 use chrono::Utc;
 use rusqlite::params;
 
 use crate::domain::Presentation;
 use crate::error::AppError;
+use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
+use crate::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use crate::infra::sqlite::connect::DbPool;
+use crate::ports::cleanup_queue::CleanupQueue;
 use crate::ports::presentation_reader::PresentationReader;
 use crate::ports::presentation_writer::{DeleteResult, PresentationWriter};
 
 #[derive(Clone)]
 pub struct SqlitePresentationRepository {
     pool: DbPool,
+    storage: Option<Arc<LocalAudioStorage>>,
 }
 
 impl SqlitePresentationRepository {
     pub fn new(pool: DbPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            storage: None,
+        }
+    }
+
+    pub fn with_storage(mut self, storage: Arc<LocalAudioStorage>) -> Self {
+        self.storage = Some(storage);
+        self
     }
 }
 
@@ -148,6 +162,22 @@ impl PresentationWriter for SqlitePresentationRepository {
             ));
         }
 
+        let audio_keys: Vec<String> = {
+            let mut audio_stmt = tx
+                .prepare(
+                    "SELECT audio_key FROM show_items WHERE presentation_id = ?1 AND audio_key IS NOT NULL;",
+                )
+                .map_err(|e| AppError::Database(format!("Failed to prepare audio keys query: {e}")))?;
+            let rows = audio_stmt
+                .query_map([id], |r| r.get(0))
+                .map_err(|e| AppError::Database(format!("Failed to query audio keys: {e}")))?;
+            let mut keys = Vec::new();
+            for r in rows {
+                keys.push(r.map_err(|e| AppError::Database(format!("Failed to read audio key: {e}")))?);
+            }
+            keys
+        };
+
         let now = Utc::now().to_rfc3339();
         tx.execute(
             "INSERT OR IGNORE INTO pending_audio_deletions (audio_key, created_at, attempts)
@@ -162,9 +192,53 @@ impl PresentationWriter for SqlitePresentationRepository {
         tx.commit()
             .map_err(|e| AppError::Database(format!("Failed to commit delete transaction: {e}")))?;
 
+        let storage = match &self.storage {
+            Some(s) => s.clone(),
+            None => {
+                let base_audio = if let Ok(conn) = self.pool.get() {
+                    if let Ok(db_path) =
+                        conn.query_row("PRAGMA database_list;", [], |r| r.get::<_, String>(2))
+                    {
+                        if !db_path.is_empty() {
+                            let parent = std::path::Path::new(&db_path)
+                                .parent()
+                                .unwrap_or(std::path::Path::new("."));
+                            if parent.join("audio").exists() {
+                                parent.join("audio")
+                            } else {
+                                std::path::PathBuf::from("audio")
+                            }
+                        } else {
+                            std::path::PathBuf::from("audio")
+                        }
+                    } else {
+                        std::path::PathBuf::from("audio")
+                    }
+                } else {
+                    std::path::PathBuf::from("audio")
+                };
+                Arc::new(LocalAudioStorage::new(base_audio))
+            }
+        };
+
+        let cleanup = SqliteCleanupRepository::new(self.pool.clone());
+        let mut cleanup_pending = false;
+
+        for key in &audio_keys {
+            match storage.delete_file(key) {
+                Ok(_) => {
+                    let _ = cleanup.mark_completed(key);
+                }
+                Err(e) => {
+                    let _ = cleanup.record_failure(key, &e.to_string());
+                    cleanup_pending = true;
+                }
+            }
+        }
+
         Ok(DeleteResult {
             deleted_id: id.to_string(),
-            cleanup_pending: false,
+            cleanup_pending,
         })
     }
 }

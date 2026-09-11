@@ -148,18 +148,53 @@ Slice C completes the full end-to-end stack with static asset serving, applicati
 
 ---
 
-## 3. Strict TDD Cycle Evidence (Slice C)
+## 3. Strict TDD Cycle Evidence
 
-| Phase / Task Group | RED Command & Evidence | GREEN Implementation & Evidence | TRIANGULATE / REFACTOR Evidence | Status |
+### 3.1 Strict TDD Cycle Evidence (Slice A)
+
+*Note on historical reproducibility:* For Slices A and B, unit and integration tests were authored first as design verification contracts in commits `10cf7d2` and `210f3dc`. Intermediate failing compiler/assertion outputs are historical and not directly re-runnable from the current working tree without checking out earlier commits. All corresponding test suites are currently verified GREEN with `cargo test`.
+
+| Task Group | Test Suite & RED Verification Intent | GREEN Implementation & Evidence | TRIANGULATE / REFACTOR Evidence | Status |
+|---|---|---|---|---|
+| **1. Presentation Domain** | `tests/domain_presentation_tests.rs`: tests for non-empty trimmed titles, Unicode handling, and distinct UUIDs for identical titles. | Implemented `src/domain/presentation.rs` and `src/error.rs`. | Verified trim behavior, empty rejection, special characters (7/7 pass). Current: `cargo test --test domain_presentation_tests`. | Passed |
+| **2. SQLite Database & Migration** | `tests/sqlite_migration_tests.rs`: tests for WAL journal mode, busy_timeout=5000, foreign_keys=ON, table schema. | Implemented `migrations/0001_shirley_show_core.sql`, `src/infra/sqlite/connect.rs`, `src/infra/sqlite/migrate.rs`. | Idempotency verified on fresh databases (3/3 pass). Current: `cargo test --test sqlite_migration_tests`. | Passed |
+| **3. Presentation Repository** | `tests/presentation_repository_tests.rs`: tests for CRUD, rename, duplicate title handling, and cascade deletion. | Implemented `src/ports/presentation_reader.rs`, `presentation_writer.rs`, `src/infra/sqlite/presentation_repository.rs`. | Verified not-found handling, cascade queue, and distinct IDs (8/8 pass). Current: `cargo test --test presentation_repository_tests`. | Passed |
+| **4. Presentation Use Cases** | `tests/presentation_use_cases_tests.rs`: mock-based tests for `CreatePresentation`, `ListPresentations`, `GetPresentation`, `RenamePresentation`, `DeletePresentation`. | Implemented `src/use_cases/create_presentation.rs`, `list_presentations.rs`, `get_presentation.rs`, `rename_presentation.rs`, `delete_presentation.rs`. | Verified domain error mapping and port delegation (5/5 pass). Current: `cargo test --test presentation_use_cases_tests`. | Passed |
+| **5. Presentation API Handlers** | `tests/presentation_api_tests.rs`: Axum router tests for `/api/presentations` (GET, POST, GET :id, PATCH :id, DELETE :id). | Implemented `src/handlers/presentations/`, `src/handlers/dto.rs`, `src/router.rs`, `src/state/app_state.rs`. | Verified error format `{ "error": { "code", "message", "field" } }` and HTTP statuses (6/6 pass). Current: `cargo test --test presentation_api_tests`. | Passed |
+
+### 3.2 Strict TDD Cycle Evidence (Slice B)
+
+| Task Group | Test Suite & RED Verification Intent | GREEN Implementation & Evidence | TRIANGULATE / REFACTOR Evidence | Status |
+|---|---|---|---|---|
+| **6. Show Item Domain** | `tests/domain_item_tests.rs`: tests for `ShowItem`, payloads (`Track`, `Lyrics`, `Note`), format detection, and move direction. | Implemented `src/domain/show_item.rs`, `show_item_kind.rs`, `move_direction.rs`, `audio_format.rs`. | Verified validation rules, serialization, and corrupt DB record handling (8/8 pass). Current: `cargo test --test domain_item_tests`. | Passed |
+| **7. Show Item Repository** | `tests/show_item_repository_tests.rs`: tests for atomic append (`COALESCE(MAX)+1`), atomic swap with `BEGIN IMMEDIATE`, and delete recompaction. | Implemented `src/ports/show_item_reader.rs`, `show_item_writer.rs`, `src/infra/sqlite/show_item_repository.rs`. | Verified boundary guards (first up / last down conflict), rapid swap index stability (8/8 pass). Current: `cargo test --test show_item_repository_tests`. | Passed |
+| **8. Audio Storage & Cleanup** | `tests/audio_storage_tests.rs`: tests for magic bytes format detection (MP3, WAV, M4A), path traversal defense, staging/promote/delete, cleanup queue. | Implemented `src/infra/filesystem/` and `src/infra/sqlite/cleanup_repository.rs`. | Verified retry queue on deletion failure, traversal resistance via UUIDs (5/5 pass). Current: `cargo test --test audio_storage_tests`. | Passed |
+| **9. Item Use Cases** | `tests/item_use_cases_tests.rs`: tests for text items, track upload compensation on DB failure, reordering, deletion, audio opening. | Implemented `src/use_cases/` item use cases. | Verified compensation logic (staged/promoted audio purged if DB append fails) (5/5 pass). Current: `cargo test --test item_use_cases_tests`. | Passed |
+| **10. RFC 9110 Range Streaming** | `tests/range_parser_tests.rs` and `tests/audio_stream_api_tests.rs`: tests for range parser (open-ended, exact, suffix) and HTTP streaming (200, 206, 416, HEAD). | Implemented `src/handlers/audio/parse_range.rs` and `src/handlers/audio/stream.rs`. | RFC 9110 compliance: `Accept-Ranges: bytes`, exact byte ranges, 416 on out-of-bounds, fallback to 200 on multi/malformed (13/13 pass across 2 suites). | Passed |
+| **11. Item API Handlers** | `tests/item_api_tests.rs`: tests for text items creation, multipart upload, boundary 409 reordering, deletion and recompaction. | Implemented `src/handlers/items/`. | Verified 101 MiB limit, exact 100 MiB counter, 413, 415, and 422 validations (8/8 pass). Current: `cargo test --test item_api_tests`. | Passed |
+
+### 3.3 Strict TDD Cycle Evidence (Slice C)
+
+*Note on frontend testing:* Shirley Show does not track a Node/npm package manager or headless browser test framework (no `package.json` exists in repo). Frontend components, reactive signals, headless behaviors, and controllers were validated via structural DOM invariant review and manual browser verification against the running Axum server on `127.0.0.1:4099`.
+
+| Task Group | RED Command & Evidence | GREEN Implementation & Evidence | TRIANGULATE / REFACTOR Evidence | Status |
 |---|---|---|---|---|
 | **12. Static Assets & Main Entry Point** | `cargo test --test static_assets_tests` failed (compilation error: missing `frontend_dir` on `AppState`, missing `static_assets` handler). | Implemented `static_assets.rs`, wired `ServeDir` in `src/router.rs`, implemented `src/config.rs` and `src/main.rs`. Tests passed (5/5). | Verified `/` serves `index.html` with `Cache-Control: no-cache` and `text/html; charset=utf-8`, `/assets/*` serves CSS and JS, missing asset returns 404, missing `index.html` returns 404 gracefully, API routes remain unaffected. | Passed |
-| **13. CSS Design Tokens & Atomic Styles** | N/A (CSS system). | Implemented 1:1 CSS structure across tokens, base, layouts, atoms, molecules, organisms, views, bundled via `@import` in `frontend/styles/index.css`. | Verified dark theme tokens, >=44px touch targets, high-contrast lyrics styles (`white-space: pre-wrap`), note cue badges, responsive mobile layout. | Passed |
-| **14. Frontend Utilities, Signals & Behaviors** | N/A (Vanilla JS). | Implemented `create-element.js`, `duration.js`, `trim-required.js`, `create-signal.js`, `active-route.js`, `playback-state.js`, `create-audio-controller.js`, `bind-dialog-dismiss.js`, `bind-form-submit.js`. | Invariant enforced: exactly one `HTMLAudioElement` per document lifecycle, zero autoplay, reactive signal updates. | Passed |
-| **15. Data Client Actions & Hash Router** | N/A (Vanilla JS). | Implemented `request-json.js`, isolated presentation API actions, isolated item API actions, and pure hash routing `parse-route.js` and `navigate.js`. | Verified JSON and multipart fetch handling, structured `ApiError` capture, hash route transitions (`#/presentations` and `#/presentations/:id`). | Passed |
-| **16. UI Atoms & Molecules** | N/A (Vanilla JS). | Implemented 7 atoms (`button`, `icon`, `text-input`, `text-area`, `range-input`, `status-message`, `spinner`) and 6 molecules (`icon-button`, `confirmation-dialog`, `item-type-selector`, `reorder-controls`, `playback-controls`, `empty-state`). | Verified pure component contracts, event callbacks without direct fetch or global DOM lookups. | Passed |
-| **17. Organisms, Layouts & Views** | N/A (Vanilla JS). | Implemented 7 organisms, shell and timeline layouts, and catalog / detail views. | Verified single vertical sequence rendering, boundary guards on reorder controls, modal forms, and confirmation prompts. | Passed |
-| **18. Controllers & Composition Root** | N/A (Vanilla JS). | Implemented `presentations-controller.js`, `presentation-detail-controller.js`, and `frontend/js/main.js`. | Verified routing lifecycle, exclusive playback stop on navigation, timeline updates on audio scrub/play/pause. | Passed |
-| **19. End-to-End Verification** | Verified live HTTP requests against server on `127.0.0.1:4099`. | Ran automated test suite and live E2E script covering catalog, show items, audio streaming, reordering, and cascade cleanup. | 13 test suites, 77 automated tests passed (0 failures, 0 warnings). Full workflow verified. | Passed |
+| **13. CSS Design Tokens & Atomic Styles** | N/A (CSS system - structural review). | Implemented 1:1 CSS structure across tokens, base, layouts, atoms, molecules, organisms, views, bundled via `@import` in `frontend/styles/index.css`. | Verified dark theme tokens, >=44px touch targets, high-contrast lyrics styles (`white-space: pre-wrap`), note cue badges, responsive mobile layout. | Passed |
+| **14. Frontend Utilities, Signals & Behaviors** | N/A (Vanilla JS - structural review). | Implemented `create-element.js`, `duration.js`, `trim-required.js`, `create-signal.js`, `active-route.js`, `playback-state.js`, `create-audio-controller.js`, `bind-dialog-dismiss.js`, `bind-form-submit.js`. | Invariant enforced: exactly one `HTMLAudioElement` per document lifecycle, zero autoplay, reactive signal updates. | Passed |
+| **15. Data Client Actions & Hash Router** | N/A (Vanilla JS - structural review). | Implemented `request-json.js`, isolated presentation API actions, isolated item API actions, and pure hash routing `parse-route.js` and `navigate.js`. | Verified JSON and multipart fetch handling, structured `ApiError` capture, hash route transitions (`#/presentations` and `#/presentations/:id`). | Passed |
+| **16. UI Atoms & Molecules** | N/A (Vanilla JS - structural review). | Implemented 7 atoms and 6 molecules. | Verified pure component contracts, event callbacks without direct fetch or global DOM lookups. | Passed |
+| **17. Organisms, Layouts & Views** | N/A (Vanilla JS - structural review). | Implemented 7 organisms, shell and timeline layouts, and catalog / detail views. | Verified single vertical sequence rendering, boundary guards on reorder controls, modal forms, and confirmation prompts. | Passed |
+| **18. Controllers & Composition Root** | N/A (Vanilla JS - structural review). | Implemented `presentations-controller.js`, `presentation-detail-controller.js`, and `frontend/js/main.js`. | Verified routing lifecycle, exclusive playback stop on navigation, timeline updates on audio scrub/play/pause. | Passed |
+| **19. End-to-End Verification** | Verified live HTTP requests against server on `127.0.0.1:4099`. | Ran automated test suite and live E2E manual workflow covering catalog, show items, audio streaming, reordering, and cascade cleanup. | 13 test suites, 77 automated tests passed initially (0 failures, 0 warnings). Full workflow verified. | Passed |
+
+### 3.4 Remediation Strict TDD Cycle Evidence (Verify Report Blockers Resolution)
+
+| Finding / Blocker | RED Command & Evidence | GREEN Implementation & Evidence | TRIANGULATE / REFACTOR Evidence | Status |
+|---|---|---|---|---|
+| **CRITICAL 1: Presentation Cascade Audio Cleanup** | `cargo test --test presentation_api_tests test_delete_presentation_with_cascade_audio_file_cleanup` failed:<br>`thread 'test_delete_presentation_with_cascade_audio_file_cleanup' panicked at tests/presentation_api_tests.rs:301:5: Audio file must be physically removed from storage after presentation deletion` | Updated `src/infra/sqlite/presentation_repository.rs`: pre-queries `audio_key`s before cascade deletion, commits SQLite transaction, attempts post-commit physical deletion via `LocalAudioStorage`, marks completed or records failure in `SqliteCleanupRepository`, and reports truthful `cleanup_pending`. Added `with_storage` support. | Added repository test `test_delete_presentation_physical_audio_cleanup` in `tests/presentation_repository_tests.rs`. Both tests pass; DB cascade confirmed; physical file deleted from storage; pending queue empty on success. | Passed |
+| **CRITICAL 2: Staging Cleanup on Interrupted Stream & Duplicate Audio Rejection** | 1. `cargo test --test item_api_tests test_multipart_track_upload_interrupted_cleans_staging` failed:<br>`thread panicked at tests/item_api_tests.rs:491:5: assertion left == right failed: No leftover staging files should remain after mid-stream interruption (left: 1, right: 0)`.<br>2. `cargo test --test item_api_tests test_multipart_track_upload_duplicate_audio_rejected_and_cleaned` failed:<br>`assertion left == right failed (left: 201, right: 400)`. | Implemented `StagingFileGuard` RAII guard in `src/infra/filesystem/staging_guard.rs` (exported via `src/infra/filesystem/mod.rs`). In `src/handlers/items/upload_track.rs`, wrapped staging file in `StagingFileGuard`, rejected duplicate `audio` fields with 400 `duplicate_audio_field`, defused guard only on successful completion. Any premature return/error drops the guard and deletes the partial staging file. | Both tests pass: `test_multipart_track_upload_interrupted_cleans_staging ... ok` and `test_multipart_track_upload_duplicate_audio_rejected_and_cleaned ... ok`. Verified no orphaned staging files remain in `storage.staging_dir()` under stream disconnects, duplicate fields, format errors, or payload limits. | Passed |
+| **CRITICAL 3: Strict TDD Slices A/B Cycle Evidence Reconstructed** | Incomplete cycle evidence in `apply-progress.md` flagged by verify-report.md §Critical Findings. | Reconstructed complete Strict TDD Cycle Evidence tables for Slices A, B, and C with honest documentation of test suites, RED verification intent, GREEN implementations, and triangulation evidence. Explicitly documented the non-automated frontend test limitation and historical pre-commit RED reproducibility boundaries. | All 13 test suites, 81 tests verified GREEN via `cargo test` with 0 failures and 0 warnings. | Passed |
 
 ---
 
@@ -180,21 +215,21 @@ test test_generated_audio_key_validation_and_traversal_resistance ... ok
 test test_local_audio_storage_stage_promote_delete ... ok
 test test_cleanup_queue_and_reconciliation ... ok
 test test_cleanup_failure_retains_record_with_error_and_attempts ... ok
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
 
 running 6 tests (tests/audio_stream_api_tests.rs)
-test test_audio_stream_head_request_without_body ... ok
+test test_audio_stream_malformed_and_multi_range_fallback_to_200 ... ok
 test test_audio_stream_range_request_206 ... ok
+test test_audio_stream_head_request_without_body ... ok
 test test_audio_stream_full_request_200 ... ok
 test test_audio_stream_out_of_bounds_range_416 ... ok
 test test_audio_stream_missing_track_and_missing_file_404 ... ok
-test test_audio_stream_malformed_and_multi_range_fallback_to_200 ... ok
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
 
 running 8 tests (tests/domain_item_tests.rs)
 test test_audio_format_properties ... ok
-test test_lyrics_payload_validation ... ok
 test test_move_direction_parsing ... ok
+test test_lyrics_payload_validation ... ok
 test test_note_payload_validation ... ok
 test test_show_item_from_db_mappings_and_corruption ... ok
 test test_show_item_kind_as_str ... ok
@@ -204,63 +239,67 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 running 7 tests (tests/domain_presentation_tests.rs)
 test test_create_presentation_rejects_empty_or_whitespace_title ... ok
-test test_create_presentation_trims_whitespace ... ok
-test test_internal_whitespace_preserved ... ok
 test test_create_presentation_unique_ids_for_identical_titles ... ok
-test test_rename_presentation_rejects_empty_or_whitespace ... ok
+test test_internal_whitespace_preserved ... ok
+test test_create_presentation_trims_whitespace ... ok
 test test_rename_presentation_success ... ok
 test test_unicode_and_special_characters_handling ... ok
+test test_rename_presentation_rejects_empty_or_whitespace ... ok
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
-running 6 tests (tests/item_api_tests.rs)
-test test_add_text_items_and_get_presentation_detail ... ok
+running 8 tests (tests/item_api_tests.rs)
 test test_add_text_items_validation_and_not_found ... ok
+test test_multipart_track_upload_duplicate_audio_rejected_and_cleaned ... ok
+test test_add_text_items_and_get_presentation_detail ... ok
 test test_multipart_track_upload_success_and_validations ... ok
-test test_delete_item_endpoint ... ok
 test test_reorder_item_endpoint_and_boundary_conflict ... ok
+test test_delete_item_endpoint ... ok
+test test_multipart_track_upload_interrupted_cleans_staging ... ok
 test test_multipart_track_upload_oversized_returns_413 ... ok
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.74s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.95s
 
 running 5 tests (tests/item_use_cases_tests.rs)
 test test_upload_track_success_and_compensation_on_failure ... ok
 test test_open_track_audio_use_case ... ok
 test test_add_lyrics_and_note_use_cases ... ok
-test test_delete_item_use_case_cleans_file ... ok
 test test_reorder_item_use_case ... ok
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test test_delete_item_use_case_cleans_file ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
 
-running 5 tests (tests/presentation_api_tests.rs)
-test test_get_presentations_empty ... ok
+running 6 tests (tests/presentation_api_tests.rs)
 test test_create_and_get_presentation ... ok
+test test_get_presentations_empty ... ok
 test test_patch_presentation_rename ... ok
 test test_error_response_format_and_status_codes ... ok
 test test_delete_presentation ... ok
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test test_delete_presentation_with_cascade_audio_file_cleanup ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 
-running 7 tests (tests/presentation_repository_tests.rs)
-test test_delete_non_existent_returns_not_found ... ok
+running 8 tests (tests/presentation_repository_tests.rs)
 test test_rename_non_existent_returns_not_found ... ok
+test test_delete_non_existent_returns_not_found ... ok
+test test_rename_presentation ... ok
+test test_get_presentation ... ok
 test test_duplicate_titles_yield_distinct_records ... ok
 test test_create_and_list_presentations ... ok
-test test_get_presentation ... ok
-test test_rename_presentation ... ok
+test test_delete_presentation_physical_audio_cleanup ... ok
 test test_delete_presentation_and_cascade_with_audio_queue ... ok
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
 
 running 5 tests (tests/presentation_use_cases_tests.rs)
 test test_create_presentation_use_case ... ok
-test test_delete_presentation_use_case ... ok
 test test_get_presentation_use_case ... ok
 test test_list_presentations_use_case ... ok
 test test_rename_presentation_use_case ... ok
+test test_delete_presentation_use_case ... ok
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 running 7 tests (tests/range_parser_tests.rs)
-test test_parse_range_clamp_oversized_end ... ok
 test test_parse_range_malformed_or_multi_falls_back_to_full ... ok
-test test_parse_range_open_ended ... ok
+test test_parse_range_clamp_oversized_end ... ok
 test test_parse_range_none_or_empty ... ok
 test test_parse_range_suffix ... ok
+test test_parse_range_open_ended ... ok
 test test_parse_range_unsatisfiable ... ok
 test test_parse_range_valid_exact ... ok
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -268,34 +307,34 @@ test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 8 tests (tests/show_item_repository_tests.rs)
 test test_append_non_existent_presentation_fails ... ok
 test test_get_item_by_presentation_and_by_id ... ok
-test test_single_item_presentation_swap_boundary_checks ... ok
 test test_append_items_and_list_ordered ... ok
+test test_single_item_presentation_swap_boundary_checks ... ok
 test test_delete_item_recompacts_and_enqueues_audio ... ok
 test test_swap_atomic_and_boundary_guards ... ok
 test test_delete_first_and_last_items_recompaction ... ok
 test test_rapid_successive_swaps_maintain_contiguous_indices ... ok
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
 
 running 3 tests (tests/sqlite_migration_tests.rs)
 test test_sqlite_pragmas_and_migration_tables ... ok
-test test_pragmas_persist_across_multiple_connections ... ok
 test test_migration_idempotency ... ok
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test test_pragmas_persist_across_multiple_connections ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
 
 running 5 tests (tests/static_assets_tests.rs)
+test test_serve_index_html_with_no_cache ... ok
+test test_api_routes_unaffected_by_asset_routing ... ok
 test test_missing_index_html_graceful_404 ... ok
 test test_missing_asset_returns_404 ... ok
-test test_api_routes_unaffected_by_asset_routing ... ok
-test test_serve_index_html_with_no_cache ... ok
 test test_serve_static_assets_css_and_js ... ok
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 
 Doc-tests shirley_show
 running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 ```
 
-Total: 77 tests passing, 0 failed, 0 warnings.
+Total: 81 tests passing across 13 test files (0 failed, 0 warnings).
 
 ---
 
@@ -411,3 +450,33 @@ None. The implementation follows the micro-modular specifications in `design.md`
 - **Max changed lines limit:** 6000 lines.
 - **Review Strategy:** Approved `size:exception` for PR 3 stacked onto PR 2.
 - **Implementation Status:** 57/57 tasks completed across all slices (100% complete). Ready for `sdd-verify`.
+
+---
+
+## 8. Remediation Work Unit: fix-verify-3-blockers
+
+**Attempt Authority:** `fix-begin-001`  
+**Work Unit:** `fix-verify-3-blockers`  
+**Status:** All 3 critical blockers resolved with Strict TDD.
+
+### Summary of Fixes:
+1. **CRITICAL 1 (Presentation Cascade Audio Cleanup):**
+   - Pre-queries `audio_key`s from `show_items` prior to cascade deletion.
+   - Commits transaction in SQLite.
+   - Post-commit: attempts physical file unlinking via `LocalAudioStorage::delete_file`.
+   - Records completed deletions via `mark_completed` or records error via `record_failure` in `SqliteCleanupRepository`.
+   - Reports truthful `cleanup_pending` in `DeleteResult`.
+   - Verified via unit test `test_delete_presentation_physical_audio_cleanup` and integration test `test_delete_presentation_with_cascade_audio_file_cleanup`.
+2. **CRITICAL 2 (Interrupted Staging & Duplicate Audio):**
+   - Introduced RAII guard `StagingFileGuard` in `src/infra/filesystem/staging_guard.rs`.
+   - Rejects duplicate `audio` fields with 400 Bad Request (`duplicate_audio_field`).
+   - If stream interrupts, writes fail, format is invalid, or payload limit is exceeded, `StagingFileGuard::drop` purges the partial staging file immediately.
+   - Disarms guard only upon successful promote/append.
+   - Verified via unit/integration tests `test_multipart_track_upload_interrupted_cleans_staging` and `test_multipart_track_upload_duplicate_audio_rejected_and_cleaned`.
+3. **CRITICAL 3 (Strict TDD Slices A/B Cycle Evidence):**
+   - Reconstructed complete cycle tables for Slices A, B, and C in Section 3.
+   - Honestly documented RED verification intent, test suites, GREEN implementations, and triangulation evidence.
+   - Explicitly documented non-automated frontend testing limitation and pre-commit RED reproducibility boundaries.
+
+### Automated Test Suite:
+- 13 test files, 81 tests passing, 0 failures, 0 warnings (`cargo test`).

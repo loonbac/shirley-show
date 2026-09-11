@@ -384,3 +384,85 @@ async fn test_delete_item_endpoint() {
     // Verify audio file deleted from disk
     assert_eq!(std::fs::read_dir(storage.files_dir()).unwrap().count(), 0);
 }
+
+
+struct ChannelReader {
+    rx: tokio::sync::mpsc::Receiver<Result<Vec<u8>, std::io::ErrorKind>>,
+    current: Option<Vec<u8>>,
+    pos: usize,
+}
+
+impl tokio::io::AsyncRead for ChannelReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        loop {
+            if let Some(ref bytes) = self.current {
+                if self.pos < bytes.len() {
+                    let to_copy = (bytes.len() - self.pos).min(buf.remaining());
+                    buf.put_slice(&bytes[self.pos..self.pos + to_copy]);
+                    self.pos += to_copy;
+                    return std::task::Poll::Ready(Ok(()));
+                }
+                self.current = None;
+                self.pos = 0;
+            }
+            match self.rx.poll_recv(cx) {
+                std::task::Poll::Ready(Some(Ok(bytes))) => { self.current = Some(bytes); self.pos = 0; }
+                std::task::Poll::Ready(Some(Err(kind))) => return std::task::Poll::Ready(Err(std::io::Error::new(kind, "drop"))),
+                std::task::Poll::Ready(None) => return std::task::Poll::Ready(Ok(())),
+                std::task::Poll::Pending => return std::task::Poll::Pending,
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_multipart_track_upload_interrupted_cleans_staging() {
+    let (app, pres_id, storage, _dir) = setup_test_app().await;
+    let boundary = "boundaryInterruptedTest123";
+    let (tx, rx) = tokio::sync::mpsc::channel(4);
+
+    let mut part1 = Vec::new();
+    part1.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nInterrupted\r\n").as_bytes());
+    part1.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"test.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
+    tx.send(Ok(part1)).await.unwrap();
+
+    let stream = tokio_util::io::ReaderStream::new(ChannelReader { rx, current: None, pos: 0 });
+    let req = Request::builder().method("POST").uri(format!("/api/presentations/{pres_id}/tracks"))
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from_stream(stream)).unwrap();
+
+    let handle = tokio::spawn(async move { app.oneshot(req).await });
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    let _ = tx.send(Ok(vec![0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x34])).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    let _ = tx.send(Err(std::io::ErrorKind::ConnectionReset)).await;
+
+    let res = handle.await.unwrap().unwrap();
+    assert!(res.status().is_client_error() || res.status().is_server_error());
+    assert_eq!(std::fs::read_dir(storage.staging_dir()).unwrap().count(), 0, "No leftover staging files after interrupt");
+}
+
+#[tokio::test]
+async fn test_multipart_track_upload_duplicate_audio_rejected_and_cleaned() {
+    let (app, pres_id, storage, _dir) = setup_test_app().await;
+    let boundary = "boundaryDupTest123";
+    let mp3 = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nT1\r\n").as_bytes());
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"1.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
+    body.extend_from_slice(&mp3);
+    body.extend_from_slice(format!("\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"2.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").as_bytes());
+    body.extend_from_slice(&mp3);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    let req = Request::builder().method("POST").uri(format!("/api/presentations/{pres_id}/tracks"))
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(body)).unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(std::fs::read_dir(storage.staging_dir()).unwrap().count(), 0, "No leftover staging files after duplicate audio");
+}

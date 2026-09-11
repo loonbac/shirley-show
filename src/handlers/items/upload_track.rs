@@ -9,6 +9,7 @@ use crate::domain::show_item::MAX_AUDIO_BYTE_SIZE;
 use crate::error::AppError;
 use crate::handlers::dto::ShowItemResponse;
 use crate::infra::filesystem::detect_audio_format::detect_audio_format;
+use crate::infra::filesystem::StagingFileGuard;
 use crate::state::AppState;
 
 pub async fn upload_track(
@@ -17,7 +18,7 @@ pub async fn upload_track(
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<ShowItemResponse>), AppError> {
     let mut title: Option<String> = None;
-    let mut stage_info: Option<(String, std::path::PathBuf)> = None;
+    let mut staging_guard: Option<StagingFileGuard> = None;
     let mut detected_format = None;
     let mut total_bytes: i64 = 0;
 
@@ -35,6 +36,13 @@ pub async fn upload_track(
                 .map_err(|e| AppError::bad_request("invalid_title_field", e.to_string()))?;
             title = Some(text);
         } else if name == "audio" {
+            if staging_guard.is_some() {
+                return Err(AppError::bad_request(
+                    "duplicate_audio_field",
+                    "Solo se permite un archivo de audio por solicitud.",
+                ));
+            }
+
             let filename = field
                 .file_name()
                 .unwrap_or("audio.mp3")
@@ -47,7 +55,8 @@ pub async fn upload_track(
                 .to_string();
 
             let (stage_id, stage_path) = state.storage.create_staging_file()?;
-            let mut file = std::fs::File::create(&stage_path).map_err(|e| {
+            let guard = StagingFileGuard::new(state.storage.clone(), stage_id, stage_path.clone());
+            let mut file = std::fs::File::create(guard.path()).map_err(|e| {
                 AppError::Internal(format!("Failed to open staging file: {e}"))
             })?;
 
@@ -61,7 +70,6 @@ pub async fn upload_track(
                 total_bytes += chunk.len() as i64;
                 if total_bytes > MAX_AUDIO_BYTE_SIZE {
                     drop(file);
-                    let _ = state.storage.delete_staging(&stage_id);
                     return Err(AppError::payload_too_large(
                         "file_too_large",
                         "El archivo excede el límite máximo de 100 MiB.",
@@ -76,7 +84,6 @@ pub async fn upload_track(
 
                 if let Err(e) = file.write_all(&chunk) {
                     drop(file);
-                    let _ = state.storage.delete_staging(&stage_id);
                     return Err(AppError::Internal(format!(
                         "Failed to write to staging file: {e}"
                     )));
@@ -85,26 +92,15 @@ pub async fn upload_track(
 
             drop(file);
 
-            match detect_audio_format(&header_buf, &ext) {
-                Ok(fmt) => {
-                    detected_format = Some(fmt);
-                }
-                Err(e) => {
-                    let _ = state.storage.delete_staging(&stage_id);
-                    return Err(e);
-                }
-            }
-
-            stage_info = Some((stage_id, stage_path));
+            let fmt = detect_audio_format(&header_buf, &ext)?;
+            detected_format = Some(fmt);
+            staging_guard = Some(guard);
         }
     }
 
     let title = match title {
         Some(t) if !t.trim().is_empty() => t.trim().to_string(),
         _ => {
-            if let Some((stage_id, _)) = stage_info {
-                let _ = state.storage.delete_staging(&stage_id);
-            }
             return Err(AppError::validation(
                 "title_required",
                 "El título de la pista no puede estar vacío.",
@@ -113,8 +109,8 @@ pub async fn upload_track(
         }
     };
 
-    let (stage_id, _stage_path) = match stage_info {
-        Some(s) => s,
+    let guard = match staging_guard.take() {
+        Some(g) => g,
         None => {
             return Err(AppError::bad_request(
                 "missing_audio_field",
@@ -126,7 +122,6 @@ pub async fn upload_track(
     let format = match detected_format {
         Some(f) => f,
         None => {
-            let _ = state.storage.delete_staging(&stage_id);
             return Err(AppError::unsupported_media_type(
                 "unsupported_media_type",
                 "Formato de audio no reconocido.",
@@ -134,6 +129,7 @@ pub async fn upload_track(
         }
     };
 
+    let stage_id = guard.stage_id().to_string();
     let item = state.upload_track.execute(
         &presentation_id,
         &title,
@@ -141,6 +137,8 @@ pub async fn upload_track(
         format,
         total_bytes,
     )?;
+
+    guard.defuse();
 
     Ok((StatusCode::CREATED, Json(ShowItemResponse::from(&item))))
 }
