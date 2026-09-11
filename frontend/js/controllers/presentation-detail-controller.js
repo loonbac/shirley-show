@@ -6,6 +6,8 @@ import { createPresentationFormDialog } from '../components/organisms/presentati
 import { createAddItemDialog } from '../components/organisms/add-item-dialog.js';
 import { createQuickEditDialog } from '../components/organisms/quick-edit-dialog.js';
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
+import { createStageModeView } from '../components/organisms/stage-mode-view.js';
+import { useWakeLock } from '../behaviors/use-wake-lock.js';
 import { getPresentation } from '../data/get-presentation.js';
 import { renamePresentation } from '../data/rename-presentation.js';
 import { deletePresentation } from '../data/delete-presentation.js';
@@ -18,7 +20,9 @@ import { toPresentations } from '../router/navigate.js';
 import { playbackSignal } from '../state/playback-state.js';
 
 /**
- * Controller orchestrating a presentation's vertical timeline, quick actions, and exclusive playback.
+ * Controller orchestrating a presentation's vertical timeline, quick actions,
+ * headless drag-and-drop reordering, distraction-free Stage Mode, and exclusive audio playback.
+ *
  * @param {{
  *   presentationId: string,
  *   audioController: {
@@ -40,9 +44,12 @@ export function createPresentationDetailController(deps) {
 
   let presentation = null;
   let items = [];
+  let confirmedItems = [];
   let isLoading = true;
   let errorMessage = null;
   let activeDialog = null;
+  let stageModeView = null;
+  let isReordering = false;
 
   function closeActiveDialog() {
     if (activeDialog) {
@@ -50,6 +57,73 @@ export function createPresentationDetailController(deps) {
       activeDialog = null;
     }
   }
+
+  // Screen Wake Lock behavior
+  const wakeLock = useWakeLock({
+    onChange: ({ status }) => {
+      if (stageModeView) {
+        stageModeView.update({ wakeLockStatus: status });
+      }
+    },
+  });
+
+  function enterStageMode() {
+    if (stageModeView || !presentation) return;
+
+    stageModeView = createStageModeView({
+      presentation,
+      items,
+      playbackState: playbackSignal.get(),
+      wakeLockStatus: wakeLock.getStatus(),
+      onExit: exitStageMode,
+      onTogglePlay: (track) => {
+        audioController.toggle(track);
+      },
+      onSeek: (seconds) => {
+        audioController.seek(seconds);
+      },
+    });
+
+    document.body.appendChild(stageModeView.el);
+
+    // Progressive Fullscreen: graceful degradation if unsupported or denied
+    try {
+      if (stageModeView.el.requestFullscreen) {
+        stageModeView.el.requestFullscreen().catch(() => {});
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+
+    // Progressive Screen Wake Lock
+    wakeLock.activate();
+  }
+
+  function exitStageMode() {
+    if (!stageModeView) return;
+
+    wakeLock.deactivate();
+
+    try {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+
+    stageModeView.destroy();
+    stageModeView = null;
+  }
+
+  const stageBtn = createButton({
+    text: 'Modo Escenario',
+    variant: 'secondary',
+    icon: createIcon({ name: 'play', size: 'sm' }),
+    onClick: () => enterStageMode(),
+  });
 
   const addItemBtn = createButton({
     text: 'Agregar Elemento',
@@ -64,7 +138,7 @@ export function createPresentationDetailController(deps) {
       audioController.stop();
       toPresentations();
     },
-    actions: [addItemBtn.el],
+    actions: [stageBtn.el, addItemBtn.el],
   });
 
   const view = createPresentationDetailView({
@@ -76,8 +150,10 @@ export function createPresentationDetailController(deps) {
     onRename: () => openRenameDialog(),
     onDeletePresentation: () => openDeletePresentationDialog(),
     onAddItemClick: () => openAddItemDialog(),
+    onEnterStageMode: () => enterStageMode(),
     onQuickAdd: (type) => openAddItemDialog(type),
     onEditItem: (item) => openQuickEditDialog(item),
+    onReorderItem: (itemId, targetPosition) => handleDragReorder(itemId, targetPosition),
     onTogglePlay: (track) => {
       audioController.toggle(track);
     },
@@ -92,6 +168,9 @@ export function createPresentationDetailController(deps) {
   // Subscribe to playback changes to update playback UI in real time
   const unsubscribePlayback = playbackSignal.subscribe((newPlaybackState) => {
     view.update({ playbackState: newPlaybackState });
+    if (stageModeView) {
+      stageModeView.update({ playbackState: newPlaybackState });
+    }
   });
 
   async function loadData() {
@@ -103,10 +182,14 @@ export function createPresentationDetailController(deps) {
       const data = await getPresentation(presentationId);
       presentation = data.presentation;
       items = data.items || [];
+      confirmedItems = [...items];
       isLoading = false;
 
       topbar.update({ title: presentation.title });
       view.update({ presentation, items, isLoading: false });
+      if (stageModeView) {
+        stageModeView.update({ presentation, items });
+      }
     } catch (err) {
       isLoading = false;
       errorMessage = err.message || 'Error al cargar la presentación.';
@@ -133,6 +216,9 @@ export function createPresentationDetailController(deps) {
           presentation = res.presentation;
           topbar.update({ title: presentation.title });
           view.update({ presentation });
+          if (stageModeView) {
+            stageModeView.update({ presentation });
+          }
           closeActiveDialog();
         } catch (err) {
           alert(err.message || 'Error al renombrar la presentación.');
@@ -203,7 +289,11 @@ export function createPresentationDetailController(deps) {
           const updatedItem = await updateItem(presentationId, item.id, payload);
           // Update item in local items array and refresh view
           items = items.map((it) => (it.id === updatedItem.id ? updatedItem : it));
+          confirmedItems = [...items];
           view.update({ items });
+          if (stageModeView) {
+            stageModeView.update({ items });
+          }
           closeActiveDialog();
         } catch (err) {
           if (err && (err.status === 404 || err.code === 'item_not_found')) {
@@ -217,14 +307,45 @@ export function createPresentationDetailController(deps) {
     document.body.appendChild(activeDialog.el);
   }
 
+  async function handleDragReorder(itemId, targetPosition) {
+    if (isReordering) return;
+    isReordering = true;
+
+    try {
+      const res = await moveItem(presentationId, itemId, { targetPosition });
+      items = res.items || [];
+      confirmedItems = [...items];
+      view.update({ items });
+      if (stageModeView) {
+        stageModeView.update({ items });
+      }
+    } catch (err) {
+      if (err.status === 409 || err.code === 'reorder_boundary') {
+        // Boundary reached or conflict: restore confirmed order
+        items = [...confirmedItems];
+        view.update({ items });
+        return;
+      }
+      alert(err.message || 'Error al reordenar el elemento.');
+      items = [...confirmedItems];
+      view.update({ items });
+      await loadData();
+    } finally {
+      isReordering = false;
+    }
+  }
+
   async function handleMoveItem(item, direction) {
     try {
       const res = await moveItem(presentationId, item.id, direction);
       items = res.items || [];
+      confirmedItems = [...items];
       view.update({ items });
+      if (stageModeView) {
+        stageModeView.update({ items });
+      }
     } catch (err) {
       if (err.status === 409 || err.code === 'reorder_boundary') {
-        // Boundary reached or concurrently modified
         return;
       }
       alert(err.message || 'Error al reordenar el elemento.');
@@ -255,7 +376,11 @@ export function createPresentationDetailController(deps) {
 
           const res = await deleteItem(presentationId, item.id);
           items = res.items || [];
+          confirmedItems = [...items];
           view.update({ items });
+          if (stageModeView) {
+            stageModeView.update({ items });
+          }
           closeActiveDialog();
         } catch (err) {
           alert(err.message || 'Error al eliminar el elemento.');
@@ -272,8 +397,13 @@ export function createPresentationDetailController(deps) {
 
   function destroy() {
     unsubscribePlayback();
+    exitStageMode();
+    wakeLock.destroy();
     audioController.stop();
     closeActiveDialog();
+    if (view.destroy) {
+      view.destroy();
+    }
   }
 
   return {

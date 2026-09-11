@@ -19,6 +19,14 @@
   gap: var(--space-2);
 }
 
+.lyrics-item-reorder-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 .lyrics-item-header {
   display: flex;
   align-items: center;
@@ -54,9 +62,23 @@
 
 /* Tactile 48px touch targets for all interactive controls */
 .lyrics-item .icon-btn,
-.lyrics-item .reorder-btn {
+.lyrics-item .reorder-btn,
+.lyrics-item .drag-handle {
   min-width: var(--touch-target-action);
   min-height: var(--touch-target-action);
+}
+
+/* Stage Mode Variant */
+.lyrics-item--stage {
+  border-left-width: 6px;
+  padding: var(--space-5);
+}
+
+.lyrics-body--stage {
+  font-size: calc(1.35rem * var(--stage-lyrics-scale, 1.25));
+  line-height: 1.55;
+  letter-spacing: 0.025em;
+  padding: var(--space-3) 0;
 }
 
 @media (min-width: 768px) and (max-width: 1023px) {

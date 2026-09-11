@@ -1,5 +1,6 @@
 import { createElement } from '../../utils/dom/create-element.js';
 import { createButton } from '../atoms/button.js';
+import { createIcon } from '../atoms/icon.js';
 import { createSpinner } from '../atoms/spinner.js';
 import { createStatusMessage } from '../atoms/status-message.js';
 import { createIconButton } from '../molecules/icon-button.js';
@@ -7,8 +8,9 @@ import { createQuickAddBar } from '../molecules/quick-add-bar.js';
 import { createEmptyState } from '../molecules/empty-state.js';
 import { createTimelineLayout } from '../layouts/timeline-layout.js';
 import { createTrackItem } from '../organisms/track-item.js';
-import { createLyricsItem } from '../organisms/lyrics-item.js';
+import { createLyricsItem } from './../organisms/lyrics-item.js';
 import { createNoteItem } from '../organisms/note-item.js';
+import { useDragAndDrop } from '../../behaviors/use-drag-and-drop.js';
 
 /**
  * Pure view for presentation detail and show execution timeline.
@@ -21,8 +23,10 @@ import { createNoteItem } from '../organisms/note-item.js';
  *   onRename: () => void,
  *   onDeletePresentation: () => void,
  *   onAddItemClick: () => void,
+ *   onEnterStageMode?: () => void,
  *   onQuickAdd?: (type: 'track' | 'lyrics' | 'note') => void,
  *   onEditItem?: (item: any) => void,
+ *   onReorderItem?: (itemId: string, targetPosition: number) => void,
  *   onTogglePlay: (item: any) => void,
  *   onSeek: (seconds: number) => void,
  *   onMoveUp: (item: any) => void,
@@ -32,6 +36,7 @@ import { createNoteItem } from '../organisms/note-item.js';
  * @returns {{
  *   el: HTMLElement,
  *   update: (props: Partial<typeof props>) => void,
+ *   destroy: () => void,
  * }}
  */
 export function createPresentationDetailView(props) {
@@ -44,8 +49,10 @@ export function createPresentationDetailView(props) {
     onRename,
     onDeletePresentation,
     onAddItemClick,
+    onEnterStageMode,
     onQuickAdd,
     onEditItem,
+    onReorderItem,
     onTogglePlay,
     onSeek,
     onMoveUp,
@@ -56,10 +63,15 @@ export function createPresentationDetailView(props) {
   const errorBanner = createStatusMessage({ message: errorMessage || '', type: 'error' });
   const container = createElement('div', { class: 'presentation-detail-view' }, [errorBanner.el]);
 
-  // Keep track of instantiated item components to update them without total re-render if possible
   let itemComponents = [];
+  let dragBehavior = null;
 
   function renderView() {
+    if (dragBehavior) {
+      dragBehavior.destroy();
+      dragBehavior = null;
+    }
+
     // Clear everything except error banner
     while (container.childNodes.length > 1) {
       container.removeChild(container.lastChild);
@@ -95,9 +107,21 @@ export function createPresentationDetailView(props) {
       onClick: onDeletePresentation,
     });
 
+    const stageBtn = createButton({
+      text: 'Modo Escenario',
+      variant: 'secondary',
+      icon: createIcon({ name: 'play', size: 'sm' }),
+      onClick: () => {
+        if (typeof onEnterStageMode === 'function') {
+          onEnterStageMode();
+        }
+      },
+    });
+
     const addBtn = createButton({
       text: 'Agregar Elemento',
       variant: 'primary',
+      icon: createIcon({ name: 'plus', size: 'sm' }),
       onClick: onAddItemClick,
     });
 
@@ -107,7 +131,10 @@ export function createPresentationDetailView(props) {
       deleteBtn.el,
     ]);
 
-    const headerRight = createElement('div', {}, [addBtn.el]);
+    const headerRight = createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } }, [
+      stageBtn.el,
+      addBtn.el,
+    ]);
 
     const detailHeader = createElement('div', { class: 'presentation-title-row' }, [
       headerLeft,
@@ -196,6 +223,23 @@ export function createPresentationDetailView(props) {
 
       timeline.setItems(itemNodes);
       timelineContent = timeline.el;
+
+      // Attach headless drag-and-drop to the timeline items list
+      if (items.length > 1) {
+        const itemsOl = timelineContent.querySelector('.timeline-items');
+        if (itemsOl) {
+          dragBehavior = useDragAndDrop({
+            listEl: itemsOl,
+            handleSelector: '.drag-handle',
+            itemSelector: '[data-id]',
+            onReorder: (itemId, targetPosition) => {
+              if (typeof onReorderItem === 'function') {
+                onReorderItem(itemId, targetPosition);
+              }
+            },
+          });
+        }
+      }
     }
 
     container.appendChild(detailHeader);
@@ -230,10 +274,15 @@ export function createPresentationDetailView(props) {
     if (nextProps.onEditItem !== undefined) {
       onEditItem = nextProps.onEditItem;
     }
+    if (nextProps.onEnterStageMode !== undefined) {
+      onEnterStageMode = nextProps.onEnterStageMode;
+    }
+    if (nextProps.onReorderItem !== undefined) {
+      onReorderItem = nextProps.onReorderItem;
+    }
 
     if (nextProps.playbackState !== undefined) {
       playbackState = nextProps.playbackState;
-      // If we only updated playbackState and items haven't changed, update track items directly!
       if (!needsFullReRender && itemComponents.length > 0) {
         for (const { comp } of itemComponents) {
           if (typeof comp.update === 'function') {
@@ -249,5 +298,12 @@ export function createPresentationDetailView(props) {
     }
   }
 
-  return { el: container, update };
+  function destroy() {
+    if (dragBehavior) {
+      dragBehavior.destroy();
+      dragBehavior = null;
+    }
+  }
+
+  return { el: container, update, destroy };
 }

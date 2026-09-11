@@ -1,16 +1,21 @@
 import { createElement } from '../../utils/dom/create-element.js';
 import { createIconButton } from '../molecules/icon-button.js';
+import { createDragHandle } from '../molecules/drag-handle.js';
 import { createReorderControls } from '../molecules/reorder-controls.js';
 
 /**
- * Creates a stage note item organism with warm-amber styling, tactile controls, and quick-editing.
+ * Creates a stage note item organism for preparation or stage mode.
+ * In stage mode: editing, deleting, reordering controls and drag handles
+ * are omitted entirely; renders high-contrast warm-amber stage cue card.
+ *
  * @param {{
  *   item: { id: string, body: string, position: number },
+ *   mode?: 'preparation' | 'stage',
  *   isFirst?: boolean,
  *   isLast?: boolean,
- *   onMoveUp: (item: any) => void,
- *   onMoveDown: (item: any) => void,
- *   onDelete: (item: any) => void,
+ *   onMoveUp?: (item: any) => void,
+ *   onMoveDown?: (item: any) => void,
+ *   onDelete?: (item: any) => void,
  *   onEdit?: (item: any) => void,
  * }} props 
  * @returns {{
@@ -21,6 +26,7 @@ import { createReorderControls } from '../molecules/reorder-controls.js';
 export function createNoteItem(props) {
   let {
     item,
+    mode = 'preparation',
     isFirst = false,
     isLast = false,
     onMoveUp,
@@ -29,12 +35,42 @@ export function createNoteItem(props) {
     onEdit,
   } = props;
 
+  if (mode === 'stage') {
+    // STAGE MODE: High-contrast warm-amber cue card, no mutation controls
+    const cueBadge = createElement('span', { class: 'note-stage-badge' }, ['INDICACIÓN']);
+    const bodyEl = createElement('div', { class: 'note-body note-body--stage' }, [item.body]);
+    const el = createElement(
+      'li',
+      { class: 'note-item note-item--stage', dataset: { id: item.id } },
+      [cueBadge, bodyEl]
+    );
+
+    function updateStage(nextProps = {}) {
+      if (nextProps.item !== undefined) {
+        item = nextProps.item;
+        bodyEl.textContent = item.body;
+      }
+    }
+
+    return { el, update: updateStage };
+  }
+
+  // PREPARATION MODE: Full controls with dedicated drag handle and fallback reorder buttons
+  const dragHandle = createDragHandle({
+    ariaLabel: 'Arrastrar nota',
+  });
+
   const reorder = createReorderControls({
     isFirst,
     isLast,
-    onMoveUp: () => onMoveUp(item),
-    onMoveDown: () => onMoveDown(item),
+    onMoveUp: () => onMoveUp && onMoveUp(item),
+    onMoveDown: () => onMoveDown && onMoveDown(item),
   });
+
+  const reorderZone = createElement('div', { class: 'note-item-reorder-zone' }, [
+    dragHandle.el,
+    reorder.el,
+  ]);
 
   const badgeEl = createElement('span', { class: 'note-item-badge' }, ['Nota de Escenario']);
 
@@ -54,7 +90,7 @@ export function createNoteItem(props) {
     ariaLabel: 'Eliminar nota',
     title: 'Eliminar nota',
     variant: 'danger',
-    onClick: () => onDelete(item),
+    onClick: () => onDelete && onDelete(item),
   });
 
   const actionsEl = createElement('div', { class: 'note-item-actions' }, [
@@ -75,7 +111,7 @@ export function createNoteItem(props) {
   ]);
 
   const el = createElement('li', { class: 'note-item', dataset: { id: item.id } }, [
-    reorder.el,
+    reorderZone,
     contentEl,
   ]);
 

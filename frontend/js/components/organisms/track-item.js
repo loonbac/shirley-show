@@ -1,5 +1,7 @@
 import { createElement } from '../../utils/dom/create-element.js';
+import { createIcon } from '../atoms/icon.js';
 import { createIconButton } from '../molecules/icon-button.js';
+import { createDragHandle } from '../molecules/drag-handle.js';
 import { createReorderControls } from '../molecules/reorder-controls.js';
 import { createPlaybackControls } from '../molecules/playback-controls.js';
 
@@ -17,17 +19,33 @@ function formatBytes(bytes) {
 }
 
 /**
- * Creates a track item organism for the timeline with tactile actions and quick-editing.
+ * Formats seconds to MM:SS string.
+ * @param {number} seconds 
+ * @returns {string}
+ */
+function formatDuration(seconds) {
+  if (!seconds || !Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Creates a track item organism for preparation or stage mode.
+ * In stage mode: editing, deleting, reordering controls and drag handles
+ * are omitted entirely; renders a large (>= 48x48px) tactile play/pause button.
+ *
  * @param {{
  *   item: { id: string, title: string, position: number, byte_size?: number, media_type?: string },
+ *   mode?: 'preparation' | 'stage',
  *   isFirst?: boolean,
  *   isLast?: boolean,
  *   playbackState?: { currentTrackId: string | null, isPlaying: boolean, currentTime: number, duration: number | null, error: string | null },
  *   onTogglePlay: (item: any) => void,
- *   onSeek: (seconds: number) => void,
- *   onMoveUp: (item: any) => void,
- *   onMoveDown: (item: any) => void,
- *   onDelete: (item: any) => void,
+ *   onSeek?: (seconds: number) => void,
+ *   onMoveUp?: (item: any) => void,
+ *   onMoveDown?: (item: any) => void,
+ *   onDelete?: (item: any) => void,
  *   onEdit?: (item: any) => void,
  * }} props 
  * @returns {{
@@ -38,6 +56,7 @@ function formatBytes(bytes) {
 export function createTrackItem(props) {
   let {
     item,
+    mode = 'preparation',
     isFirst = false,
     isLast = false,
     playbackState = {},
@@ -55,12 +74,115 @@ export function createTrackItem(props) {
   const duration = isCurrentTrack ? playbackState.duration : null;
   const errorMessage = isCurrentTrack ? playbackState.error : null;
 
+  if (mode === 'stage') {
+    // STAGE MODE: Distraction-free, large play button >= 48x48px, no edit/delete/drag controls
+    const playIcon = createIcon({ name: isPlaying ? 'pause' : 'play', size: 'lg' });
+    const stagePlayBtn = createElement(
+      'button',
+      {
+        type: 'button',
+        class: `track-stage-play-btn ${isPlaying ? 'is-playing' : ''}`,
+        'aria-label': isPlaying ? `Pausar pista ${item.title}` : `Reproducir pista ${item.title}`,
+        onClick: (e) => {
+          e.stopPropagation();
+          onTogglePlay(item);
+        },
+      },
+      [playIcon]
+    );
+
+    const titleEl = createElement('div', { class: 'track-stage-title' }, [item.title]);
+    const durationText = duration ? ` / ${formatDuration(duration)}` : '';
+    const timeEl = createElement('div', { class: 'track-stage-time' }, [
+      `${formatDuration(currentTime)}${durationText}`,
+    ]);
+
+    const infoEl = createElement('div', { class: 'track-stage-info' }, [
+      titleEl,
+      timeEl,
+    ]);
+
+    const errorEl = createElement(
+      'div',
+      {
+        class: 'track-item-error',
+        role: 'alert',
+        style: { display: errorMessage ? 'block' : 'none' },
+      },
+      [errorMessage || '']
+    );
+
+    const stageContent = createElement('div', { class: 'track-stage-content' }, [
+      stagePlayBtn,
+      infoEl,
+      errorEl,
+    ]);
+
+    const el = createElement(
+      'li',
+      { class: 'track-item track-item--stage', dataset: { id: item.id } },
+      [stageContent]
+    );
+
+    function updateStage(nextProps = {}) {
+      if (nextProps.item !== undefined) {
+        item = nextProps.item;
+        titleEl.textContent = item.title;
+      }
+      if (nextProps.onTogglePlay !== undefined) {
+        onTogglePlay = nextProps.onTogglePlay;
+      }
+      if (nextProps.playbackState !== undefined) {
+        playbackState = nextProps.playbackState;
+        const trackActive = playbackState.currentTrackId === item.id;
+        const trackPlaying = trackActive && Boolean(playbackState.isPlaying);
+        const trackCurrentTime = trackActive ? playbackState.currentTime || 0 : 0;
+        const trackDuration = trackActive ? playbackState.duration : null;
+        const trackError = trackActive ? playbackState.error : null;
+
+        stagePlayBtn.className = `track-stage-play-btn ${trackPlaying ? 'is-playing' : ''}`;
+        stagePlayBtn.setAttribute(
+          'aria-label',
+          trackPlaying ? `Pausar pista ${item.title}` : `Reproducir pista ${item.title}`
+        );
+
+        while (stagePlayBtn.firstChild) {
+          stagePlayBtn.removeChild(stagePlayBtn.firstChild);
+        }
+        stagePlayBtn.appendChild(createIcon({ name: trackPlaying ? 'pause' : 'play', size: 'lg' }));
+
+        const durStr = trackDuration ? ` / ${formatDuration(trackDuration)}` : '';
+        timeEl.textContent = `${formatDuration(trackCurrentTime)}${durStr}`;
+
+        if (trackError) {
+          errorEl.textContent = trackError;
+          errorEl.style.display = 'block';
+        } else {
+          errorEl.textContent = '';
+          errorEl.style.display = 'none';
+        }
+      }
+    }
+
+    return { el, update: updateStage };
+  }
+
+  // PREPARATION MODE: Full controls with dedicated drag handle and fallback reorder buttons
+  const dragHandle = createDragHandle({
+    ariaLabel: `Arrastrar pista ${item.title}`,
+  });
+
   const reorder = createReorderControls({
     isFirst,
     isLast,
-    onMoveUp: () => onMoveUp(item),
-    onMoveDown: () => onMoveDown(item),
+    onMoveUp: () => onMoveUp && onMoveUp(item),
+    onMoveDown: () => onMoveDown && onMoveDown(item),
   });
+
+  const reorderZone = createElement('div', { class: 'track-item-reorder-zone' }, [
+    dragHandle.el,
+    reorder.el,
+  ]);
 
   const titleBadge = createElement('span', { class: 'track-item-badge' }, ['Pista']);
   const titleText = createElement('span', { class: 'track-item-title-text' }, [item.title]);
@@ -88,7 +210,7 @@ export function createTrackItem(props) {
     ariaLabel: `Eliminar pista ${item.title}`,
     title: 'Eliminar pista',
     variant: 'danger',
-    onClick: () => onDelete(item),
+    onClick: () => onDelete && onDelete(item),
   });
 
   const headerActions = createElement('div', { class: 'track-item-actions' }, [
@@ -127,7 +249,7 @@ export function createTrackItem(props) {
   ]);
 
   const el = createElement('li', { class: 'track-item', dataset: { id: item.id } }, [
-    reorder.el,
+    reorderZone,
     contentEl,
   ]);
 
@@ -138,6 +260,7 @@ export function createTrackItem(props) {
       metaEl.textContent = item.byte_size ? formatBytes(item.byte_size) : '';
       editBtn.update({ ariaLabel: `Editar pista ${item.title}` });
       deleteBtn.update({ ariaLabel: `Eliminar pista ${item.title}` });
+      dragHandle.update({ ariaLabel: `Arrastrar pista ${item.title}` });
     }
     if (nextProps.onEdit !== undefined) onEdit = nextProps.onEdit;
     if (nextProps.isFirst !== undefined) isFirst = nextProps.isFirst;

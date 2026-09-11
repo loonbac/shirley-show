@@ -26,6 +26,7 @@
 @import "./molecules/confirmation-dialog.css";
 @import "./molecules/item-type-selector.css";
 @import "./molecules/reorder-controls.css";
+@import "./molecules/drag-handle.css";
 @import "./molecules/playback-controls.css";
 @import "./molecules/empty-state.css";
 
@@ -39,6 +40,7 @@
 @import "./organisms/note-item.css";
 @import "./organisms/add-item-dialog.css";
 @import "./organisms/quick-edit-dialog.css";
+@import "./organisms/stage-mode-view.css";
 
 /* Views */
 @import "./views/presentations-view.css";

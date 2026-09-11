@@ -1,16 +1,21 @@
 import { createElement } from '../../utils/dom/create-element.js';
 import { createIconButton } from '../molecules/icon-button.js';
+import { createDragHandle } from '../molecules/drag-handle.js';
 import { createReorderControls } from '../molecules/reorder-controls.js';
 
 /**
- * Creates a lyrics item organism with deep-cyan accent, tactile controls, and quick-editing.
+ * Creates a lyrics item organism for preparation or stage mode.
+ * In stage mode: editing, deleting, reordering controls and drag handles
+ * are omitted entirely; renders readable large display lyrics.
+ *
  * @param {{
  *   item: { id: string, body: string, position: number },
+ *   mode?: 'preparation' | 'stage',
  *   isFirst?: boolean,
  *   isLast?: boolean,
- *   onMoveUp: (item: any) => void,
- *   onMoveDown: (item: any) => void,
- *   onDelete: (item: any) => void,
+ *   onMoveUp?: (item: any) => void,
+ *   onMoveDown?: (item: any) => void,
+ *   onDelete?: (item: any) => void,
  *   onEdit?: (item: any) => void,
  * }} props 
  * @returns {{
@@ -21,6 +26,7 @@ import { createReorderControls } from '../molecules/reorder-controls.js';
 export function createLyricsItem(props) {
   let {
     item,
+    mode = 'preparation',
     isFirst = false,
     isLast = false,
     onMoveUp,
@@ -29,12 +35,41 @@ export function createLyricsItem(props) {
     onEdit,
   } = props;
 
+  if (mode === 'stage') {
+    // STAGE MODE: Distraction-free, large display typography, no mutation controls
+    const bodyEl = createElement('div', { class: 'lyrics-body lyrics-body--stage' }, [item.body]);
+    const el = createElement(
+      'li',
+      { class: 'lyrics-item lyrics-item--stage', dataset: { id: item.id } },
+      [bodyEl]
+    );
+
+    function updateStage(nextProps = {}) {
+      if (nextProps.item !== undefined) {
+        item = nextProps.item;
+        bodyEl.textContent = item.body;
+      }
+    }
+
+    return { el, update: updateStage };
+  }
+
+  // PREPARATION MODE: Full controls with dedicated drag handle and fallback reorder buttons
+  const dragHandle = createDragHandle({
+    ariaLabel: 'Arrastrar letra',
+  });
+
   const reorder = createReorderControls({
     isFirst,
     isLast,
-    onMoveUp: () => onMoveUp(item),
-    onMoveDown: () => onMoveDown(item),
+    onMoveUp: () => onMoveUp && onMoveUp(item),
+    onMoveDown: () => onMoveDown && onMoveDown(item),
   });
+
+  const reorderZone = createElement('div', { class: 'lyrics-item-reorder-zone' }, [
+    dragHandle.el,
+    reorder.el,
+  ]);
 
   const badgeEl = createElement('span', { class: 'lyrics-item-badge' }, ['Letra']);
 
@@ -54,7 +89,7 @@ export function createLyricsItem(props) {
     ariaLabel: 'Eliminar letra',
     title: 'Eliminar letra',
     variant: 'danger',
-    onClick: () => onDelete(item),
+    onClick: () => onDelete && onDelete(item),
   });
 
   const actionsEl = createElement('div', { class: 'lyrics-item-actions' }, [
@@ -75,7 +110,7 @@ export function createLyricsItem(props) {
   ]);
 
   const el = createElement('li', { class: 'lyrics-item', dataset: { id: item.id } }, [
-    reorder.el,
+    reorderZone,
     contentEl,
   ]);
 

@@ -127,29 +127,29 @@ Chain strategy: pending
 
 ### 4.1 Manija de Arrastre y Micro-Comportamiento Headless Drag-and-Drop
 
-- [ ] Actualizar `frontend/js/data/move-item.js` para soportar opcionalmente el parámetro `target_position` en la petición POST hacia `/api/presentations/{id}/items/{itemId}/move`. <!-- sdd-owner: implementation -->
-- [ ] Implementar la molécula `frontend/js/components/molecules/drag-handle.js` y su estilo `frontend/styles/molecules/drag-handle.css` con `touch-action: none`, foco por teclado y señal visual clara de arrastre. <!-- sdd-owner: implementation -->
-- [ ] Implementar el comportamiento headless `frontend/js/behaviors/use-drag-and-drop.js` capturando pointer events exclusivamente en la manija, calculando umbrales de inserción mediante `requestAnimationFrame`, aplicando feedback visual temporal sin alterar el DOM real, emitiendo `onReorder(itemId, targetPosition)` al soltar dentro de la lista, y restaurando el orden ante `pointercancel` o salida. <!-- sdd-owner: implementation -->
-- [ ] Integrar `drag-handle` en `track-item.js`, `lyrics-item.js` y `note-item.js`, asegurando que las zonas fuera de la manija permitan scroll vertical nativo fluido. <!-- sdd-owner: implementation -->
+- [x] Actualizar `frontend/js/data/move-item.js` para soportar opcionalmente el parámetro `target_position` en la petición POST hacia `/api/presentations/{id}/items/{itemId}/move`. <!-- sdd-owner: implementation -->
+- [x] Implementar la molécula `frontend/js/components/molecules/drag-handle.js` y su estilo `frontend/styles/molecules/drag-handle.css` con `touch-action: none`, foco por teclado y señal visual clara de arrastre. <!-- sdd-owner: implementation -->
+- [x] Implementar el comportamiento headless `frontend/js/behaviors/use-drag-and-drop.js` capturando pointer events exclusivamente en la manija, calculando umbrales de inserción mediante `requestAnimationFrame`, aplicando feedback visual temporal sin alterar el DOM real, emitiendo `onReorder(itemId, targetPosition)` al soltar dentro de la lista, y restaurando el orden ante `pointercancel` o salida. <!-- sdd-owner: implementation -->
+- [x] Integrar `drag-handle` en `track-item.js`, `lyrics-item.js` y `note-item.js`, asegurando que las zonas fuera de la manija permitan scroll vertical nativo fluido. <!-- sdd-owner: implementation -->
 
 ### 4.2 Micro-Comportamiento Screen Wake Lock
 
-- [ ] Implementar el micro-comportamiento headless `frontend/js/behaviors/use-wake-lock.js` gestionando la adquisición de `navigator.wakeLock.request('screen')`, degradación silenciosa cuando no esté soportado o sea denegado, liberación limpia al desactivar, y re-adquisición automática ante eventos `visibilitychange` si el modo sigue activo. <!-- sdd-owner: implementation -->
+- [x] Implementar el micro-comportamiento headless `frontend/js/behaviors/use-wake-lock.js` gestionando la adquisición de `navigator.wakeLock.request('screen')`, degradación silenciosa cuando no esté soportado o sea denegado, liberación limpia al desactivar, y re-adquisición automática ante eventos `visibilitychange` si el modo sigue activo. <!-- sdd-owner: implementation -->
 
 ### 4.3 Soporte de Variante "Stage" en Organismos de Items
 
-- [ ] Adaptar `track-item.js`, `lyrics-item.js` y `note-item.js` para recibir `mode: 'preparation' | 'stage'`: en modo stage se omiten por completo los nodos de edición, borrado, manija y flechas; track renderiza un botón gigante de play/pause (>= 48 × 48 px), lyrics usa tipografía display grande, y note usa tarjeta de alto contraste ámbar. <!-- sdd-owner: implementation -->
+- [x] Adaptar `track-item.js`, `lyrics-item.js` y `note-item.js` para recibir `mode: 'preparation' | 'stage'`: en modo stage se omiten por completo los nodos de edición, borrado, manija y flechas; track renderiza un botón gigante de play/pause (>= 48 × 48 px), lyrics usa tipografía display grande, y note usa tarjeta de alto contraste ámbar. <!-- sdd-owner: implementation -->
 
 ### 4.4 Organismo Stage Mode View y Control de Tipografía
 
-- [ ] Implementar el organismo puro `frontend/js/components/organisms/stage-mode-view.js` como overlay fixed de viewport completo, con barra superior fija de safe-area, botón prominente para salir, controles accesibles `A-` / `A+` para regular el tamaño de letra (variable CSS `--stage-lyrics-scale`), indicador sutil de estado de Wake Lock, y contenedor scrollable para la secuencia de items en modo stage. <!-- sdd-owner: implementation -->
-- [ ] Crear la hoja de estilo atómica `frontend/styles/organisms/stage-mode-view.css` con fondo oscuro de alto contraste, protección de zonas seguras móviles (`env(safe-area-inset-*)`) y áreas táctiles de control >= 48 px. <!-- sdd-owner: implementation -->
+- [x] Implementar el organismo puro `frontend/js/components/organisms/stage-mode-view.js` como overlay fixed de viewport completo, con barra superior fija de safe-area, botón prominente para salir, controles accesibles `A-` / `A+` para regular el tamaño de letra (variable CSS `--stage-lyrics-scale`), indicador sutil de estado de Wake Lock, y contenedor scrollable para la secuencia de items en modo stage. <!-- sdd-owner: implementation -->
+- [x] Crear la hoja de estilo atómica `frontend/styles/organisms/stage-mode-view.css` con fondo oscuro de alto contraste, protección de zonas seguras móviles (`env(safe-area-inset-*)`) y áreas táctiles de control >= 48 px. <!-- sdd-owner: implementation -->
 
 ### 4.5 Orquestación de Audio Continuo y Modo Escenario en Controlador
 
-- [ ] Actualizar `frontend/js/controllers/presentation-detail-controller.js` para:
+- [x] Actualizar `frontend/js/controllers/presentation-detail-controller.js` para:
   1. Instanciar y vincular `useDragAndDrop`, serializando las peticiones de reordenamiento y revirtiendo al último orden confirmado por servidor ante error.
   2. Gestionar la apertura y cierre de Modo Escenario sin alterar la ruta hash, reutilizando la misma instancia del controlador singleton de audio y `playbackSignal` para que la música continúe sonando sin interrupciones ni reinicios.
   3. Ejecutar de forma progresiva `overlay.requestFullscreen()` y `wakeLock.activate()` al entrar a Modo Escenario, y liberar ambos al salir sin modal invasivo ante rechazos.
   4. Detener el audio únicamente cuando el usuario navega fuera de la presentación hacia el catálogo general. <!-- sdd-owner: implementation -->
-- [ ] Registrar nuevos estilos en `frontend/styles/index.css` y realizar la verificación final manual de todos los criterios de aceptación E2E: drag táctil, scroll nativo, entrada/salida a Modo Escenario durante reproducción activa, exclusividad de pista y fallback cuando Wake Lock o Fullscreen no están disponibles. <!-- sdd-owner: implementation -->
+- [x] Registrar nuevos estilos en `frontend/styles/index.css` y realizar la verificación final manual de todos los criterios de aceptación E2E: drag táctil, scroll nativo, entrada/salida a Modo Escenario durante reproducción activa, exclusividad de pista y fallback cuando Wake Lock o Fullscreen no están disponibles. <!-- sdd-owner: implementation -->

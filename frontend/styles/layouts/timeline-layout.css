@@ -50,3 +50,24 @@
   }
 }
 
+/* Drag and Drop visual indicator */
+.timeline-items.is-reordering {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.timeline-items li.is-dragging {
+  opacity: 0.55;
+  transform: scale(0.98);
+  box-shadow: var(--elevation-lg, 0 10px 15px -3px rgba(0, 0, 0, 0.1));
+}
+
+.timeline-items li.drop-target-before {
+  border-top: 3px solid var(--color-primary, #6d28d9) !important;
+}
+
+.timeline-items li.drop-target-after {
+  border-bottom: 3px solid var(--color-primary, #6d28d9) !important;
+}
+
+

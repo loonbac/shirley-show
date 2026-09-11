@@ -1,7 +1,7 @@
 /**
  * Pure SVG Icon registry and creator.
  * @param {{
- *   name: 'play' | 'pause' | 'plus' | 'trash' | 'edit' | 'arrow-up' | 'arrow-down' | 'back' | 'track' | 'lyrics' | 'note' | 'check' | 'close',
+ *   name: 'play' | 'pause' | 'plus' | 'trash' | 'edit' | 'arrow-up' | 'arrow-down' | 'back' | 'track' | 'lyrics' | 'note' | 'check' | 'close' | 'grip',
  *   size?: 'sm' | 'base' | 'lg' | 'xl',
  *   className?: string,
  * }} props 
@@ -23,6 +23,9 @@ export function createIcon(props = {}) {
   svg.setAttribute('class', ['icon', sizeClass, className].filter(Boolean).join(' '));
 
   switch (name) {
+    case 'grip':
+      svg.innerHTML = '<circle cx="9" cy="5" r="1.5" fill="currentColor"></circle><circle cx="9" cy="12" r="1.5" fill="currentColor"></circle><circle cx="9" cy="19" r="1.5" fill="currentColor"></circle><circle cx="15" cy="5" r="1.5" fill="currentColor"></circle><circle cx="15" cy="12" r="1.5" fill="currentColor"></circle><circle cx="15" cy="19" r="1.5" fill="currentColor"></circle>';
+      break;
     case 'play':
       svg.innerHTML = '<polygon points="5 3 19 12 5 21 5 3" fill="currentColor"></polygon>';
       break;
