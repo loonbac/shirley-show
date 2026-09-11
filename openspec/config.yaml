@@ -1,0 +1,35 @@
+schema: spec-driven
+
+context: |
+  Project: shirley-show — "un grupo de WhatsApp por presentación, pero diseñado para cantar".
+  Stack: Rust + Axum (backend), SQLite + archivos de audio en disco, frontend vanilla JS micro-modular según AGENTS.md (átomos→moléculas→organismos→vistas) servido por el propio backend.
+  Uso: responsive PC + teléfono, mobile-first, pantalla completa durante la presentación. Sin login (auth externa asumida).
+  Núcleo usable (slice 1): lista de presentaciones (crear/abrir/renombrar/eliminar) + lista vertical de elementos (pista/letra/nota) + agregar + reproducir audio + reordenar arriba/abajo.
+  Style: SDD/OpenSpec con TDD estricto cuando haya runner disponible.
+
+strict_tdd: true
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+  specs:
+    - Use Given/When/Then for scenarios
+  design:
+    - Document architecture decisions with rationale
+  tasks:
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing code patterns
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+testing:
+  strict_tdd: true
+  detected: "2026-09-11"
+  runner:
+    command: "cargo test"
+    framework: "Rust cargo test (Axum + SQLite)"
