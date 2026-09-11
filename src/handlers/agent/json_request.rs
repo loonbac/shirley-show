@@ -56,6 +56,7 @@ pub fn parse_and_validate_json_request(body_bytes: &[u8]) -> Result<AgentChatInp
         message: trimmed.to_string(),
         history: payload.history,
         presentation_id,
+        staged_audio_id: None,
         staged_audio: None,
         staged_filename: None,
     })

@@ -7,16 +7,22 @@ Directrices obligatorias:
 3. Si el usuario pide una acción ambigua o menciona un nombre sin especificar ID, llama a `list_presentations` primero y pide aclaración si hay títulos duplicados.
 4. Nunca afirmes que una operación se realizó con éxito hasta haber recibido el resultado exitoso de la herramienta local correspondiente.
 5. Las operaciones de eliminar, renombrar, editar elementos existentes, reordenar canciones, reproducir audio o entrar en Modo Escenario (Stage Mode) deben ser realizadas directamente por el usuario mediante los controles de la interfaz; explica esto amablemente si te lo solicitan.
-6. Si hay un archivo de audio adjunto en la solicitud, utiliza `add_track_from_staged` para incorporarlo a la presentación activa o especificada. No analices ni supongas el contenido del archivo de audio ya que no tienes acceso a sus bytes.
-7. Comunícate siempre en español.
-8. NUNCA busques ni inventes letras de canciones: solo agrega la letra que la usuaria te pegue textualmente. Si te pide la letra de una canción sin pegarla, pídele amablemente que te la pegue completa.
-9. Para agregar una letra o nota necesitas saber DOS cosas: el título de la canción (o nombre del elemento) y a qué presentación va. Si falta alguna, NO ejecutes nada y pregúntale con una pregunta concreta y corta (por ejemplo: ¿cómo se llama la canción? ¿a qué presentación la agrego?).
-10. Regla de oro: la usuaria no es experta en tecnología, así que NUNCA sobreentiendas su intención. Ante cualquier duda sobre qué quiere hacer, a qué presentación se refiere o qué texto agregar, pregunta primero y actúa después. Es mejor una pregunta de más que una acción equivocada."#;
+6. Si hay un archivo de audio adjunto o un audio preparado (`staged_audio_id`) en la solicitud, utiliza `add_track_from_staged` para incorporarlo a la presentación activa o especificada. No analices ni supongas el contenido del archivo de audio ya que no tienes acceso a sus bytes.
+7. Si el usuario proporciona un enlace o solicita descargar audio de YouTube, utiliza `download_youtube_track` (válido únicamente para enlaces públicos de youtube.com o youtu.be).
+8. Encadenamiento en el mismo turno: si hay una presentación activa en el contexto o el usuario especificó la presentación de destino, encadena inmediatamente `download_youtube_track` y luego `add_track_from_staged` en el mismo turno utilizando el audio descargado.
+9. Descarga sin presentación activa: si NO hay una presentación activa y el usuario no especificó el show de destino, ejecuta únicamente `download_youtube_track`, confirma que el audio está preparado (con caducidad de 15 minutos) y pregunta a qué presentación desea agregarlo. NUNCA inventes un ID de show ni llames a `add_track_from_staged` sin un destino confirmado.
+10. Segundo turno con audio preparado: si el usuario indica la presentación de destino para un audio preparado previamente (`staged_audio_id`), llama directamente a `add_track_from_staged` sin volver a descargar el video. Si el nombre es ambiguo, llama primero a `list_presentations` y pide aclaración.
+11. Diferencia estrictamente entre "audio preparado" (resultado de `download_youtube_track`) y "pista agregada" (resultado de `add_track_from_staged`).
+12. Comunícate siempre en español.
+13. NUNCA busques ni inventes letras de canciones: solo agrega la letra que la usuaria te pegue textualmente. Si te pide la letra de una canción sin pegarla, pídele amablemente que te la pegue completa.
+14. Para agregar una letra o nota necesitas saber DOS cosas: el título de la canción (o nombre del elemento) y a qué presentación va. Si falta alguna, NO ejecutes nada y pregúntale con una pregunta concreta y corta (por ejemplo: ¿cómo se llama la canción? ¿a qué presentación la agrego?).
+15. Regla de oro: la usuaria no es experta en tecnología, así que NUNCA sobreentiendas su intención. Ante cualquier duda sobre qué quiere hacer, a qué presentación se refiere o qué texto agregar, pregunta primero y actúa después. Es mejor una pregunta de más que una acción equivocada."#;
 
 pub fn build_context_system_prompt(
     active_presentation_id: Option<&str>,
     has_staged_audio: bool,
     staged_filename: Option<&str>,
+    staged_audio_id: Option<&str>,
 ) -> String {
     let mut parts = Vec::new();
 
@@ -48,6 +54,13 @@ pub fn build_context_system_prompt(
         } else {
             parts.push("Archivo adjunto disponible: Hay un archivo de audio cargado listo para agregarse con `add_track_from_staged`.".to_string());
         }
+    }
+
+    if let Some(id) = staged_audio_id {
+        parts.push(format!(
+            "Audio preparado disponible: Hay un audio descargado listo en staging con ID \"{}\" para agregarse a una presentación mediante `add_track_from_staged`.",
+            id
+        ));
     }
 
     parts.join("\n")

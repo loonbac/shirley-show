@@ -1,12 +1,12 @@
 # Progreso de aplicación: `shirley-show-yt-download`
 
 **Fecha:** 2026-09-11  
-**Slice activo:** Slice 2 (`yt-s2-usecase-registry`)  
-**Estrategia de entrega:** 4 PRs encadenados stacked-to-main (PR 1 = Slice 1, PR 2 = Slice 2)  
+**Slice activo:** Slice 3 (`yt-s3-tool-agent`)  
+**Estrategia de entrega:** 4 PRs encadenados stacked-to-main (PR 1 = Slice 1, PR 2 = Slice 2, PR 3 = Slice 3)  
 **Attempt authority:**
-- Token: `sha256:608eddae852ff954fb9086d84c6750406bcda31ffd419b55ba6e4dfea5d3cdf7`
-- Work-unit: `"yt-s2-usecase-registry"`
-- Request: `y2-acquire-001`
+- Token: `sha256:c924dd1728579bfe9507ceab24e3b99ab57be1e4b9c2c2b1768864314142e70d`
+- Work-unit: `"yt-s3-tool-agent"`
+- Request: `y3-acquire-001`
 - Max budget: 3000 líneas (Reportado para settle, NO settle ejecutado)
 
 ---
@@ -33,69 +33,72 @@
 
 ---
 
-## Archivos modificados y creados en Slice 2
+## Tareas completadas en Slice 3
 
-### Creados
-- `src/state/staged_audio_registry.rs`: Registro en memoria con exclusión mutua granular sobre `HashMap`, ciclo de vida `Available -> Reserved(lease_id) -> Consumed`, retención de tombstones para idempotencia, leases transaccionales de uso único, y tarea de purga programada en tokio por entrada con fallback reactivo.
-- `src/infra/filesystem/staged_promotion_guard.rs`: RAII guard `StagedPromotionGuard` para reversión transaccional segura del archivo de audio promovido de vuelta a `audio/staging/{stage_id}.part` en caso de fallo durante el guardado en base de datos.
-- `src/use_cases/download_youtube_audio.rs`: Caso de uso atómico `DownloadYouTubeAudio` que orquesta la validación de `YouTubeUrl`, target seguro de staging con `StagingFileGuard`, invocación al puerto `YoutubeDownloader`, jerarquía de fallback de títulos (solicitado > metadata > ID de 11 caracteres), saneamiento estricto de caracteres de control y registro en `StagedAudioRegistry`.
-- `tests/staged_audio_registry_tests.rs`: Suite de pruebas unitarias y de estrés para ciclo de vida de registros staged, pruebas de concurrencia (50 hilos compitiendo por un único lease), y prueba de preservación incondicional de `audio/files` ante reconciliación de arranque.
-- `tests/download_youtube_audio_tests.rs`: Suite de pruebas unitarias y de integración para `DownloadYouTubeAudio`, jerarquía de títulos, stubs de error, y validación de `StagedPromotionGuard` con reversión a `.part`.
-
-### Modificados
-- `src/state/mod.rs`: Exportados tipos y constantes del registro de audio temporal (`StagedAudioRegistry`, `StagedAudioDescriptor`, `StagedAudioLease`, `StagedAudioState`, `StagedAudioRegistryError`, `DEFAULT_STAGED_AUDIO_TTL`).
-- `src/state/app_state.rs`: Inyectados campos `staged_audio_registry`, `youtube_downloader` y `download_youtube_audio` en `AppState`, con constructores extensibles `new_with_all_components` y `with_youtube_downloader`.
-- `src/infra/filesystem/mod.rs`: Exportado módulo y struct `StagedPromotionGuard`.
-- `src/infra/filesystem/local_audio_storage.rs`: Añadido método `promote_staged_file_guarded` retornando `(GeneratedAudioKey, StagedPromotionGuard)`, y actualizado `promote_staged_file` para delegar y defusar.
-- `src/use_cases/mod.rs`: Exportado caso de uso `DownloadYouTubeAudio` y sus DTOs de salida y error.
-- `src/use_cases/upload_track.rs`: Integrada promoción guardada con `StagedPromotionGuard` para reversión automática ante fallos de append en base de datos.
-- `tests/item_use_cases_tests.rs`: Ajustada la aserción de compensación en fallo de base de datos para reflejar la preservación del archivo en staging para retry.
-- `openspec/changes/shirley-show-yt-download/tasks.md`: Marcadas tareas 2.1 a 2.6 completadas `[x]`.
+- [x] 3.1 RED: Escribir pruebas en `tests/agent_tools_tests.rs` validando la allowlist estricta de 7 herramientas, el schema exacto de `download_youtube_track` (`url` obligatoria, `title` opcional, `additionalProperties: false`), la propiedad opcional `staged_audio_id` en `add_track_from_staged`, la prevención de llamadas duplicadas a `download_youtube_track` en el mismo turno y el despacho asíncrono. <!-- sdd-owner: implementation -->
+- [x] 3.2 GREEN: Actualizar definiciones en `src/agent/tool_schemas.rs`, extender `TurnToolContext` en `src/agent/turn_context.rs` con la capability `staged_audio_id`, hacer asíncrono `AgentToolDispatcher::dispatch` en `src/agent/tool_dispatcher.rs`, y registrar la ejecución de `download_youtube_track` y el consumo de `add_track_from_staged`. <!-- sdd-owner: implementation -->
+- [x] 3.3 RED: Escribir pruebas de loop y grounding en `tests/agent_chat_tests.rs` con stub de proveedor de IA (`StubChatProvider`), validando encadenamiento en el mismo turno cuando `presentation_id` está activo (descarga + alta directa de pista), detención con pregunta de destino cuando no hay presentación activa (emitiendo `staged_audio_id` en el output), segundo turno que consume el ID estructurado, y solicitud de aclaración ante nombres ambiguos de presentación. <!-- sdd-owner: implementation -->
+- [x] 3.4 GREEN: Actualizar `src/agent/system_prompt.rs` con las directrices conversacionales de descarga de YouTube y encadenamiento, ajustar `compose_grounded_message` y el bucle principal en `src/use_cases/agent_chat.rs`, hacer opcional `presentation_id` en `ToolAction` de `src/domain/agent_tool.rs` para acciones de staging sin show, y añadir `staged_audio_id: Option<String>` a `AgentChatOutput`. <!-- sdd-owner: implementation -->
+- [x] 3.5 TRIANGULATE: Añadir pruebas de robustez en `tests/agent_chat_tests.rs` para asegurar que afirmaciones falsas del modelo sin ejecución de herramienta son suprimidas por el grounding, y que errores de descarga (`downloader_not_configured`, timeout) devuelven mensajes amables en español sin exponer trazas técnicas. <!-- sdd-owner: implementation -->
+- [x] 3.6 REFACTOR: Verificar que ninguna ruta exponga comandos de proceso ni paths absolutos en outputs o metadata del agente, confirmando que `cargo test --test agent_tools_tests --test agent_chat_tests` pase al 100%. <!-- sdd-owner: implementation -->
 
 ---
 
-## Evidencia de Ciclo TDD Estricto (Slice 2)
+## Archivos modificados y creados en Slice 3
+
+### Modificados
+- `src/domain/agent_tool.rs`: `ToolAction.presentation_id` actualizado a `Option<String>` con `#[serde(skip_serializing_if = "Option::is_none")]` para permitir acciones de staging de audio desacopladas de un show específico sin fabricar IDs fantasmas.
+- `src/agent/tool_schemas.rs`: Allowlist extendida a exactamente 7 herramientas. Añadido el schema estricto de `download_youtube_track` (`url` requerida, `title` opcional, `additionalProperties: false`) y añadida la propiedad opcional `staged_audio_id` en `add_track_from_staged`.
+- `src/agent/turn_context.rs`: `TurnToolContext` extendido con `staged_audio_id: Option<String>`, conjunto `known_staged_audio_ids: HashSet<String>`, constructores `with_staged_audio_id` / `with_full_context`, y réplica atómica en `CommittedTurnState` para conservación de estado ante timeouts.
+- `src/agent/tool_dispatcher.rs`: `AgentToolDispatcher::dispatch` transformado a función asíncrona; incorporada ejecución de `download_youtube_audio` con registro de capability y acción auditada `Audio «título» preparado temporalmente` con payload `{status, title, byte_size, format}`, deduplicación por ID y firma canónica; y actualización de `add_track_from_staged` para resolver de forma prioritaria el `staged_audio_id` del registro (con lease transaccional, commit y limpieza de capability) o recurrir al adjunto request-scoped.
+- `src/agent/system_prompt.rs`: Incorporadas directrices conversacionales para Ressy en español: encadenamiento en el mismo turno con show activo, detención y consulta de show destino tras preparar audio sin show, resolución directa en segundo turno sin re-descarga y diferenciación estricta entre audio preparado y pista agregada.
+- `src/use_cases/agent_chat.rs`: Bucle conversacional actualizado para esperar el despacho asíncrono de herramientas; `AgentChatInput` y `AgentChatOutput` enriquecidos con `staged_audio_id: Option<String>`; `compose_grounded_message` extendido para adjuntar la pregunta de destino ante audio preparado pendiente; y añadido filtro de supresión de afirmaciones falsas del modelo sin respaldo de ledger en `actions_taken`.
+- `src/state/app_state.rs`: Inyectados `download_youtube_audio` y `staged_audio_registry` en `AgentToolDispatcher::from_components`.
+- `src/handlers/agent/json_request.rs`: Inicializado `staged_audio_id: None` en `AgentChatInput`.
+- `src/handlers/agent/multipart_request.rs`: Inicializado `staged_audio_id: None` en `AgentChatInput`.
+- `src/handlers/agent/chat.rs`: Añadido `staged_audio_id: None` en el envelope de timeout controlado.
+- `tests/agent_tools_tests.rs`: Pruebas exhaustivas para la allowlist de 7 herramientas, schemas exactos, deduplicación de mutaciones, despacho asíncrono, capability `staged_audio_id` y aislamiento ante IDs no autorizados o consumidos.
+- `tests/agent_chat_tests.rs`: Pruebas de integración del bucle conversacional con `StubChatProvider`, encadenamiento en el mismo turno, emisión de `staged_audio_id` sin destino, segundo turno con consumo estructurado, aclaración ante nombres ambiguos, y supresión de alucinaciones mediante grounding.
+- `openspec/changes/shirley-show-yt-download/tasks.md`: Marcadas tareas 3.1 a 3.6 completadas `[x]`.
+
+---
+
+## Evidencia de Ciclo TDD Estricto (Slice 3)
 
 | Tarea | Fase | Acción realizada | Resultado / Comando |
 |---|---|---|---|
-| 2.1 | RED | Creación de pruebas unitarias para `StagedAudioRegistry` (formato opaco `staged-`, transición de estados, rechazo de doble consumo y expiración con purga de disco) | `cargo test --test staged_audio_registry_tests` falló por módulo no existente (E0432) |
-| 2.2 | GREEN | Implementación de `StagedAudioRegistry` en `src/state/staged_audio_registry.rs` con mutex granular, gestión de leases, purga automática en tokio y exportación en `src/state/mod.rs` | `cargo test --test staged_audio_registry_tests` pasó (5 tests ok) |
-| 2.3 | RED | Pruebas unitarias para `DownloadYouTubeAudio` y `StagedPromotionGuard` en `tests/download_youtube_audio_tests.rs`, verificando fallback de títulos, registro y reversión ante fallo de DB | `cargo test --test download_youtube_audio_tests` falló por tipos no existentes (E0432) |
-| 2.4 | GREEN | Implementación de `DownloadYouTubeAudio`, `StagedPromotionGuard`, integración de compensación reversible en `LocalAudioStorage` y `UploadTrack`, e integración en `AppState` | `cargo test --test download_youtube_audio_tests` pasó (6 tests ok) |
-| 2.5 | TRIANGULATE | Pruebas de estrés con 50 hilos concurrentes compitiendo por un único lease, fallos de filesystem al liberar reserva, y verificación de que `reconcile_audio_files` nunca borra archivos en `audio/files` | `cargo test --test staged_audio_registry_tests` pasó (8 tests ok) |
-| 2.6 | REFACTOR | Verificación de separación estricta de IDs (`stage_id` interno vs `staged_audio_id` público), saneamiento de errores en español y ejecución de suite integral | `cargo test` suite completa (24 suites ok, 0 fallos) |
+| 3.1 | RED | Creación de pruebas unitarias y de dispatcher en `tests/agent_tools_tests.rs` (allowlist de 7 herramientas, schemas exactos, despacho async, deduplicación y consumo de staging) | `cargo test --test agent_tools_tests` falló con 38 errores de compilación (`Value is not a future`, `staged_audio_id unknown`, etc.) |
+| 3.2 | GREEN | Schemas de 7 tools en `tool_schemas.rs`, extensión de `TurnToolContext` con capability `staged_audio_id`, despacho asíncrono en `AgentToolDispatcher` con leases transaccionales de `StagedAudioRegistry` | `cargo test --test agent_tools_tests` pasó limpiamente (12 tests ok) |
+| 3.3 | RED | Pruebas de bucle y grounding en `tests/agent_chat_tests.rs` con `StubChatProvider` (encadenamiento mismo turno, detención con pregunta de destino y staged_audio_id, segundo turno estructurado y ambigüedad de nombres) | `cargo test --test agent_chat_tests` falló por campos faltantes en `AgentChatInput`/`AgentChatOutput` |
+| 3.4 | GREEN | Directrices conversacionales en `system_prompt.rs`, despacho async y prompt de contexto en `agent_chat.rs`, `staged_audio_id` en DTOs de chat, y grounding determinista con pregunta de destino | `cargo test --test agent_chat_tests` pasó (12 tests ok) |
+| 3.5 | TRIANGULATE | Pruebas de robustez para supresión de alucinaciones del modelo sin llamadas a tools (`sanitize_ungrounded_claims`), y respuestas amables ante errores de configuración y timeout sin trazas técnicas | `cargo test --test agent_chat_tests` pasó (15 tests ok) |
+| 3.6 | REFACTOR | Verificación integral de cero exposición de rutas de proceso y saneamiento de salidas. Ejecución de suite completa de pruebas | `cargo test` suite completa: 24 suites ok, 0 fallos |
 
 ---
 
 ## Comandos de verificación ejecutados
 
 - `cargo check --tests`: 0 errores, 0 warnings.
-- `cargo test --test staged_audio_registry_tests`: 8 tests ok.
-- `cargo test --test download_youtube_audio_tests`: 6 tests ok.
-- `cargo test --test staged_audio_registry_tests --test download_youtube_audio_tests`: 14 tests ok.
-- `cargo test`: 24 test suites ok (incluyendo API de presentaciones, audio streaming, agent tools y chat UI).
+- `cargo test --test agent_tools_tests`: 12 tests ok.
+- `cargo test --test agent_chat_tests`: 15 tests ok.
+- `cargo test --test agent_tools_tests --test agent_chat_tests`: 27 tests ok.
+- `cargo test`: 24 test suites ok (incluyendo API HTTP, SQLite migrations, audio streaming y harnesses UI).
 
 ---
 
 ## Desviaciones de diseño
 
-Ninguna. La implementación se ajusta con exactitud matemática a `design.md` y `specs/agent-tools/spec.md`:
-- Separación estricta entre `stage_id` interno del filesystem y `staged_audio_id` público entregado a capas superiores.
-- TTL configurable (por defecto 900 s / 15 min) con tarea de purga por entrada en Tokio y retención de tombstones `Consumed`.
-- Reversión transaccional mediante `StagedPromotionGuard` que devuelve el archivo a `audio/staging/{stage_id}.part` ante fallos de persistencia en SQLite, permitiendo retries limpios.
-- Micro-modularidad extrema según `AGENTS.md`.
+Ninguna. La implementación se ajusta fielmente a `design.md`, `specs/agent-tools/spec.md` y `specs/agent-chat/spec.md`:
+- Allowlist de exactamente 7 herramientas locales.
+- Capability de `staged_audio_id` vinculada estrictamente al turno conversacional (`TurnToolContext`), impidiendo que el modelo consulte o consuma identificadores arbitrarios sin autorización previa.
+- Grounding server-side estricto que gobierna el mensaje final tras cualquier mutación y suprime afirmaciones falsas del modelo sin ejecución real de herramientas.
+- `ToolAction.presentation_id` como `Option<String>` con serialización limpia (omitido si es `None`), evitando fabricar identificadores para descargas que aún no tienen presentación asignada.
 
 ---
 
-## Tareas restantes (Slices 3 y 4 intactos)
+## Tareas restantes (Slice 4 intacto)
 
 ```markdown
-- [ ] 3.1 RED: Escribir pruebas en `tests/agent_tools_tests.rs` validando la allowlist estricta de 7 herramientas, el schema exacto de `download_youtube_track` (`url` obligatoria, `title` opcional, `additionalProperties: false`), la propiedad opcional `staged_audio_id` en `add_track_from_staged`, la prevención de llamadas duplicadas a `download_youtube_track` en el mismo turno y el despacho asíncrono. <!-- sdd-owner: implementation -->
-- [ ] 3.2 GREEN: Actualizar definiciones en `src/agent/tool_schemas.rs`, extender `TurnToolContext` en `src/agent/turn_context.rs` con la capability `staged_audio_id`, hacer asíncrono `AgentToolDispatcher::dispatch` en `src/agent/tool_dispatcher.rs`, y registrar la ejecución de `download_youtube_track` y el consumo de `add_track_from_staged`. <!-- sdd-owner: implementation -->
-- [ ] 3.3 RED: Escribir pruebas de loop y grounding en `tests/agent_chat_tests.rs` con stub de proveedor de IA (`StubChatProvider`), validando encadenamiento en el mismo turno cuando `presentation_id` está activo (descarga + alta directa de pista), detención con pregunta de destino cuando no hay presentación activa (emitiendo `staged_audio_id` en el output), segundo turno que consume el ID estructurado, y solicitud de aclaración ante nombres ambiguos de presentación. <!-- sdd-owner: implementation -->
-- [ ] 3.4 GREEN: Actualizar `src/agent/system_prompt.rs` con las directrices conversacionales de descarga de YouTube y encadenamiento, ajustar `compose_grounded_message` y el bucle principal en `src/use_cases/agent_chat.rs`, hacer opcional `presentation_id` en `ToolAction` de `src/domain/agent_tool.rs` para acciones de staging sin show, y añadir `staged_audio_id: Option<String>` a `AgentChatOutput`. <!-- sdd-owner: implementation -->
-- [ ] 3.5 TRIANGULATE: Añadir pruebas de robustez en `tests/agent_chat_tests.rs` para asegurar que afirmaciones falsas del modelo sin ejecución de herramienta son suprimidas por el grounding, y que errores de descarga (`downloader_not_configured`, timeout) devuelven mensajes amables en español sin exponer trazas técnicas. <!-- sdd-owner: implementation -->
-- [ ] 3.6 REFACTOR: Verificar que ninguna ruta exponga comandos de proceso ni paths absolutos en outputs o metadata del agente, confirmando que `cargo test --test agent_tools_tests --test agent_chat_tests` pase al 100%. <!-- sdd-owner: implementation -->
 - [ ] 4.1 RED: Escribir pruebas de API HTTP en `tests/agent_chat_api_tests.rs` validando la lectura de `YT_DLP_BIN` y `SHIRLEY_AGENT_TIMEOUT_SECS` en `Config`, la aceptación y round-trip de `staged_audio_id` en peticiones JSON y multipart, y la respuesta HTTP 200 con deadline unificado de 120 s ante timeout global reportando acciones confirmadas. <!-- sdd-owner: implementation -->
 - [ ] 4.2 GREEN: Actualizar `src/config.rs` y `.env.example` con las nuevas variables, ajustar `src/main.rs`, actualizar los parsers de solicitud en `src/handlers/agent/json_request.rs` y `src/handlers/agent/multipart_request.rs`, e implementar el deadline absoluto unificado en `src/handlers/agent/chat.rs`. <!-- sdd-owner: implementation -->
 - [ ] 4.3 RED: Escribir pruebas unitarias de frontend en `tests/agent-chat-state.test.mjs` y `tests/agent-chat-ui-components.test.mjs` para validar la detección de URLs de YouTube, la visualización del label "descargando el audio…" con `aria-live="polite"`, la retención de `staged_audio_id` en `chat-state.js` solo en memoria efímera (cero `localStorage`), su inclusión en la siguiente llamada API, y su limpieza tras agregar pista o ante comandos no relacionados. <!-- sdd-owner: implementation -->

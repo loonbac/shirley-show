@@ -6,15 +6,18 @@ use serde_json::{Value, json};
 use crate::agent::tool_signature::canonical_tool_signature;
 use crate::agent::turn_context::{StagedAudioHandle, TurnToolContext};
 use crate::domain::agent_tool::{ToolAction, ToolCall};
+use crate::domain::audio_format::AudioFormat;
 use crate::handlers::dto::ShowItemResponse;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
 use crate::ports::show_item_reader::ShowItemReader;
 use crate::state::AppState;
+use crate::state::staged_audio_registry::{StagedAudioRegistry, StagedAudioRegistryError};
 use crate::use_cases::add_lyrics::AddLyrics;
 use crate::use_cases::add_note::AddNote;
 use crate::use_cases::create_presentation::CreatePresentation;
+use crate::use_cases::download_youtube_audio::DownloadYouTubeAudio;
 use crate::use_cases::get_presentation::GetPresentation;
 use crate::use_cases::list_presentations::ListPresentations;
 use crate::use_cases::upload_track::UploadTrack;
@@ -43,6 +46,16 @@ struct AddItemTextArgs {
 struct AddTrackArgs {
     presentation_id: String,
     title: String,
+    #[serde(default)]
+    staged_audio_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DownloadYouTubeTrackArgs {
+    url: String,
+    #[serde(default)]
+    title: Option<String>,
 }
 
 #[derive(Clone)]
@@ -54,6 +67,8 @@ pub struct AgentToolDispatcher {
     add_note: Arc<AddNote<SqliteShowItemRepository>>,
     upload_track: Arc<UploadTrack<SqliteShowItemRepository>>,
     item_repo: Arc<SqliteShowItemRepository>,
+    download_youtube_audio: Arc<DownloadYouTubeAudio>,
+    staged_audio_registry: Arc<StagedAudioRegistry>,
 }
 
 impl AgentToolDispatcher {
@@ -61,6 +76,7 @@ impl AgentToolDispatcher {
         Self::from_state(&state)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_components(
         create_presentation: Arc<CreatePresentation<SqlitePresentationRepository>>,
         list_presentations: Arc<ListPresentations<PresentationSummaryRepository>>,
@@ -69,6 +85,8 @@ impl AgentToolDispatcher {
         add_note: Arc<AddNote<SqliteShowItemRepository>>,
         upload_track: Arc<UploadTrack<SqliteShowItemRepository>>,
         item_repo: Arc<SqliteShowItemRepository>,
+        download_youtube_audio: Arc<DownloadYouTubeAudio>,
+        staged_audio_registry: Arc<StagedAudioRegistry>,
     ) -> Self {
         Self {
             create_presentation,
@@ -78,6 +96,8 @@ impl AgentToolDispatcher {
             add_note,
             upload_track,
             item_repo,
+            download_youtube_audio,
+            staged_audio_registry,
         }
     }
 
@@ -90,10 +110,12 @@ impl AgentToolDispatcher {
             state.add_note.clone(),
             state.upload_track.clone(),
             state.item_repo.clone(),
+            state.download_youtube_audio.clone(),
+            state.staged_audio_registry.clone(),
         )
     }
 
-    pub fn dispatch(&self, call: &ToolCall, context: &mut TurnToolContext) -> Value {
+    pub async fn dispatch(&self, call: &ToolCall, context: &mut TurnToolContext) -> Value {
         let is_read_tool = matches!(
             call.name.as_str(),
             "list_presentations" | "get_presentation"
@@ -163,7 +185,7 @@ impl AgentToolDispatcher {
 
                         context.record_action(ToolAction {
                             tool: "create_presentation".to_string(),
-                            presentation_id: pres.id,
+                            presentation_id: Some(pres.id),
                             summary: format!("Presentación “{}” creada", pres.title),
                             status: "success".to_string(),
                             details: Some(res.clone()),
@@ -300,7 +322,7 @@ impl AgentToolDispatcher {
 
                         context.record_action(ToolAction {
                             tool: "add_lyrics".to_string(),
-                            presentation_id: pres_id.to_string(),
+                            presentation_id: Some(pres_id.to_string()),
                             summary: "Letra añadida a la presentación".to_string(),
                             status: "success".to_string(),
                             details: Some(res.clone()),
@@ -354,7 +376,7 @@ impl AgentToolDispatcher {
 
                         context.record_action(ToolAction {
                             tool: "add_note".to_string(),
-                            presentation_id: pres_id.to_string(),
+                            presentation_id: Some(pres_id.to_string()),
                             summary: "Nota añadida a la presentación".to_string(),
                             status: "success".to_string(),
                             details: Some(res.clone()),
@@ -397,75 +419,226 @@ impl AgentToolDispatcher {
                     });
                 }
 
-                match context.staged_audio.take() {
-                    None => {
-                        json!({
-                            "error": "no_audio_staged",
-                            "message": "No hay archivo de audio adjunto en esta solicitud"
-                        })
+                // Resolve staged audio source:
+                // 1. Explicit staged_audio_id argument or inherited from turn capability
+                let staged_id_opt = if let Some(ref arg_id) = args.staged_audio_id {
+                    let tr = arg_id.trim();
+                    if tr.is_empty() {
+                        context.staged_audio_id.clone()
+                    } else if !context.known_staged_audio_ids.contains(tr) {
+                        return json!({
+                            "error": "staged_audio_not_found",
+                            "message": "Identificador de audio preparado no encontrado o no autorizado"
+                        });
+                    } else {
+                        Some(tr.to_string())
                     }
-                    Some(StagedAudioHandle::Consumed) => {
-                        context.staged_audio = Some(StagedAudioHandle::Consumed);
-                        json!({
-                            "error": "audio_already_consumed",
-                            "message": "El archivo de audio adjunto ya fue consumido"
-                        })
-                    }
-                    Some(StagedAudioHandle::Failed) => {
-                        context.staged_audio = Some(StagedAudioHandle::Failed);
-                        json!({
-                            "error": "audio_staging_failed",
-                            "message": "El procesamiento del archivo de audio falló previamente"
-                        })
-                    }
-                    Some(StagedAudioHandle::Available {
-                        guard,
-                        format,
-                        byte_size,
-                    }) => {
-                        let stage_id = guard.stage_id().to_string();
-                        match self.upload_track.execute(
-                            pres_id,
-                            trimmed_title,
-                            &stage_id,
-                            format,
-                            byte_size,
-                        ) {
-                            Ok(item) => {
-                                guard.defuse();
-                                context.staged_audio = Some(StagedAudioHandle::Consumed);
+                } else {
+                    context.staged_audio_id.clone()
+                };
 
-                                let res = json!({
-                                    "item_id": item.id,
-                                    "kind": "track",
-                                    "title": trimmed_title,
-                                    "position": item.position,
-                                    "presentation_id": item.presentation_id
-                                });
+                if let Some(ref staged_id) = staged_id_opt {
+                    match self.staged_audio_registry.reserve(staged_id) {
+                        Ok(lease) => {
+                            match self.upload_track.execute(
+                                pres_id,
+                                trimmed_title,
+                                &lease.stage_id,
+                                AudioFormat::Mp3,
+                                lease.size_bytes as i64,
+                            ) {
+                                Ok(item) => {
+                                    let _ = self.staged_audio_registry.commit_consumed(
+                                        &lease.staged_audio_id,
+                                        &lease.lease_id,
+                                    );
+                                    context.set_staged_audio_id(None);
 
-                                context.record_action(ToolAction {
-                                    tool: "add_track_from_staged".to_string(),
-                                    presentation_id: pres_id.to_string(),
-                                    summary: format!(
-                                        "Pista “{}” añadida a la presentación",
-                                        trimmed_title
-                                    ),
-                                    status: "success".to_string(),
-                                    details: Some(res.clone()),
-                                });
+                                    let res = json!({
+                                        "item_id": item.id,
+                                        "kind": "track",
+                                        "title": trimmed_title,
+                                        "position": item.position,
+                                        "presentation_id": item.presentation_id
+                                    });
 
-                                context.executed_call_ids.insert(call.id.clone());
-                                context.executed_signatures.insert(signature, res.clone());
-                                res
-                            }
-                            Err(e) => {
-                                context.staged_audio = Some(StagedAudioHandle::Failed);
-                                json!({
-                                    "error": "track_upload_failed",
-                                    "message": e.to_string()
-                                })
+                                    context.record_action(ToolAction {
+                                        tool: "add_track_from_staged".to_string(),
+                                        presentation_id: Some(pres_id.to_string()),
+                                        summary: format!(
+                                            "Pista “{}” añadida a la presentación",
+                                            trimmed_title
+                                        ),
+                                        status: "success".to_string(),
+                                        details: Some(res.clone()),
+                                    });
+
+                                    context.executed_call_ids.insert(call.id.clone());
+                                    context.executed_signatures.insert(signature, res.clone());
+                                    res
+                                }
+                                Err(e) => {
+                                    let _ = self.staged_audio_registry.release(
+                                        &lease.staged_audio_id,
+                                        &lease.lease_id,
+                                    );
+                                    json!({
+                                        "error": "track_upload_failed",
+                                        "message": e.to_string()
+                                    })
+                                }
                             }
                         }
+                        Err(StagedAudioRegistryError::AlreadyConsumed) => {
+                            json!({
+                                "error": "audio_already_consumed",
+                                "message": "El archivo de audio ya fue consumido o expiró"
+                            })
+                        }
+                        Err(StagedAudioRegistryError::NotFound) => {
+                            json!({
+                                "error": "staged_audio_not_found",
+                                "message": "Archivo de audio temporal no encontrado"
+                            })
+                        }
+                        Err(e) => {
+                            json!({
+                                "error": e.code(),
+                                "message": e.message()
+                            })
+                        }
+                    }
+                } else {
+                    // 2. Request-scoped attachment fallback
+                    match context.staged_audio.take() {
+                        None => {
+                            json!({
+                                "error": "no_audio_staged",
+                                "message": "No hay archivo de audio adjunto o preparado en esta solicitud"
+                            })
+                        }
+                        Some(StagedAudioHandle::Consumed) => {
+                            context.staged_audio = Some(StagedAudioHandle::Consumed);
+                            json!({
+                                "error": "audio_already_consumed",
+                                "message": "El archivo de audio adjunto ya fue consumido"
+                            })
+                        }
+                        Some(StagedAudioHandle::Failed) => {
+                            context.staged_audio = Some(StagedAudioHandle::Failed);
+                            json!({
+                                "error": "audio_staging_failed",
+                                "message": "El procesamiento del archivo de audio falló previamente"
+                            })
+                        }
+                        Some(StagedAudioHandle::Available {
+                            guard,
+                            format,
+                            byte_size,
+                        }) => {
+                            let stage_id = guard.stage_id().to_string();
+                            match self.upload_track.execute(
+                                pres_id,
+                                trimmed_title,
+                                &stage_id,
+                                format,
+                                byte_size,
+                            ) {
+                                Ok(item) => {
+                                    guard.defuse();
+                                    context.staged_audio = Some(StagedAudioHandle::Consumed);
+
+                                    let res = json!({
+                                        "item_id": item.id,
+                                        "kind": "track",
+                                        "title": trimmed_title,
+                                        "position": item.position,
+                                        "presentation_id": item.presentation_id
+                                    });
+
+                                    context.record_action(ToolAction {
+                                        tool: "add_track_from_staged".to_string(),
+                                        presentation_id: Some(pres_id.to_string()),
+                                        summary: format!(
+                                            "Pista “{}” añadida a la presentación",
+                                            trimmed_title
+                                        ),
+                                        status: "success".to_string(),
+                                        details: Some(res.clone()),
+                                    });
+
+                                    context.executed_call_ids.insert(call.id.clone());
+                                    context.executed_signatures.insert(signature, res.clone());
+                                    res
+                                }
+                                Err(e) => {
+                                    context.staged_audio = Some(StagedAudioHandle::Failed);
+                                    json!({
+                                        "error": "track_upload_failed",
+                                        "message": e.to_string()
+                                    })
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            "download_youtube_track" => {
+                let args: DownloadYouTubeTrackArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => {
+                        return json!({
+                            "error": "validation_error",
+                            "message": "Parámetros de herramienta inválidos"
+                        });
+                    }
+                };
+
+                let requested_title = args.title.as_deref().and_then(|t| {
+                    let tr = t.trim();
+                    if tr.is_empty() { None } else { Some(tr) }
+                });
+
+                match self
+                    .download_youtube_audio
+                    .execute(&args.url, requested_title)
+                    .await
+                {
+                    Ok(output) => {
+                        context.set_staged_audio_id(Some(output.staged_audio_id.clone()));
+
+                        let res = json!({
+                            "staged_audio_id": output.staged_audio_id,
+                            "title": output.title,
+                            "duration_secs": output.duration_secs,
+                            "size_bytes": output.size_bytes,
+                        });
+
+                        context.record_action(ToolAction {
+                            tool: "download_youtube_track".to_string(),
+                            presentation_id: None,
+                            summary: format!("Audio «{}» preparado temporalmente", output.title),
+                            status: "success".to_string(),
+                            details: Some(json!({
+                                "status": "success",
+                                "title": output.title,
+                                "byte_size": output.size_bytes,
+                                "format": "mp3",
+                                "staged_audio_id": output.staged_audio_id,
+                                "duration_secs": output.duration_secs,
+                            })),
+                        });
+
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => {
+                        json!({
+                            "error": e.code(),
+                            "message": e.message()
+                        })
                     }
                 }
             }

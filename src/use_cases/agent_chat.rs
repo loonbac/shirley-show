@@ -30,6 +30,7 @@ pub struct AgentChatInput {
     pub message: String,
     pub history: Vec<HistoryMessage>,
     pub presentation_id: Option<String>,
+    pub staged_audio_id: Option<String>,
     pub staged_audio: Option<StagedAudioHandle>,
     pub staged_filename: Option<String>,
 }
@@ -39,6 +40,8 @@ pub struct AgentChatOutput {
     pub message: String,
     pub actions_taken: Vec<ToolAction>,
     pub active_presentation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged_audio_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<AgentNotice>,
 }
@@ -82,6 +85,7 @@ impl AgentChat {
                     message: "Para hablar conmigo y gestionar tus shows con IA, necesitas configurar la variable de entorno GROQ_API_KEY en el servidor. Todas las funciones manuales siguen operando con normalidad.".to_string(),
                     actions_taken: vec![],
                     active_presentation_id: input.presentation_id,
+                    staged_audio_id: None,
                     notice: Some(AgentNotice {
                         code: "agent_unconfigured".to_string(),
                         retryable: false,
@@ -99,6 +103,7 @@ impl AgentChat {
             initial_presentation_id.as_deref(),
             has_staged_audio,
             staged_filename.as_deref(),
+            input.staged_audio_id.as_deref(),
         );
         let full_system_prompt = format!("{}\n\n{}", SHIRLEY_SYSTEM_PROMPT, context_prompt);
 
@@ -119,12 +124,14 @@ impl AgentChat {
         let tracker = Arc::new(Mutex::new(CommittedTurnState {
             actions_taken: Vec::new(),
             active_presentation_id: initial_presentation_id.clone(),
+            staged_audio_id: input.staged_audio_id.clone(),
         }));
         let tracker_for_timeout = tracker.clone();
 
-        let mut turn_context = TurnToolContext::with_tracker(
+        let mut turn_context = TurnToolContext::with_full_context(
             initial_presentation_id,
             input.staged_audio,
+            input.staged_audio_id,
             Some(tracker),
         );
 
@@ -150,12 +157,14 @@ impl AgentChat {
                             compose_grounded_message(
                                 &turn_context.actions_taken,
                                 Some(err.friendly_message()),
+                                turn_context.staged_audio_id.as_deref(),
                             )
                         };
                         return AgentChatOutput {
                             message,
                             actions_taken: turn_context.actions_taken,
                             active_presentation_id: turn_context.active_presentation_id,
+                            staged_audio_id: turn_context.staged_audio_id,
                             notice: Some(notice),
                         };
                     }
@@ -168,7 +177,7 @@ impl AgentChat {
                     });
 
                     for tc in response.tool_calls {
-                        let res = self.dispatcher.dispatch(&tc, &mut turn_context);
+                        let res = self.dispatcher.dispatch(&tc, &mut turn_context).await;
                         conversation_messages.push(AgentMessage::Tool {
                             tool_call_id: tc.id,
                             content: res.to_string(),
@@ -183,36 +192,49 @@ impl AgentChat {
                         let message = compose_grounded_message(
                             &turn_context.actions_taken,
                             Some("Alcancé el límite de pasos permitidos para este turno. Si necesitas continuar, indícamelo en un nuevo mensaje."),
+                            turn_context.staged_audio_id.as_deref(),
                         );
                         return AgentChatOutput {
                             message,
                             actions_taken: turn_context.actions_taken,
                             active_presentation_id: turn_context.active_presentation_id,
+                            staged_audio_id: turn_context.staged_audio_id,
                             notice: Some(notice),
                         };
                     }
                 } else {
                     let message = if turn_context.actions_taken.is_empty() {
-                        response
+                        let raw = response
                             .content
-                            .unwrap_or_else(|| "No pude generar una respuesta.".to_string())
+                            .unwrap_or_else(|| "No pude generar una respuesta.".to_string());
+                        sanitize_ungrounded_claims(&raw)
                     } else {
-                        compose_grounded_message(&turn_context.actions_taken, None)
+                        compose_grounded_message(
+                            &turn_context.actions_taken,
+                            None,
+                            turn_context.staged_audio_id.as_deref(),
+                        )
                     };
 
                     return AgentChatOutput {
                         message,
                         actions_taken: turn_context.actions_taken,
                         active_presentation_id: turn_context.active_presentation_id,
+                        staged_audio_id: turn_context.staged_audio_id,
                         notice: None,
                     };
                 }
             }
 
             AgentChatOutput {
-                message: compose_grounded_message(&turn_context.actions_taken, None),
+                message: compose_grounded_message(
+                    &turn_context.actions_taken,
+                    None,
+                    turn_context.staged_audio_id.as_deref(),
+                ),
                 actions_taken: turn_context.actions_taken,
                 active_presentation_id: turn_context.active_presentation_id,
+                staged_audio_id: turn_context.staged_audio_id,
                 notice: None,
             }
         })
@@ -226,9 +248,11 @@ impl AgentChat {
                     message: compose_grounded_message(
                         &committed.actions_taken,
                         Some("La solicitud tardó más del límite de tiempo (30 s) y fue cancelada."),
+                        committed.staged_audio_id.as_deref(),
                     ),
                     actions_taken: committed.actions_taken.clone(),
                     active_presentation_id: committed.active_presentation_id.clone(),
+                    staged_audio_id: committed.staged_audio_id.clone(),
                     notice: Some(AgentNotice {
                         code: "agent_timeout".to_string(),
                         retryable: true,
@@ -282,7 +306,11 @@ fn prune_history(history: Vec<HistoryMessage>) -> (Vec<AgentMessage>, bool) {
     (selected_rev, was_pruned)
 }
 
-fn compose_grounded_message(actions_taken: &[ToolAction], extra_notice: Option<&str>) -> String {
+fn compose_grounded_message(
+    actions_taken: &[ToolAction],
+    extra_notice: Option<&str>,
+    staged_audio_id: Option<&str>,
+) -> String {
     if actions_taken.is_empty() {
         if let Some(notice) = extra_notice {
             return notice.to_string();
@@ -293,9 +321,42 @@ fn compose_grounded_message(actions_taken: &[ToolAction], extra_notice: Option<&
     let summaries: Vec<&str> = actions_taken.iter().map(|a| a.summary.as_str()).collect();
     let actions_text = summaries.join(". ") + ".";
 
-    if let Some(notice) = extra_notice {
-        format!("{}\n\n{}", actions_text, notice)
+    let with_staged_question = if staged_audio_id.is_some() {
+        format!(
+            "{}\n\nEl audio está preparado y caduca en 15 minutos. ¿A qué presentación deseas agregarlo?",
+            actions_text
+        )
     } else {
         actions_text
+    };
+
+    if let Some(notice) = extra_notice {
+        format!("{}\n\n{}", with_staged_question, notice)
+    } else {
+        with_staged_question
+    }
+}
+
+fn sanitize_ungrounded_claims(content: &str) -> String {
+    let lower = content.to_lowercase();
+    let false_claim_patterns = [
+        "descargué",
+        "he descargado",
+        "audio descargado",
+        "video descargado",
+        "agregué la pista",
+        "he agregado la pista",
+        "pista agregada",
+        "creé la presentación",
+        "he creado la presentación",
+        "presentación creada",
+        "añadí la pista",
+        "he añadido la pista",
+    ];
+
+    if false_claim_patterns.iter().any(|pattern| lower.contains(pattern)) {
+        "No se completaron acciones en este turno. Si deseas realizar una acción como descargar un audio o gestionar una presentación, por favor indícamelo.".to_string()
+    } else {
+        content.to_string()
     }
 }

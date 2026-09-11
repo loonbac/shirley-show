@@ -172,6 +172,7 @@ pub async fn parse_and_validate_multipart_request(
         message: final_message,
         history,
         presentation_id,
+        staged_audio_id: None,
         staged_audio,
         staged_filename,
     })

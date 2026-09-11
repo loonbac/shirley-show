@@ -83,7 +83,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "add_track_from_staged".to_string(),
-            description: "Incorpora el archivo de audio adjunto en la solicitud actual como una pista en la presentación especificada.".to_string(),
+            description: "Incorpora el archivo de audio adjunto o preparado en la solicitud actual como una pista en la presentación especificada.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -94,9 +94,32 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                     "title": {
                         "type": "string",
                         "description": "Título de la pista de audio."
+                    },
+                    "staged_audio_id": {
+                        "type": "string",
+                        "description": "Identificador opcional del audio preparado previamente para esta solicitud."
                     }
                 },
                 "required": ["presentation_id", "title"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "download_youtube_track".to_string(),
+            description: "Descarga el audio de un video de YouTube y lo prepara temporalmente como archivo staged para agregarlo como pista.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL pública del video de YouTube a descargar (youtube.com o youtu.be)."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Título opcional personalizado para la pista de audio."
+                    }
+                },
+                "required": ["url"],
                 "additionalProperties": false
             }),
         },

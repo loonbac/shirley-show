@@ -17,7 +17,8 @@ pub struct ToolDefinition {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolAction {
     pub tool: String,
-    pub presentation_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presentation_id: Option<String>,
     pub summary: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]

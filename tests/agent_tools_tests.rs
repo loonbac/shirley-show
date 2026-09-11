@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -8,9 +10,68 @@ use shirley_show::agent::tool_schemas::get_tool_definitions;
 use shirley_show::agent::turn_context::{StagedAudioHandle, TurnToolContext};
 use shirley_show::domain::agent_tool::ToolCall;
 use shirley_show::domain::audio_format::AudioFormat;
+use shirley_show::domain::youtube_url::YouTubeUrl;
 use shirley_show::infra::filesystem::{LocalAudioStorage, StagingFileGuard};
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
+use shirley_show::ports::youtube_downloader::{
+    DownloadedYoutubeAudio, YoutubeDownloadError, YoutubeDownloadTarget, YoutubeDownloader,
+};
 use shirley_show::state::AppState;
+
+struct FakeDownloader {
+    metadata_title: String,
+    duration_secs: u32,
+    size_bytes: u64,
+    fail_with_error: Option<YoutubeDownloadError>,
+}
+
+impl FakeDownloader {
+    fn new(title: &str, duration_secs: u32, size_bytes: u64) -> Self {
+        Self {
+            metadata_title: title.to_string(),
+            duration_secs,
+            size_bytes,
+            fail_with_error: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn failing(err: YoutubeDownloadError) -> Self {
+        Self {
+            metadata_title: String::new(),
+            duration_secs: 0,
+            size_bytes: 0,
+            fail_with_error: Some(err),
+        }
+    }
+}
+
+impl YoutubeDownloader for FakeDownloader {
+    fn download(
+        &self,
+        _url: YouTubeUrl,
+        target: YoutubeDownloadTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>> {
+        if let Some(err) = self.fail_with_error.clone() {
+            return Box::pin(async move { Err(err) });
+        }
+
+        let title = self.metadata_title.clone();
+        let duration_secs = self.duration_secs;
+        let size_bytes = self.size_bytes;
+
+        Box::pin(async move {
+            let part_path = target.staging_dir.join(format!("{}.part", target.stage_id));
+            std::fs::write(&part_path, b"dummy audio mp3 content").expect("write fake mp3 part");
+
+            Ok(DownloadedYoutubeAudio {
+                title,
+                duration_secs,
+                size_bytes,
+            })
+        })
+    }
+}
 
 fn setup_test_state() -> (AppState, TempDir) {
     let temp_dir = TempDir::new().expect("create temp dir");
@@ -28,9 +89,9 @@ fn setup_test_state() -> (AppState, TempDir) {
 }
 
 #[test]
-fn test_tool_schemas_strictly_six_tools_with_exact_signatures() {
+fn test_tool_schemas_strictly_seven_tools_with_exact_signatures() {
     let tools = get_tool_definitions();
-    assert_eq!(tools.len(), 6, "Must expose exactly 6 tools");
+    assert_eq!(tools.len(), 7, "Must expose exactly 7 tools");
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"create_presentation"));
@@ -39,6 +100,7 @@ fn test_tool_schemas_strictly_six_tools_with_exact_signatures() {
     assert!(names.contains(&"add_lyrics"));
     assert!(names.contains(&"add_note"));
     assert!(names.contains(&"add_track_from_staged"));
+    assert!(names.contains(&"download_youtube_track"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -66,6 +128,19 @@ fn test_tool_schemas_strictly_six_tools_with_exact_signatures() {
                 let required = params["required"].as_array().unwrap();
                 assert!(required.contains(&json!("presentation_id")));
                 assert!(required.contains(&json!("title")));
+                assert!(!required.contains(&json!("staged_audio_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert!(props.contains_key("presentation_id"));
+                assert!(props.contains_key("title"));
+                assert!(props.contains_key("staged_audio_id"));
+            }
+            "download_youtube_track" => {
+                let required = params["required"].as_array().unwrap();
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("url")));
+                let props = params["properties"].as_object().unwrap();
+                assert!(props.contains_key("url"));
+                assert!(props.contains_key("title"));
             }
             _ => panic!("Unexpected tool name: {}", tool.name),
         }
@@ -84,7 +159,7 @@ async fn test_dispatcher_rejects_unknown_or_destructive_tools() {
         arguments: json!({ "presentation_id": "pres-1" }).to_string(),
     };
 
-    let result = dispatcher.dispatch(&destructive_call, &mut context);
+    let result = dispatcher.dispatch(&destructive_call, &mut context).await;
     assert_eq!(result["error"], "unknown_tool");
 
     let unknown_call = ToolCall {
@@ -93,7 +168,7 @@ async fn test_dispatcher_rejects_unknown_or_destructive_tools() {
         arguments: json!({ "query": "DROP TABLE presentations;" }).to_string(),
     };
 
-    let result2 = dispatcher.dispatch(&unknown_call, &mut context);
+    let result2 = dispatcher.dispatch(&unknown_call, &mut context).await;
     assert_eq!(result2["error"], "unknown_tool");
     assert!(context.actions_taken.is_empty());
 }
@@ -117,7 +192,7 @@ async fn test_dispatcher_enforces_presentation_id_integrity() {
         })
         .to_string(),
     };
-    let result = dispatcher.dispatch(&bad_call, &mut context);
+    let result = dispatcher.dispatch(&bad_call, &mut context).await;
     assert_eq!(result["error"], "unauthorized_presentation_id");
     assert!(context.actions_taken.is_empty());
 
@@ -131,7 +206,7 @@ async fn test_dispatcher_enforces_presentation_id_integrity() {
         })
         .to_string(),
     };
-    let result_good = dispatcher.dispatch(&good_call, &mut context);
+    let result_good = dispatcher.dispatch(&good_call, &mut context).await;
     assert_eq!(result_good["kind"], "note");
     assert_eq!(result_good["presentation_id"], pres.id);
     assert_eq!(context.actions_taken.len(), 1);
@@ -155,13 +230,13 @@ async fn test_dispatcher_deduplication_mutation_and_read_cache() {
         })
         .to_string(),
     };
-    let res1 = dispatcher.dispatch(&call1, &mut context);
+    let res1 = dispatcher.dispatch(&call1, &mut context).await;
     assert_eq!(res1["kind"], "lyrics");
     assert_eq!(res1["position"], 0);
     assert_eq!(context.actions_taken.len(), 1);
 
     // Duplicate call with SAME call_id
-    let res_dup_id = dispatcher.dispatch(&call1, &mut context);
+    let res_dup_id = dispatcher.dispatch(&call1, &mut context).await;
     assert_eq!(res_dup_id["warning"], "duplicate_call_ignored");
     assert_eq!(
         context.actions_taken.len(),
@@ -178,7 +253,7 @@ async fn test_dispatcher_deduplication_mutation_and_read_cache() {
             pres.id
         ),
     };
-    let res_dup_sig = dispatcher.dispatch(&call2_equiv, &mut context);
+    let res_dup_sig = dispatcher.dispatch(&call2_equiv, &mut context).await;
     assert_eq!(res_dup_sig["warning"], "duplicate_call_ignored");
     assert_eq!(context.actions_taken.len(), 1);
 
@@ -188,7 +263,7 @@ async fn test_dispatcher_deduplication_mutation_and_read_cache() {
         name: "list_presentations".to_string(),
         arguments: "{}".to_string(),
     };
-    let list_res1 = dispatcher.dispatch(&list_call1, &mut context);
+    let list_res1 = dispatcher.dispatch(&list_call1, &mut context).await;
     assert!(list_res1.is_array());
 
     let list_call2 = ToolCall {
@@ -196,7 +271,7 @@ async fn test_dispatcher_deduplication_mutation_and_read_cache() {
         name: "list_presentations".to_string(),
         arguments: "{}".to_string(),
     };
-    let list_res2 = dispatcher.dispatch(&list_call2, &mut context);
+    let list_res2 = dispatcher.dispatch(&list_call2, &mut context).await;
     assert_eq!(list_res1, list_res2);
 }
 
@@ -212,7 +287,7 @@ async fn test_dispatcher_chained_presentation_creation_and_item_addition() {
         name: "create_presentation".to_string(),
         arguments: json!({ "name": "Show Nuevo" }).to_string(),
     };
-    let create_res = dispatcher.dispatch(&create_call, &mut context);
+    let create_res = dispatcher.dispatch(&create_call, &mut context).await;
     let new_id = create_res["id"].as_str().unwrap().to_string();
     assert_eq!(create_res["title"], "Show Nuevo");
     assert!(context.known_presentation_ids.contains(&new_id));
@@ -228,7 +303,7 @@ async fn test_dispatcher_chained_presentation_creation_and_item_addition() {
         })
         .to_string(),
     };
-    let note_res = dispatcher.dispatch(&note_call, &mut context);
+    let note_res = dispatcher.dispatch(&note_call, &mut context).await;
     assert_eq!(note_res["kind"], "note");
     assert_eq!(note_res["position"], 0);
     assert_eq!(context.actions_taken.len(), 2);
@@ -243,7 +318,7 @@ async fn test_dispatcher_chained_presentation_creation_and_item_addition() {
         })
         .to_string(),
     };
-    let lyrics_res = dispatcher.dispatch(&lyrics_call, &mut context);
+    let lyrics_res = dispatcher.dispatch(&lyrics_call, &mut context).await;
     assert_eq!(lyrics_res["kind"], "lyrics");
     assert_eq!(lyrics_res["position"], 1);
     assert_eq!(context.actions_taken.len(), 3);
@@ -282,7 +357,7 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&track_call, &mut context);
+    let res = dispatcher.dispatch(&track_call, &mut context).await;
     assert_eq!(res["kind"], "track");
     assert_eq!(res["title"], "Pista 1 Guitarra");
     assert_eq!(res["position"], 0);
@@ -303,7 +378,7 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
         })
         .to_string(),
     };
-    let res2 = dispatcher.dispatch(&track_call_2, &mut context);
+    let res2 = dispatcher.dispatch(&track_call_2, &mut context).await;
     assert_eq!(res2["error"], "audio_already_consumed");
 
     // 3. Calling add_track_from_staged without any staged audio
@@ -317,7 +392,7 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
         })
         .to_string(),
     };
-    let res3 = dispatcher.dispatch(&track_call_no_audio, &mut empty_context);
+    let res3 = dispatcher.dispatch(&track_call_no_audio, &mut empty_context).await;
     assert_eq!(res3["error"], "no_audio_staged");
 }
 
@@ -334,7 +409,7 @@ async fn test_dispatcher_validation_empty_arguments() {
         name: "create_presentation".to_string(),
         arguments: json!({ "name": "   " }).to_string(),
     };
-    let res1 = dispatcher.dispatch(&empty_name, &mut context);
+    let res1 = dispatcher.dispatch(&empty_name, &mut context).await;
     assert_eq!(res1["error"], "validation_error");
 
     // Empty text in add_lyrics
@@ -343,7 +418,7 @@ async fn test_dispatcher_validation_empty_arguments() {
         name: "add_lyrics".to_string(),
         arguments: json!({ "presentation_id": pres.id, "text": " \n \t " }).to_string(),
     };
-    let res2 = dispatcher.dispatch(&empty_lyrics, &mut context);
+    let res2 = dispatcher.dispatch(&empty_lyrics, &mut context).await;
     assert_eq!(res2["error"], "validation_error");
 
     // Empty text in add_note
@@ -352,7 +427,7 @@ async fn test_dispatcher_validation_empty_arguments() {
         name: "add_note".to_string(),
         arguments: json!({ "presentation_id": pres.id, "text": "" }).to_string(),
     };
-    let res3 = dispatcher.dispatch(&empty_note, &mut context);
+    let res3 = dispatcher.dispatch(&empty_note, &mut context).await;
     assert_eq!(res3["error"], "validation_error");
 
     // Empty title in add_track_from_staged
@@ -361,7 +436,7 @@ async fn test_dispatcher_validation_empty_arguments() {
         name: "add_track_from_staged".to_string(),
         arguments: json!({ "presentation_id": pres.id, "title": "   " }).to_string(),
     };
-    let res4 = dispatcher.dispatch(&empty_track, &mut context);
+    let res4 = dispatcher.dispatch(&empty_track, &mut context).await;
     assert_eq!(res4["error"], "validation_error");
 }
 
@@ -377,7 +452,7 @@ async fn test_dispatcher_rejects_unknown_fields_in_tool_arguments() {
         name: "create_presentation".to_string(),
         arguments: json!({ "name": "Show Nuevo", "extra_prop": "malicious" }).to_string(),
     };
-    let res = dispatcher.dispatch(&call_create, &mut context);
+    let res = dispatcher.dispatch(&call_create, &mut context).await;
     assert_eq!(res["error"], "validation_error");
     assert_eq!(res["message"], "Parámetros de herramienta inválidos");
 
@@ -386,7 +461,7 @@ async fn test_dispatcher_rejects_unknown_fields_in_tool_arguments() {
         name: "get_presentation".to_string(),
         arguments: json!({ "presentation_id": pres.id, "foo": "bar" }).to_string(),
     };
-    let res = dispatcher.dispatch(&call_get, &mut context);
+    let res = dispatcher.dispatch(&call_get, &mut context).await;
     assert_eq!(res["error"], "validation_error");
     assert_eq!(res["message"], "Parámetros de herramienta inválidos");
 
@@ -395,7 +470,7 @@ async fn test_dispatcher_rejects_unknown_fields_in_tool_arguments() {
         name: "add_lyrics".to_string(),
         arguments: json!({ "presentation_id": pres.id, "text": "Letra", "extra": 123 }).to_string(),
     };
-    let res = dispatcher.dispatch(&call_lyrics, &mut context);
+    let res = dispatcher.dispatch(&call_lyrics, &mut context).await;
     assert_eq!(res["error"], "validation_error");
     assert_eq!(res["message"], "Parámetros de herramienta inválidos");
 
@@ -405,7 +480,209 @@ async fn test_dispatcher_rejects_unknown_fields_in_tool_arguments() {
         arguments: json!({ "presentation_id": pres.id, "title": "Track", "bogus": true })
             .to_string(),
     };
-    let res = dispatcher.dispatch(&call_track, &mut context);
+    let res = dispatcher.dispatch(&call_track, &mut context).await;
     assert_eq!(res["error"], "validation_error");
     assert_eq!(res["message"], "Parámetros de herramienta inválidos");
+
+    let call_yt = ToolCall {
+        id: "call_extra_5".to_string(),
+        name: "download_youtube_track".to_string(),
+        arguments: json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "extra": 123 }).to_string(),
+    };
+    let res_yt = dispatcher.dispatch(&call_yt, &mut context).await;
+    assert_eq!(res_yt["error"], "validation_error");
+    assert_eq!(res_yt["message"], "Parámetros de herramienta inválidos");
+}
+
+#[tokio::test]
+async fn test_dispatcher_download_youtube_track_success_and_deduplication() {
+    let (state, _tmp) = setup_test_state();
+    let state = state.with_youtube_downloader(Arc::new(FakeDownloader::new(
+        "Zamba de mi Esperanza",
+        180,
+        4_500_000,
+    )));
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::default();
+
+    let yt_call = ToolCall {
+        id: "call_yt_1".to_string(),
+        name: "download_youtube_track".to_string(),
+        arguments: json!({
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "title": "Mi Zamba Personalizada"
+        })
+        .to_string(),
+    };
+
+    let res = dispatcher.dispatch(&yt_call, &mut context).await;
+    assert!(res["staged_audio_id"].as_str().is_some());
+    let staged_id = res["staged_audio_id"].as_str().unwrap().to_string();
+    assert!(staged_id.starts_with("staged-"));
+    assert_eq!(res["title"], "Mi Zamba Personalizada");
+    assert_eq!(res["duration_secs"], 180);
+    assert_eq!(res["size_bytes"], 4_500_000);
+
+    // Context should now carry the staged_audio_id capability
+    assert_eq!(context.staged_audio_id.as_deref(), Some(staged_id.as_str()));
+    assert_eq!(context.actions_taken.len(), 1);
+    assert_eq!(context.actions_taken[0].tool, "download_youtube_track");
+    assert_eq!(context.actions_taken[0].presentation_id, None);
+    assert_eq!(context.actions_taken[0].status, "success");
+
+    // Check payload details in ToolAction
+    let details = context.actions_taken[0].details.as_ref().unwrap();
+    assert_eq!(details["status"], "success");
+    assert_eq!(details["title"], "Mi Zamba Personalizada");
+    assert_eq!(details["byte_size"], 4_500_000);
+    assert_eq!(details["format"], "mp3");
+
+    // Second call in same turn with same call ID MUST be deduplicated
+    let dup_res = dispatcher.dispatch(&yt_call, &mut context).await;
+    assert_eq!(dup_res["warning"], "duplicate_call_ignored");
+    assert_eq!(context.actions_taken.len(), 1);
+
+    // Second call with different ID but same arguments MUST also be deduplicated
+    let yt_call_diff_id = ToolCall {
+        id: "call_yt_2".to_string(),
+        name: "download_youtube_track".to_string(),
+        arguments: json!({
+            "title": "Mi Zamba Personalizada",
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        })
+        .to_string(),
+    };
+    let dup_res_sig = dispatcher.dispatch(&yt_call_diff_id, &mut context).await;
+    assert_eq!(dup_res_sig["warning"], "duplicate_call_ignored");
+    assert_eq!(context.actions_taken.len(), 1);
+}
+
+#[tokio::test]
+async fn test_dispatcher_download_youtube_track_chained_with_add_track_from_staged() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Repertorio Peña").unwrap();
+    let state = state.with_youtube_downloader(Arc::new(FakeDownloader::new(
+        "Chacarera del 55",
+        150,
+        3_800_000,
+    )));
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::new(Some(pres.id.clone()), None);
+
+    // 1. Download YouTube track
+    let yt_call = ToolCall {
+        id: "call_yt_1".to_string(),
+        name: "download_youtube_track".to_string(),
+        arguments: json!({
+            "url": "https://youtu.be/dQw4w9WgXcQ"
+        })
+        .to_string(),
+    };
+    let yt_res = dispatcher.dispatch(&yt_call, &mut context).await;
+    let staged_id = yt_res["staged_audio_id"].as_str().unwrap().to_string();
+    assert_eq!(context.staged_audio_id.as_deref(), Some(staged_id.as_str()));
+    assert_eq!(context.actions_taken.len(), 1);
+
+    // 2. Chained add_track_from_staged without explicit staged_audio_id (inherited from turn capability)
+    let add_call = ToolCall {
+        id: "call_add_1".to_string(),
+        name: "add_track_from_staged".to_string(),
+        arguments: json!({
+            "presentation_id": pres.id,
+            "title": "Chacarera del 55"
+        })
+        .to_string(),
+    };
+    let add_res = dispatcher.dispatch(&add_call, &mut context).await;
+    assert_eq!(add_res["kind"], "track");
+    assert_eq!(add_res["title"], "Chacarera del 55");
+    assert_eq!(add_res["position"], 0);
+
+    // Staged audio ID should now be consumed / cleared from active context capability
+    assert_eq!(context.staged_audio_id, None);
+    assert_eq!(context.actions_taken.len(), 2);
+    assert_eq!(context.actions_taken[0].tool, "download_youtube_track");
+    assert_eq!(context.actions_taken[1].tool, "add_track_from_staged");
+    assert_eq!(context.actions_taken[1].presentation_id, Some(pres.id));
+
+    // Attempting to consume again should fail with audio_already_consumed
+    let add_call_again = ToolCall {
+        id: "call_add_2".to_string(),
+        name: "add_track_from_staged".to_string(),
+        arguments: json!({
+            "presentation_id": context.actions_taken[1].presentation_id.as_ref().unwrap(),
+            "title": "Otra Pista",
+            "staged_audio_id": staged_id
+        })
+        .to_string(),
+    };
+    let add_again_res = dispatcher.dispatch(&add_call_again, &mut context).await;
+    assert_eq!(add_again_res["error"], "audio_already_consumed");
+}
+
+#[tokio::test]
+async fn test_dispatcher_add_track_from_staged_with_explicit_staged_audio_id() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Domingo").unwrap();
+
+    // Register an audio file directly in registry
+    let (stage_id, stage_path) = state.storage.create_staging_file().unwrap();
+    std::fs::write(&stage_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+
+    let descriptor = state.staged_audio_registry.register(
+        stage_id,
+        stage_path,
+        "Tema Registrado".to_string(),
+        210,
+        2_500_000,
+    );
+
+    let dispatcher = AgentToolDispatcher::new(state);
+    // Context initialized with the staged_audio_id capability from previous turn
+    let mut context = TurnToolContext::with_staged_audio_id(
+        Some(pres.id.clone()),
+        None,
+        Some(descriptor.staged_audio_id.clone()),
+    );
+
+    let add_call = ToolCall {
+        id: "call_explicit_staged".to_string(),
+        name: "add_track_from_staged".to_string(),
+        arguments: json!({
+            "presentation_id": pres.id,
+            "title": "Tema Registrado",
+            "staged_audio_id": descriptor.staged_audio_id
+        })
+        .to_string(),
+    };
+
+    let add_res = dispatcher.dispatch(&add_call, &mut context).await;
+    assert_eq!(add_res["kind"], "track");
+    assert_eq!(add_res["title"], "Tema Registrado");
+    assert_eq!(context.staged_audio_id, None);
+    assert_eq!(context.actions_taken.len(), 1);
+}
+
+#[tokio::test]
+async fn test_dispatcher_add_track_from_staged_rejects_unauthorized_staged_audio_id() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Seguro").unwrap();
+    let dispatcher = AgentToolDispatcher::new(state);
+    // Context does NOT know this staged_audio_id
+    let mut context = TurnToolContext::new(Some(pres.id.clone()), None);
+
+    let bad_staged_call = ToolCall {
+        id: "call_bad_staged".to_string(),
+        name: "add_track_from_staged".to_string(),
+        arguments: json!({
+            "presentation_id": pres.id,
+            "title": "Pista No Autorizada",
+            "staged_audio_id": "staged-unauthorized-999"
+        })
+        .to_string(),
+    };
+
+    let res = dispatcher.dispatch(&bad_staged_call, &mut context).await;
+    assert_eq!(res["error"], "staged_audio_not_found");
+    assert!(context.actions_taken.is_empty());
 }
