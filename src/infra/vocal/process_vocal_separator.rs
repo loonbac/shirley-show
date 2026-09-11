@@ -36,7 +36,11 @@ impl ProcessVocalSeparator {
         &self.config
     }
 
-    async fn run_ffprobe_preflight(&self, source_path: &Path) -> Result<f64, VocalSeparationError> {
+    async fn run_ffprobe_preflight(
+        &self,
+        source_path: &Path,
+        timeout: Duration,
+    ) -> Result<f64, VocalSeparationError> {
         struct PreflightChildGuard(Option<tokio::process::Child>);
         impl Drop for PreflightChildGuard {
             fn drop(&mut self) {
@@ -99,7 +103,7 @@ impl ProcessVocalSeparator {
                 })
             };
 
-            match tokio::time::timeout(Duration::from_secs(5), combined).await {
+            match tokio::time::timeout(timeout, combined).await {
                 Ok(Ok(o)) if o.status.success() => {
                     pguard.0 = None;
                     break o;
@@ -285,7 +289,10 @@ impl VocalSeparator for ProcessVocalSeparator {
             }
 
             // 3. Preflight duration verification via ffprobe (<= 600s) before GPU
-            let preflight_duration = this.run_ffprobe_preflight(&request.source_path).await?;
+            let preflight_timeout = request.timeout.min(Duration::from_secs(5));
+            let preflight_duration = this
+                .run_ffprobe_preflight(&request.source_path, preflight_timeout)
+                .await?;
             if preflight_duration > 600.0 {
                 return Err(VocalSeparationError::DurationExceeded);
             }

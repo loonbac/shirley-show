@@ -10,8 +10,6 @@ pub struct ProcessVocalSeparatorConfig {
     pub vocal_sep_bin: Option<PathBuf>,
     pub ffprobe_bin: PathBuf,
     pub ffmpeg_bin: PathBuf,
-    pub polarformer_checkpoint: Option<PathBuf>,
-    pub polarformer_config: Option<PathBuf>,
     pub work_root: PathBuf,
     pub gpu: Arc<Semaphore>,
 }
@@ -29,26 +27,23 @@ impl ProcessVocalSeparatorConfig {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("ffmpeg"));
 
-        let polarformer_checkpoint = std::env::var("POLARFORMER_CHECKPOINT")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| {
-                dirs_fallback_models_dir().map(|d| d.join("model_bs_polarformer_float16.ckpt"))
-            });
-
-        let polarformer_config = std::env::var("POLARFORMER_CONFIG")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| {
-                dirs_fallback_models_dir().map(|d| d.join("model_bs_polarformer_float16.yaml"))
-            });
+        // NOTE on POLARFORMER_CHECKPOINT and POLARFORMER_CONFIG:
+        // We deliberately DO NOT read `POLARFORMER_CHECKPOINT` or `POLARFORMER_CONFIG` overrides.
+        // The real wrapper `/run/current-system/sw/bin/karaoke-separator` hardcodes:
+        //   models_dir="$HOME/Proyectos/separador-vocal/modelos"
+        // and passes exclusively:
+        //   "$models_dir/model_bs_polarformer_float16.ckpt"
+        //   "$models_dir/model_bs_polarformer_float16.yaml"
+        // without accepting CLI flags or environment overrides for weights.
+        // Permitting overrides in Shirley Show would create a false-positive vulnerability
+        // where preflight passes on alternate files, acquires the GPU semaphore permit,
+        // and then the wrapper fails loading its internal hardcoded paths.
+        // PolarFormer availability is validated strictly against the wrapper's contractual paths.
 
         Self {
             vocal_sep_bin,
             ffprobe_bin,
             ffmpeg_bin,
-            polarformer_checkpoint,
-            polarformer_config,
             work_root,
             gpu,
         }
@@ -77,37 +72,57 @@ impl ProcessVocalSeparatorConfig {
         }
     }
 
-    /// Validates physical existence and readability of PolarFormer checkpoint and config.
-    /// Absence indicates `instrumental_unavailable` and does NOT acquire GPU.
-    pub fn validate_polarformer_artifacts(&self) -> Result<(&Path, &Path), VocalSeparationError> {
-        let ckpt = self
-            .polarformer_checkpoint
-            .as_deref()
-            .ok_or(VocalSeparationError::InstrumentalUnavailable)?;
-        let conf = self
-            .polarformer_config
-            .as_deref()
-            .ok_or(VocalSeparationError::InstrumentalUnavailable)?;
-
-        if ckpt.is_file() && conf.is_file() {
-            Ok((ckpt, conf))
-        } else {
-            Err(VocalSeparationError::InstrumentalUnavailable)
-        }
-    }
-}
-
-fn dirs_fallback_models_dir() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("HOME") {
+    /// Returns the exact contractual PolarFormer paths hardcoded in `/run/current-system/sw/bin/karaoke-separator`:
+    /// - `$HOME/Proyectos/separador-vocal/modelos/model_bs_polarformer_float16.ckpt`
+    /// - `$HOME/Proyectos/separador-vocal/modelos/model_bs_polarformer_float16.yaml`
+    pub fn contractual_polarformer_paths() -> Result<(PathBuf, PathBuf), VocalSeparationError> {
+        let home =
+            std::env::var("HOME").map_err(|_| VocalSeparationError::InstrumentalUnavailable)?;
         let models_dir = PathBuf::from(home)
             .join("Proyectos")
             .join("separador-vocal")
             .join("modelos");
-        if models_dir.is_dir() {
-            return Some(models_dir);
+        let ckpt = models_dir.join("model_bs_polarformer_float16.ckpt");
+        let conf = models_dir.join("model_bs_polarformer_float16.yaml");
+        Ok((ckpt, conf))
+    }
+
+    /// Pure validation function testing physical existence, regular file status, and readability
+    /// by actively opening both PolarFormer checkpoint and config artifacts with `File::open`.
+    pub fn validate_polarformer_artifacts_at(
+        ckpt: &Path,
+        conf: &Path,
+    ) -> Result<(), VocalSeparationError> {
+        let ckpt_file =
+            std::fs::File::open(ckpt).map_err(|_| VocalSeparationError::InstrumentalUnavailable)?;
+        let conf_file =
+            std::fs::File::open(conf).map_err(|_| VocalSeparationError::InstrumentalUnavailable)?;
+
+        let ckpt_meta = ckpt_file
+            .metadata()
+            .map_err(|_| VocalSeparationError::InstrumentalUnavailable)?;
+        let conf_meta = conf_file
+            .metadata()
+            .map_err(|_| VocalSeparationError::InstrumentalUnavailable)?;
+
+        if ckpt_meta.is_file() && conf_meta.is_file() {
+            Ok(())
+        } else {
+            Err(VocalSeparationError::InstrumentalUnavailable)
         }
     }
-    None
+
+    /// Validates physical existence and readability of the exact contractual PolarFormer
+    /// checkpoint and config consumed by `/run/current-system/sw/bin/karaoke-separator`.
+    /// Actively opens both files to verify read permissions.
+    /// Absence or unreadability indicates `instrumental_unavailable` and does NOT acquire GPU.
+    pub fn validate_polarformer_artifacts(
+        &self,
+    ) -> Result<(PathBuf, PathBuf), VocalSeparationError> {
+        let (ckpt, conf) = Self::contractual_polarformer_paths()?;
+        Self::validate_polarformer_artifacts_at(&ckpt, &conf)?;
+        Ok((ckpt, conf))
+    }
 }
 
 fn is_executable_file(path: &Path) -> bool {

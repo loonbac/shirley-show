@@ -52,8 +52,6 @@ struct TestSeparatorEnv {
     pub staging_dir: PathBuf,
     pub log_file: PathBuf,
     pub sample_wav: PathBuf,
-    pub checkpoint_file: PathBuf,
-    pub config_file: PathBuf,
     pub gpu: Arc<Semaphore>,
 }
 
@@ -71,12 +69,6 @@ impl TestSeparatorEnv {
         let sample_wav = temp_dir.path().join("sample.wav");
         create_test_wav(&sample_wav, 4410, 44100);
 
-        let checkpoint_file = temp_dir.path().join("model_bs_polarformer_float16.ckpt");
-        File::create(&checkpoint_file).expect("failed to create fake ckpt");
-
-        let config_file = temp_dir.path().join("model_bs_polarformer_float16.yaml");
-        File::create(&config_file).expect("failed to create fake yaml");
-
         let gpu = Arc::new(Semaphore::new(1));
 
         Self {
@@ -86,8 +78,6 @@ impl TestSeparatorEnv {
             staging_dir,
             log_file,
             sample_wav,
-            checkpoint_file,
-            config_file,
             gpu,
         }
     }
@@ -180,8 +170,6 @@ exit 0
             vocal_sep_bin: Some(vocal_sep_bin),
             ffprobe_bin,
             ffmpeg_bin,
-            polarformer_checkpoint: Some(self.checkpoint_file.clone()),
-            polarformer_config: Some(self.config_file.clone()),
             work_root: self.work_root.clone(),
             gpu: self.gpu.clone(),
         }
@@ -254,61 +242,90 @@ async fn test_ffprobe_duration_invalid_before_gpu() {
 }
 
 #[tokio::test]
-async fn test_polarformer_checkpoint_missing_returns_instrumental_unavailable_before_gpu() {
+async fn test_polarformer_real_artifacts_pass_preflight_by_opening() {
     let env = TestSeparatorEnv::new();
     let (vocal_sep_bin, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
+    let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
 
-    // Point polarformer checkpoint to nonexistent file
-    let mut config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
-    config.polarformer_checkpoint = Some(env.temp_dir.path().join("missing_checkpoint.ckpt"));
-    let separator = ProcessVocalSeparator::new(config);
-
-    let output_path = env.staging_dir.join("test_out.part");
-    let req = VocalSeparationRequest {
-        source_path: env.sample_wav.clone(),
-        output_path,
-        mode: VocalSeparationMode::Instrumental,
-        timeout: Duration::from_secs(30),
-    };
-
-    let result = separator.separate(req).await;
-    match result {
-        Err(VocalSeparationError::InstrumentalUnavailable) => {}
-        other => panic!("expected InstrumentalUnavailable, got: {:?}", other),
-    }
-
-    // GPU permit was never taken
-    assert_eq!(env.gpu.available_permits(), 1);
-    // Separator was not invoked
-    assert!(!env.log_file.exists());
+    // Preflight must pass against real host artifacts by actively opening them for read
+    let result = config.validate_polarformer_artifacts();
+    assert!(
+        result.is_ok(),
+        "real PolarFormer artifacts must exist and be readable: {:?}",
+        result.err()
+    );
+    let (ckpt, conf) = result.unwrap();
+    assert!(ckpt.ends_with("model_bs_polarformer_float16.ckpt"));
+    assert!(conf.ends_with("model_bs_polarformer_float16.yaml"));
 }
 
-#[tokio::test]
-async fn test_polarformer_config_missing_returns_instrumental_unavailable_before_gpu() {
-    let env = TestSeparatorEnv::new();
-    let (vocal_sep_bin, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
+#[test]
+fn test_polarformer_artifacts_pure_validation_detects_missing_or_unreadable() {
+    let temp = TempDir::new().expect("tempdir");
+    let valid_ckpt = temp.path().join("model.ckpt");
+    let valid_yaml = temp.path().join("model.yaml");
+    File::create(&valid_ckpt).unwrap();
+    File::create(&valid_yaml).unwrap();
 
-    // Point polarformer config to nonexistent file
-    let mut config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
-    config.polarformer_config = Some(env.temp_dir.path().join("missing_config.yaml"));
-    let separator = ProcessVocalSeparator::new(config);
+    // 1. Both valid and readable -> Ok
+    assert!(
+        ProcessVocalSeparatorConfig::validate_polarformer_artifacts_at(&valid_ckpt, &valid_yaml)
+            .is_ok()
+    );
 
-    let output_path = env.staging_dir.join("test_out_yaml.part");
-    let req = VocalSeparationRequest {
-        source_path: env.sample_wav.clone(),
-        output_path,
-        mode: VocalSeparationMode::Instrumental,
-        timeout: Duration::from_secs(30),
-    };
-
-    let result = separator.separate(req).await;
-    match result {
+    // 2. Missing ckpt -> Err(InstrumentalUnavailable)
+    let missing_ckpt = temp.path().join("missing.ckpt");
+    match ProcessVocalSeparatorConfig::validate_polarformer_artifacts_at(&missing_ckpt, &valid_yaml)
+    {
         Err(VocalSeparationError::InstrumentalUnavailable) => {}
         other => panic!("expected InstrumentalUnavailable, got: {:?}", other),
     }
 
-    assert_eq!(env.gpu.available_permits(), 1);
-    assert!(!env.log_file.exists());
+    // 3. Missing yaml -> Err(InstrumentalUnavailable)
+    let missing_yaml = temp.path().join("missing.yaml");
+    match ProcessVocalSeparatorConfig::validate_polarformer_artifacts_at(&valid_ckpt, &missing_yaml)
+    {
+        Err(VocalSeparationError::InstrumentalUnavailable) => {}
+        other => panic!("expected InstrumentalUnavailable, got: {:?}", other),
+    }
+
+    // 4. Directory instead of regular file -> Err(InstrumentalUnavailable)
+    let dir_path = temp.path().join("dir_artifact");
+    fs::create_dir_all(&dir_path).unwrap();
+    match ProcessVocalSeparatorConfig::validate_polarformer_artifacts_at(&dir_path, &valid_yaml) {
+        Err(VocalSeparationError::InstrumentalUnavailable) => {}
+        other => panic!("expected InstrumentalUnavailable, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_polarformer_env_overrides_ignored_by_config() {
+    // Set fake override env vars that do not match the real wrapper paths
+    unsafe {
+        std::env::set_var("POLARFORMER_CHECKPOINT", "/nonexistent/fake.ckpt");
+        std::env::set_var("POLARFORMER_CONFIG", "/nonexistent/fake.yaml");
+    }
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let config = ProcessVocalSeparatorConfig::from_env(PathBuf::from("/tmp"), gpu);
+
+    // Config MUST NOT have stored or validated those env overrides.
+    // It must validate the contractual paths hardcoded in the wrapper.
+    let result = config.validate_polarformer_artifacts();
+    assert!(
+        result.is_ok(),
+        "preflight must validate contractual paths, ignoring env overrides"
+    );
+    let (ckpt, _) = result.unwrap();
+    assert!(
+        ckpt.starts_with(std::env::var("HOME").unwrap()),
+        "ckpt must be resolved under HOME Proyectos/separador-vocal/modelos"
+    );
+
+    unsafe {
+        std::env::remove_var("POLARFORMER_CHECKPOINT");
+        std::env::remove_var("POLARFORMER_CONFIG");
+    }
 }
 
 #[tokio::test]
@@ -669,6 +686,328 @@ exit 0
         work_entries.len(),
         0,
         "work_root must be cleaned after MP3 encode cancellation"
+    );
+}
+
+#[tokio::test]
+async fn test_cancellation_during_ffprobe_preflight_kills_and_reaps_child() {
+    let env = TestSeparatorEnv::new();
+    let (vocal_sep_bin, _, ffmpeg_bin) = env.setup_default_stubs();
+
+    let marker_file = env.temp_dir.path().join("ffprobe_preflight_started");
+    let marker_str = marker_file.to_str().unwrap();
+    let pid_file = env.temp_dir.path().join("ffprobe_preflight.pid");
+    let pid_str = pid_file.to_str().unwrap();
+
+    // ffprobe stub that writes its PID to file, touches marker, and sleeps
+    let ffprobe_script = format!(
+        r#"#!/bin/sh
+echo $$ > "{pid_str}"
+touch "{marker_str}"
+exec sleep 30
+"#
+    );
+    let ffprobe_bin = create_executable_script(&env.bin_dir, "slow_pre_ffprobe", &ffprobe_script);
+    let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
+    let separator = Arc::new(ProcessVocalSeparator::new(config));
+
+    let output_path = env.staging_dir.join("pre_cancelled.part");
+    let req = VocalSeparationRequest {
+        source_path: env.sample_wav.clone(),
+        output_path: output_path.clone(),
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let sep_clone = separator.clone();
+    let handle = tokio::spawn(async move { sep_clone.separate(req).await });
+
+    // Wait until ffprobe preflight starts
+    for _ in 0..50 {
+        if marker_file.exists() && pid_file.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(marker_file.exists(), "ffprobe preflight must have started");
+
+    let pid: u32 = fs::read_to_string(&pid_file)
+        .expect("read pid")
+        .trim()
+        .parse()
+        .expect("parse pid");
+
+    // Process must be active in /proc before cancellation
+    assert!(
+        Path::new(&format!("/proc/{}", pid)).exists(),
+        "ffprobe preflight child must be running in /proc before abort"
+    );
+    assert_eq!(
+        env.gpu.available_permits(),
+        1,
+        "GPU permit must NOT be held during preflight"
+    );
+
+    // Cancel the task during preflight
+    handle.abort();
+
+    // Give background PreflightChildGuard drop task time to kill and reap (wait)
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Process must be reaped from /proc (no zombie)
+    assert!(
+        !Path::new(&format!("/proc/{}", pid)).exists(),
+        "ffprobe preflight child must be killed and reaped from /proc after cancellation"
+    );
+    assert_eq!(env.gpu.available_permits(), 1);
+    assert!(!output_path.exists());
+}
+
+#[tokio::test]
+async fn test_timeout_during_ffprobe_preflight_kills_and_reaps_child() {
+    let env = TestSeparatorEnv::new();
+    let (vocal_sep_bin, _, ffmpeg_bin) = env.setup_default_stubs();
+
+    let marker_file = env.temp_dir.path().join("ffprobe_pre_timeout_started");
+    let marker_str = marker_file.to_str().unwrap();
+    let pid_file = env.temp_dir.path().join("ffprobe_pre_timeout.pid");
+    let pid_str = pid_file.to_str().unwrap();
+
+    let ffprobe_script = format!(
+        r#"#!/bin/sh
+echo $$ > "{pid_str}"
+touch "{marker_str}"
+exec sleep 30
+"#
+    );
+    let ffprobe_bin =
+        create_executable_script(&env.bin_dir, "timeout_pre_ffprobe", &ffprobe_script);
+    let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
+    let separator = ProcessVocalSeparator::new(config);
+
+    let output_path = env.staging_dir.join("pre_timeout.part");
+    let req = VocalSeparationRequest {
+        source_path: env.sample_wav.clone(),
+        output_path: output_path.clone(),
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_millis(150),
+    };
+
+    let result = separator.separate(req).await;
+    match result {
+        Err(VocalSeparationError::InvalidAudioDuration)
+        | Err(VocalSeparationError::SeparationTimeout) => {}
+        other => panic!("expected duration or timeout error, got: {:?}", other),
+    }
+
+    // Wait up to 300ms for background reaper
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    if pid_file.exists() {
+        let pid: u32 = fs::read_to_string(&pid_file)
+            .expect("read pid")
+            .trim()
+            .parse()
+            .expect("parse pid");
+        assert!(
+            !Path::new(&format!("/proc/{}", pid)).exists(),
+            "ffprobe preflight child must be killed and reaped from /proc after timeout"
+        );
+    }
+
+    assert_eq!(env.gpu.available_permits(), 1);
+    assert!(!output_path.exists());
+}
+
+#[tokio::test]
+async fn test_cancellation_during_ffprobe_post_verify_kills_child_purges_workdir_and_releases_permit()
+ {
+    let env = TestSeparatorEnv::new();
+    let (vocal_sep_bin, _, ffmpeg_bin) = env.setup_default_stubs();
+
+    let marker_file = env.temp_dir.path().join("ffprobe_post_started");
+    let marker_str = marker_file.to_str().unwrap();
+    let pid_file = env.temp_dir.path().join("ffprobe_post.pid");
+    let pid_str = pid_file.to_str().unwrap();
+
+    // ffprobe stub: preflight returns valid JSON; post-verify (.part) records PID and sleeps
+    let ffprobe_script = format!(
+        r#"#!/bin/sh
+file="$0"
+while [ "$#" -gt 0 ]; do
+  file="$1"
+  shift
+done
+
+case "$file" in
+  *.part)
+    echo $$ > "{pid_str}"
+    touch "{marker_str}"
+    exec sleep 30
+    ;;
+  *)
+    echo '{{"streams":[{{"codec_type":"audio","codec_name":"mp3"}}],"format":{{"duration":"180.0","bit_rate":"320000"}}}}'
+    ;;
+esac
+exit 0
+"#
+    );
+    let ffprobe_bin = create_executable_script(&env.bin_dir, "slow_post_ffprobe", &ffprobe_script);
+    let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
+    let separator = Arc::new(ProcessVocalSeparator::new(config));
+
+    let output_path = env.staging_dir.join("post_cancelled.part");
+    let req = VocalSeparationRequest {
+        source_path: env.sample_wav.clone(),
+        output_path: output_path.clone(),
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_secs(30),
+    };
+
+    let sep_clone = separator.clone();
+    let gpu_clone = env.gpu.clone();
+    let handle = tokio::spawn(async move { sep_clone.separate(req).await });
+
+    // Wait until ffprobe post-verify starts
+    for _ in 0..50 {
+        if marker_file.exists() && pid_file.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        marker_file.exists(),
+        "ffprobe post-verify must have started"
+    );
+    assert_eq!(
+        gpu_clone.available_permits(),
+        0,
+        "GPU permit must be held during post-verify"
+    );
+
+    let pid: u32 = fs::read_to_string(&pid_file)
+        .expect("read pid")
+        .trim()
+        .parse()
+        .expect("parse pid");
+
+    assert!(
+        Path::new(&format!("/proc/{}", pid)).exists(),
+        "ffprobe post-verify child must be running in /proc before abort"
+    );
+
+    // Abort during post-verify
+    handle.abort();
+
+    // Give background VocalProcessGuard drop task time to kill, wait, purge, and release permit
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Process must be reaped from /proc
+    assert!(
+        !Path::new(&format!("/proc/{}", pid)).exists(),
+        "ffprobe post-verify child must be killed and reaped from /proc after cancellation"
+    );
+
+    // Permit restored to 1
+    assert_eq!(
+        gpu_clone.available_permits(),
+        1,
+        "GPU permit must be restored to 1 after cancellation during post-verify"
+    );
+
+    // Output and work_root purged
+    assert!(!output_path.exists(), "partial output must be purged");
+    let work_entries: Vec<_> = fs::read_dir(&env.work_root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(
+        work_entries.len(),
+        0,
+        "work_root must be cleaned after post-verify cancellation"
+    );
+}
+
+#[tokio::test]
+async fn test_timeout_during_ffprobe_post_verify_kills_child_purges_workdir_and_releases_permit() {
+    let env = TestSeparatorEnv::new();
+    let (vocal_sep_bin, _, ffmpeg_bin) = env.setup_default_stubs();
+
+    let marker_file = env.temp_dir.path().join("ffprobe_post_timeout_started");
+    let marker_str = marker_file.to_str().unwrap();
+    let pid_file = env.temp_dir.path().join("ffprobe_post_timeout.pid");
+    let pid_str = pid_file.to_str().unwrap();
+
+    // ffprobe stub: preflight returns valid JSON; post-verify (.part) sleeps 30s
+    let ffprobe_script = format!(
+        r#"#!/bin/sh
+file="$0"
+while [ "$#" -gt 0 ]; do
+  file="$1"
+  shift
+done
+
+case "$file" in
+  *.part)
+    echo $$ > "{pid_str}"
+    touch "{marker_str}"
+    exec sleep 30
+    ;;
+  *)
+    echo '{{"streams":[{{"codec_type":"audio","codec_name":"mp3"}}],"format":{{"duration":"180.0","bit_rate":"320000"}}}}'
+    ;;
+esac
+exit 0
+"#
+    );
+    let ffprobe_bin =
+        create_executable_script(&env.bin_dir, "timeout_post_ffprobe", &ffprobe_script);
+    let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
+    let separator = ProcessVocalSeparator::new(config);
+
+    let output_path = env.staging_dir.join("post_timeout.part");
+    let req = VocalSeparationRequest {
+        source_path: env.sample_wav.clone(),
+        output_path: output_path.clone(),
+        mode: VocalSeparationMode::Coros,
+        timeout: Duration::from_millis(800),
+    };
+
+    let result = separator.separate(req).await;
+    match result {
+        Err(VocalSeparationError::TranscodeFailed)
+        | Err(VocalSeparationError::SeparationTimeout) => {}
+        other => panic!("expected transcode or timeout error, got: {:?}", other),
+    }
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    if pid_file.exists() {
+        let pid: u32 = fs::read_to_string(&pid_file)
+            .expect("read pid")
+            .trim()
+            .parse()
+            .expect("parse pid");
+        assert!(
+            !Path::new(&format!("/proc/{}", pid)).exists(),
+            "ffprobe post-verify child must be killed and reaped from /proc after timeout"
+        );
+    }
+
+    assert_eq!(
+        env.gpu.available_permits(),
+        1,
+        "GPU permit must be restored to 1 after post-verify timeout"
+    );
+    assert!(!output_path.exists());
+    let work_entries: Vec<_> = fs::read_dir(&env.work_root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(
+        work_entries.len(),
+        0,
+        "work_root must be cleaned after post-verify timeout"
     );
 }
 

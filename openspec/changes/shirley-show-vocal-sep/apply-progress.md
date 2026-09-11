@@ -5,14 +5,14 @@
 ```json
 {
   "changeName": "shirley-show-vocal-sep",
-  "slice": "fix-vsep-verify-blockers",
+  "slice": "fix-vsep-2-blockers",
   "executionMode": "auto",
   "artifactStore": "openspec",
   "reviewBudgetLines": 500,
   "chainStrategy": "stacked-to-main",
-  "workUnit": "fix-vsep-verify-blockers",
-  "token": "sha256:b1845fdeeeb144313dd3a58dc4ca0646d88950a55f8f85480e021f6d1eef8002",
-  "request": "vvf-begin-001",
+  "workUnit": "fix-vsep-2-blockers",
+  "token": "vvf2-begin-001",
+  "request": "vvf2-begin-001",
   "completedSliceTasks": 4,
   "totalSliceTasks": 4,
   "completedChangeTasks": 16,
@@ -127,6 +127,22 @@ Remediated all 6 blockers C1-C6 identified in `verify-report.md`:
    - Added `test_agent_limits_defaults_and_separation_600s_invariants` in `tests/agent_chat_tests.rs`.
    - Formatted codebase cleanly with `cargo fmt`, passing `cargo fmt -- --check`.
 
+## Remediation 2 Summary (`fix-vsep-2-blockers`)
+
+Remediated the 2 remaining blockers from `verify-report.md`:
+1. **§C1 (Preflight PolarFormer Contract Alignment & Readability Proof):**
+   - Contractual path alignment: the real system wrapper `/run/current-system/sw/bin/karaoke-separator` hardcodes `models_dir="$HOME/Proyectos/separador-vocal/modelos"` and passes `$models_dir/model_bs_polarformer_float16.ckpt` and `$models_dir/model_bs_polarformer_float16.yaml` without accepting CLI flags or environment overrides.
+   - Replaced `is_file()` with active `File::open` check in pure function `ProcessVocalSeparatorConfig::validate_polarformer_artifacts_at` to test physical presence, regular file status, and read permissions before acquiring the GPU mutex.
+   - Eliminated/ignored `POLARFORMER_CHECKPOINT` and `POLARFORMER_CONFIG` environment overrides in `from_env`. Documented in code why overrides are ignored to avoid false-positive preflight passing for alternate files while the real wrapper fails on its fixed paths.
+   - Added tests verifying: preflight passes with real host artifacts; pure validation fails on missing ckpt, missing yaml, or directory; and `from_env` ignores `POLARFORMER_*` overrides.
+2. **§C2 (Strict TDD Evidence for ffprobe Cancellation, Timeout & Reaping):**
+   - Added `test_cancellation_during_ffprobe_preflight_kills_and_reaps_child`: verifies that aborting during `run_ffprobe_preflight` activates `PreflightChildGuard`, kills and reaps the child process (`/proc/{pid}` ceases to exist), and keeps GPU permit unacquired (1 available).
+   - Added `test_timeout_during_ffprobe_preflight_kills_and_reaps_child`: verifies that preflight timeout terminates and reaps child process.
+   - Added `test_cancellation_during_ffprobe_post_verify_kills_child_purges_workdir_and_releases_permit`: verifies that aborting during `run_ffprobe_post_verify` activates `VocalProcessGuard::drop`, kills and reaps the child (`/proc/{pid}` ceases to exist), purges `work_dir`, purges partial output, and restores GPU permit to 1.
+   - Added `test_timeout_during_ffprobe_post_verify_kills_child_purges_workdir_and_releases_permit`: verifies that post-verify timeout reaps child, purges all disk artifacts, and restores GPU permit to 1.
+   - Bounded `run_ffprobe_preflight` with explicit timeout parameter (`request.timeout.min(5s)`).
+   - Fixed residual warning in `apply-progress.md` ensuring `pendingLabel` is documented everywhere as exact `"separando voces…"`.
+
 ## Completed Tasks (All Slices 1, 2, 3 & 4)
 
 ### Slice 1 (`vsep-s1-domain-dsp`)
@@ -178,6 +194,10 @@ Remediated all 6 blockers C1-C6 identified in `verify-report.md`:
 | REM | GREEN | Corrected `VocalCommandBuilder` exact argv `[modelo, input, output_dir]`, zero fake flags, local PolarFormer preflight, stubs emulating `NAME_(STEM)_MODEL` in FLAC, config clamp, and exact pendingLabel | `cargo test --test process_vocal_separator_tests` & `cargo test --test agent_chat_api_tests` | All 13 separator tests and API tests passed |
 | REM | TRIANGULATE | Added cancellation during FLAC conversion, cancellation during MP3 encode, and 600s clamp invariant | `cargo test --test process_vocal_separator_tests` & `cargo test --test agent_chat_tests` | All 12 separator tests and 19 agent chat tests passed |
 | REM | REFACTOR | Ran `cargo fmt` across all surfaces; full test suite verification | `cargo test && node --test tests/*.mjs` & `cargo fmt -- --check` | 237 Rust passed (1 ignored), 5 Node suites passed, fmt clean |
+| REM2 | RED | §C1 (`validate_polarformer_artifacts_at` opening check), §C2 (ffprobe preflight & post-verify cancellation/timeout+reaping assertions) | `cargo test --test process_vocal_separator_tests` | Failed with expected compilation errors (missing pure function) |
+| REM2 | GREEN | Implemented contractual PolarFormer paths, pure `validate_polarformer_artifacts_at` with `File::open` legibility test, ignored `POLARFORMER_*` overrides, bounded `run_ffprobe_preflight` with timeout parameter | `cargo test --test process_vocal_separator_tests` | All 18 separator tests passed |
+| REM2 | TRIANGULATE | Added behavioral tests: preflight cancellation + reaping (/proc check), preflight timeout + reaping, post-verify cancellation + reaping + purges + permit restore, post-verify timeout + reaping + purges + permit restore | `cargo test --test process_vocal_separator_tests` | Caught unneeded dead fields, verified zero zombie processes in /proc across all lifecycle phases. All 18 tests passed |
+| REM2 | REFACTOR | Ran `cargo fmt` across codebase; verified full Rust and Node suites with zero warnings | `cargo test && node --test tests/*.mjs` & `cargo fmt -- --check` | 242 Rust passed (1 ignored), 5 Node suites passed, fmt clean |
 
 ## Files Changed (Slice 4)
 
@@ -214,7 +234,7 @@ None. All 6 blockers C1-C6 from verify-report.md have been remediated:
 - Destination confirmed is tracked in `TurnToolContext` and required by `AgentToolDispatcher`.
 - Allowlist contains exactly 8 tools.
 - Dynamic deadline scales up to 600s specifically for separation turns while maintaining 30s conversational baseline.
-- `pendingLabel` is owned exclusively by headless chat state with `"Ressy está separando voces… (tarda unos minutos)"` and composer is restored cleanly on all outcomes.
+- `pendingLabel` is owned exclusively by headless chat state with `"separando voces…"` and composer is restored cleanly on all outcomes.
 - Real GPU separation verified against physical NVIDIA GPU with `karaoke-separator`.
 
 ## Remaining Tasks
