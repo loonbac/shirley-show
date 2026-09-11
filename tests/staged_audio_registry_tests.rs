@@ -351,3 +351,103 @@ fn test_startup_reconciliation_purges_staging_but_never_managed_files() {
     assert!(managed2.exists());
     assert!(managed3.exists());
 }
+
+#[test]
+fn test_reserve_guarded_auto_releases_on_drop() {
+    let harness = TestHarness::new();
+    let registry = StagedAudioRegistry::new();
+
+    let stage_id = "test-stage-guarded-001";
+    let file_path = harness.create_dummy_part(stage_id);
+
+    let descriptor = registry.register(
+        stage_id.to_string(),
+        file_path.clone(),
+        "Guarded Track".to_string(),
+        120,
+        1_000_000,
+    );
+
+    {
+        let guard = registry.reserve_guarded(&descriptor.staged_audio_id).expect("reserve_guarded ok");
+        assert_eq!(guard.staged_audio_id, descriptor.staged_audio_id);
+        assert_eq!(
+            registry.get_state(&descriptor.staged_audio_id).unwrap(),
+            StagedAudioState::Reserved { lease_id: guard.lease_id.clone() }
+        );
+        // Guard is dropped here without commit
+    }
+
+    // After drop, state must automatically be restored to Available
+    assert_eq!(
+        registry.get_state(&descriptor.staged_audio_id).unwrap(),
+        StagedAudioState::Available
+    );
+    // Staging file on disk must still exist
+    assert!(file_path.exists(), "File on disk must still exist after auto-release");
+
+    // Can be reserved again
+    let second_guard = registry.reserve_guarded(&descriptor.staged_audio_id).expect("second reserve ok");
+    assert_eq!(second_guard.staged_audio_id, descriptor.staged_audio_id);
+}
+
+#[test]
+fn test_commit_processed_deletes_file_and_retains_consumed_tombstone() {
+    let harness = TestHarness::new();
+    let registry = StagedAudioRegistry::new();
+
+    let stage_id = "test-stage-commit-processed-002";
+    let file_path = harness.create_dummy_part(stage_id);
+    assert!(file_path.exists());
+
+    let descriptor = registry.register(
+        stage_id.to_string(),
+        file_path.clone(),
+        "Processed Source".to_string(),
+        200,
+        2_000_000,
+    );
+
+    let lease = registry.reserve(&descriptor.staged_audio_id).expect("reserve ok");
+    registry.commit_processed(&descriptor.staged_audio_id, &lease.lease_id).expect("commit_processed ok");
+
+    // 1. File on disk must be deleted
+    assert!(!file_path.exists(), "Source file must be deleted by commit_processed");
+
+    // 2. State must be Consumed
+    assert_eq!(
+        registry.get_state(&descriptor.staged_audio_id).unwrap(),
+        StagedAudioState::Consumed
+    );
+
+    // 3. Second reservation must be rejected with AlreadyConsumed
+    let err = registry.reserve(&descriptor.staged_audio_id).unwrap_err();
+    assert_eq!(err, StagedAudioRegistryError::AlreadyConsumed);
+}
+
+#[test]
+fn test_guard_commit_processed_deletes_file() {
+    let harness = TestHarness::new();
+    let registry = StagedAudioRegistry::new();
+
+    let stage_id = "test-stage-guard-commit-003";
+    let file_path = harness.create_dummy_part(stage_id);
+    assert!(file_path.exists());
+
+    let descriptor = registry.register(
+        stage_id.to_string(),
+        file_path.clone(),
+        "Guard Commit Track".to_string(),
+        150,
+        1_500_000,
+    );
+
+    let guard = registry.reserve_guarded(&descriptor.staged_audio_id).expect("reserve_guarded ok");
+    guard.commit_processed().expect("guard commit_processed ok");
+
+    assert!(!file_path.exists(), "Source file must be deleted by guard commit_processed");
+    assert_eq!(
+        registry.get_state(&descriptor.staged_audio_id).unwrap(),
+        StagedAudioState::Consumed
+    );
+}

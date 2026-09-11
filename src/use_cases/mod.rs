@@ -12,6 +12,7 @@ pub mod rename_presentation;
 pub mod reorder_item;
 pub mod update_show_item;
 pub mod upload_track;
+pub mod separate_vocals;
 
 pub use add_lyrics::AddLyrics;
 pub use add_note::AddNote;
@@ -29,3 +30,7 @@ pub use rename_presentation::RenamePresentation;
 pub use reorder_item::ReorderItem;
 pub use update_show_item::UpdateShowItem;
 pub use upload_track::UploadTrack;
+pub use separate_vocals::{
+    SeparateVocals, SeparateVocalsError, SeparateVocalsInput, SeparateVocalsOutput,
+    VocalAudioSource, DEFAULT_SEPARATION_TIMEOUT,
+};

@@ -25,6 +25,7 @@ use crate::use_cases::download_youtube_audio::DownloadYouTubeAudio;
 use crate::use_cases::get_presentation::GetPresentation;
 use crate::use_cases::list_presentations::ListPresentations;
 use crate::use_cases::open_track_audio::OpenTrackAudio;
+use crate::use_cases::separate_vocals::SeparateVocals;
 use crate::use_cases::rename_presentation::RenamePresentation;
 use crate::use_cases::reorder_item::ReorderItem;
 use crate::use_cases::update_show_item::UpdateShowItem;
@@ -61,6 +62,7 @@ pub struct AppState {
     pub download_youtube_audio: Arc<DownloadYouTubeAudio>,
     pub gpu_semaphore: Arc<tokio::sync::Semaphore>,
     pub vocal_separator: Arc<dyn VocalSeparator>,
+    pub separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>,
     pub agent_runtime: AgentRuntime,
     pub agent_chat: Arc<AgentChat>,
 }
@@ -122,6 +124,14 @@ impl AppState {
             ),
         ));
 
+        let separate_vocals = Arc::new(SeparateVocals::new(
+            vocal_separator.clone(),
+            storage.clone(),
+            staged_audio_registry.clone(),
+            item_repo.clone(),
+            download_youtube_audio.clone(),
+        ));
+
         let dispatcher = AgentToolDispatcher::from_components(
             create_presentation.clone(),
             list_presentations.clone(),
@@ -171,6 +181,7 @@ impl AppState {
             download_youtube_audio,
             gpu_semaphore,
             vocal_separator,
+            separate_vocals,
             agent_runtime,
             agent_chat,
         }
@@ -178,16 +189,31 @@ impl AppState {
 
     pub fn with_youtube_downloader(mut self, downloader: Arc<dyn YoutubeDownloader>) -> Self {
         self.youtube_downloader = downloader.clone();
-        self.download_youtube_audio = Arc::new(DownloadYouTubeAudio::new(
+        let download_youtube_audio = Arc::new(DownloadYouTubeAudio::new(
             downloader,
             self.storage.clone(),
             self.staged_audio_registry.clone(),
+        ));
+        self.download_youtube_audio = download_youtube_audio.clone();
+        self.separate_vocals = Arc::new(SeparateVocals::new(
+            self.vocal_separator.clone(),
+            self.storage.clone(),
+            self.staged_audio_registry.clone(),
+            self.item_repo.clone(),
+            download_youtube_audio,
         ));
         self
     }
 
     pub fn with_vocal_separator(mut self, separator: Arc<dyn VocalSeparator>) -> Self {
-        self.vocal_separator = separator;
+        self.vocal_separator = separator.clone();
+        self.separate_vocals = Arc::new(SeparateVocals::new(
+            separator,
+            self.storage.clone(),
+            self.staged_audio_registry.clone(),
+            self.item_repo.clone(),
+            self.download_youtube_audio.clone(),
+        ));
         self
     }
 

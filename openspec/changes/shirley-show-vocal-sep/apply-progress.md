@@ -5,18 +5,18 @@
 ```json
 {
   "changeName": "shirley-show-vocal-sep",
-  "slice": "vsep-s2-infra-gpu",
+  "slice": "vsep-s3-usecase-staging",
   "executionMode": "auto",
   "artifactStore": "openspec",
   "reviewBudgetLines": 400,
   "chainStrategy": "stacked-to-main",
-  "workUnit": "vsep-s2-infra-gpu",
-  "token": "sha256:82050155a718b402666d705b701ec37514b9eb5b865f7eb2792ad73be776fcab",
-  "request": "v2-acquire-001",
+  "workUnit": "vsep-s3-usecase-staging",
+  "token": "sha256:23063d57207a78a28c3a5abac8ebf0a4f422cef50e79e6a820e211b0c10e52e0",
+  "request": "v3-acquire-001",
   "completedSliceTasks": 4,
   "totalSliceTasks": 4,
-  "completedChangeTasks": 8,
-  "remainingChangeTasks": 8
+  "completedChangeTasks": 12,
+  "remainingChangeTasks": 4
 }
 ```
 
@@ -44,7 +44,24 @@ Slice 2 implements the abstract port, CLI process adapter, GPU serialization mut
 6. `LocalAudioStorage` & `reconcile_audio_files`: Added `vocal_work_dir` (`<audio>/vocal-work`) and startup reconciliation purges orphan vocal work directories.
 7. `AppState`: Wired `gpu_semaphore: Arc<Semaphore>` and injected `vocal_separator: Arc<dyn VocalSeparator>` with `with_vocal_separator` override method.
 
-## Completed Tasks (Slices 1 & 2)
+## Slice 3 Implementation Summary (`vsep-s3-usecase-staging`)
+
+Slice 3 implements the use case orchestration, staging lifecycle extension, and RAII lease guard:
+1. `StagedAudioLeaseGuard`: RAII lease wrapper that automatically calls `registry.release` upon drop unless committed via `commit_consumed`, `commit_processed`, or `defuse`.
+2. `StagedAudioRegistry` extensions:
+   - `reserve_guarded`: reserves an available staged audio and returns `StagedAudioLeaseGuard`.
+   - `commit_processed`: marks the staged audio as `Consumed` (retaining tombstone) AND deletes the physical temporary file from disk.
+3. `SeparateVocals` use case:
+   - Resolves sources in strict priority order: `staged_audio_id` -> `track_id` -> `youtube_url` (or returns `source_required`).
+   - For `staged_audio_id`: reserves with RAII lease guard. On success, `commit_processed` deletes the source file and consumes the handle; on failure, auto-release preserves the source file for retry.
+   - For `track_id`: reads managed track item via `ShowItemReader` in read-only mode, resolving path in `LocalAudioStorage`. The source track file is never deleted or altered.
+   - For `youtube_url`: reuses `DownloadYouTubeAudio` directly without duplicating downloader, staging, or limits. Reserves downloaded handle, and deletes it after separation via `commit_processed`.
+   - Protects output staging file via `StagingFileGuard`.
+   - Enforces title suffix (`" (Coros)"` or `" (Instrumental)"`) and registers output in `StagedAudioRegistry` with 15-minute TTL.
+   - Validated integration with `UploadTrack` / `add_track_from_staged` to create canonical show tracks from separated outputs.
+4. `AppState`: wired `separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>` in `new_with_all_components`, `with_vocal_separator`, and `with_youtube_downloader`.
+
+## Completed Tasks (Slices 1, 2 & 3)
 
 ### Slice 1 (`vsep-s1-domain-dsp`)
 - [x] RED: Escribir pruebas unitarias en `tests/avg_wave_tests.rs` para `VocalSeparationMode` (parsing JSON `"chorus"`/`"instrumental"`, rechazo de alias/desconocidos) y `avg_wave` con fixtures sintéticos generados en memoria (promedio float de 3 WAVs mono/estéreo a 16-bit/24-bit/32-bit float, clamp ante picos +1.0/-1.0, rechazo de disparidad en sample rate/canales/longitud y purga del archivo de salida ante fallos). <!-- sdd-owner: implementation -->
@@ -58,6 +75,12 @@ Slice 2 implements the abstract port, CLI process adapter, GPU serialization mut
 - [x] TRIANGULATE: Agregar casos de prueba de fallo y contención en `tests/process_vocal_separator_tests.rs` (falla del segundo modelo en la cadena Coros con limpieza completa de salidas previas, error cuando `VOCAL_SEP_BIN` no existe o no es ejecutable, salida con bitrate MP3 distinto a 320 kbps o codec incorrecto, y dos tareas simultáneas donde la segunda espera sin solapar VRAM). <!-- sdd-owner: implementation -->
 - [x] REFACTOR: Estructurar submódulos atómicos bajo `src/infra/vocal/`, asegurar que ningún comando invoque shells (`sh -c`) sino argumentos estructurados, y cablear el `Arc<Semaphore>::new(1)` en `AppState`. <!-- sdd-owner: implementation -->
 
+### Slice 3 (`vsep-s3-usecase-staging`)
+- [x] RED: Escribir pruebas unitarias e integración en `tests/separate_vocals_tests.rs` y `tests/staged_audio_registry_tests.rs` con un fake `VocalSeparator` (separación exitosa desde `staged_audio_id`, desde `track_id` administrado sin modificar el archivo original, y desde `youtube_url` reutilizando `DownloadYouTubeAudio`; prioridad de fuentes; verificación de `commit_processed` que elimina el archivo staged fuente y retiene tombstone single-use; verificación de que ante fallo del separator la fuente staged permanece disponible para reintento; registro del MP3 resultante con TTL de 15 minutos; y degradación amable ante PolarFormer ausente). <!-- sdd-owner: implementation -->
+- [x] GREEN: Implementar `StagedAudioLeaseGuard` en `src/state/staged_audio_lease_guard.rs`, añadir `reserve_guarded` y `commit_processed` a `src/state/staged_audio_registry.rs`, implementar el caso de uso `SeparateVocals` en `src/use_cases/separate_vocals.rs` coordinando staging, resolución de audio y almacenamiento, y registrarlo en `src/state/app_state.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE: Añadir pruebas de robustez en `tests/separate_vocals_tests.rs` (intento de separar con fuente inexistente o ya consumida, fallo al descargar de YouTube antes de llegar a la separación, fuente que excede el límite de duración, y validación de que el audio resultante puede ser consumido por `UploadTrack`/`add_track_from_staged` para crear una pista canónica). <!-- sdd-owner: implementation -->
+- [x] REFACTOR: Desacoplar la resolución de fuente en funciones privadas puras, validar que `SeparateVocals` siga el principio de 1 struct por caso de uso, y asegurar el aislamiento de las capas de dominio frente a detalles de I/O. <!-- sdd-owner: implementation -->
+
 ## Strict TDD Cycle Evidence
 
 | Slice | Phase | Target / Scope | Test Command / Action | Result |
@@ -70,40 +93,36 @@ Slice 2 implements the abstract port, CLI process adapter, GPU serialization mut
 | S2 | GREEN | Implemented port, guard, config, resolver, `ProcessVocalSeparator`, `LocalAudioStorage.vocal_work_dir`, `reconcile_audio_files` | `cargo test --test process_vocal_separator_tests` | 6 tests passed |
 | S2 | TRIANGULATE | Added failure & contention cases: step 2 failure cleans intermediate files, non-existent/non-exec `VOCAL_SEP_BIN`, post-verify bad bitrate/codec, concurrent serialization with Semaphore(1) | `cargo test --test process_vocal_separator_tests` | Caught Linux ETXTBSY race on fast script creation; resolved with `file.sync_all()` + `drop(file)` + bounded retry. All 10 tests passed |
 | S2 | REFACTOR | Atomized submodules under `src/infra/vocal/`, structured args without shell evaluation, wired `gpu_semaphore` in `AppState` | `cargo test && node --test tests/*.mjs` | All 162 Rust tests and 18 Node tests passed cleanly |
+| S3 | RED | `StagedAudioLeaseGuard`, `reserve_guarded`, `commit_processed`, `SeparateVocals`, fake separator tests | `cargo test --test staged_audio_registry_tests` & `cargo test --test separate_vocals_tests` | Failed with expected compilation errors (missing methods and use case module) |
+| S3 | GREEN | Implemented `StagedAudioLeaseGuard`, added `reserve_guarded` and `commit_processed` to `StagedAudioRegistry`, implemented `SeparateVocals`, wired in `AppState` | `cargo test --test staged_audio_registry_tests` & `cargo test --test separate_vocals_tests` | 11 registry tests passed; 6 separate vocals tests passed |
+| S3 | TRIANGULATE | Added robustness tests: nonexistent/already consumed staged audio, nonexistent track, non-track item, youtube download failure aborts before separator, duration exceeded preserves source, output consumed by `UploadTrack` into canonical show track | `cargo test --test separate_vocals_tests` | All 13 separate vocals tests passed |
+| S3 | REFACTOR | Decoupled source resolution into private helpers (`resolve_staged_source`, `resolve_track_source`, `resolve_youtube_source`), validated 1-struct use case adherence, checked zero regressions | `cargo test && node --test tests/*.mjs` | All 178 Rust tests and 18 Node tests passed cleanly |
 
-## Files Changed (Slice 2)
+## Files Changed (Slice 3)
 
-- `src/ports/vocal_separator.rs` (new port: trait `VocalSeparator`, `VocalSeparationRequest`, `SeparatedAudio`, `VocalSeparationError`)
-- `src/ports/mod.rs` (exported `VocalSeparator` and types)
-- `src/infra/vocal/vocal_process_guard.rs` (new module: RAII subprocess guard with permit retention in background drop task)
-- `src/infra/vocal/resolve_stem.rs` (new module: strict stem resolver with case-insensitive `(?i)vocal` exclusion)
-- `src/infra/vocal/process_vocal_separator_config.rs` (new module: configuration with strict `VOCAL_SEP_BIN` resolution and PolarFormer artifact validation)
-- `src/infra/vocal/process_vocal_separator.rs` (new module: `ProcessVocalSeparator` adapter with preflight, Coros/Instrumental pipelines, and post-verify)
-- `src/infra/vocal/mod.rs` (new module re-exports)
-- `src/infra/mod.rs` (exported `pub mod vocal;`)
-- `src/infra/filesystem/local_audio_storage.rs` (added `vocal_work_dir` directory and accessor)
-- `src/infra/filesystem/reconcile_audio_files.rs` (purges orphan vocal work directories on startup)
-- `src/state/app_state.rs` (wired `gpu_semaphore: Arc<Semaphore>` and `vocal_separator: Arc<dyn VocalSeparator>`)
-- `tests/process_vocal_separator_tests.rs` (new test suite: 10 hermetic tests with executable stubs)
-- `openspec/changes/shirley-show-vocal-sep/tasks.md` (marked S2 checkboxes `- [x]`)
+- `src/state/staged_audio_lease_guard.rs` (new module: RAII lease guard with auto-release on drop, `commit_consumed`, `commit_processed`, and `defuse`)
+- `src/state/staged_audio_registry.rs` (added `reserve_guarded` returning `StagedAudioLeaseGuard`, and `commit_processed` deleting source file from disk while retaining tombstone)
+- `src/state/mod.rs` (exported `StagedAudioLeaseGuard`)
+- `src/use_cases/separate_vocals.rs` (new use case: `SeparateVocals`, `VocalAudioSource`, `SeparateVocalsInput`, `SeparateVocalsOutput`, `SeparateVocalsError`, decoupled source resolvers, staging management)
+- `src/use_cases/mod.rs` (exported `SeparateVocals` and types)
+- `src/state/app_state.rs` (wired `separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>`, updated `with_vocal_separator` and `with_youtube_downloader`)
+- `tests/staged_audio_registry_tests.rs` (added tests for `reserve_guarded` auto-release on drop, `commit_processed` file deletion and tombstone retention)
+- `tests/separate_vocals_tests.rs` (new test suite: 13 tests covering staged, track, youtube sources, priority, failures, degradation, and canonical promotion via `UploadTrack`)
+- `openspec/changes/shirley-show-vocal-sep/tasks.md` (marked S3 checkboxes `- [x]`)
 
 ## Deviations from Design
 
 None. The implementation strictly adheres to `design.md`:
-- `VocalProcessGuard` holds the semaphore permit until child process termination via `wait()`, even when dropped in background tasks.
-- `resolve_stem` strictly requires 2 regular WAV files, rejects symlinks and extra files, and excludes `(?i)vocal`.
-- `ffprobe` validates duration <= 600s before GPU mutex is requested.
-- PolarFormer absence returns `instrumental_unavailable` before GPU mutex is requested without fallback to Demucs or Coros.
-- `encode_mp3_320k` and `ffprobe` enforce CBR 320 kbps MP3 output format.
+- Source resolution strictly prioritizes `staged_audio_id` -> `track_id` -> `youtube_url`.
+- `track_id` reads managed track items in read-only mode and never mutates or deletes the managed file.
+- Temporary staged sources are deleted via `commit_processed` only upon successful registration of the result.
+- Separator failure preserves the source staged file and its registry entry for subsequent retries.
+- Resulting MP3 is registered in `StagedAudioRegistry` with 15-minute TTL and title suffix.
 
-## Remaining Tasks (Slices 3 & 4)
+## Remaining Tasks (Slice 4)
 
-The following 8 implementation tasks remain for subsequent slices (PR3 and PR4):
+The following 4 implementation tasks remain for Slice 4 (PR4):
 
-- [ ] RED: Escribir pruebas unitarias e integración en `tests/separate_vocals_tests.rs` y `tests/staged_audio_registry_tests.rs` con un fake `VocalSeparator` (separación exitosa desde `staged_audio_id`, desde `track_id` administrado sin modificar el archivo original, y desde `youtube_url` reutilizando `DownloadYouTubeAudio`; prioridad de fuentes; verificación de `commit_processed` que elimina el archivo staged fuente y retiene tombstone single-use; verificación de que ante fallo del separator la fuente staged permanece disponible para reintento; registro del MP3 resultante con TTL de 15 minutos; y degradación amable ante PolarFormer ausente). <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implementar `StagedAudioLeaseGuard` en `src/state/staged_audio_lease_guard.rs`, añadir `reserve_guarded` y `commit_processed` a `src/state/staged_audio_registry.rs`, implementar el caso de uso `SeparateVocals` en `src/use_cases/separate_vocals.rs` coordinando staging, resolución de audio y almacenamiento, y registrarlo en `src/state/app_state.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE: Añadir pruebas de robustez en `tests/separate_vocals_tests.rs` (intento de separar con fuente inexistente o ya consumida, fallo al descargar de YouTube antes de llegar a la separación, fuente que excede el límite de duración, y validación de que el audio resultante puede ser consumido por `UploadTrack`/`add_track_from_staged` para crear una pista canónica). <!-- sdd-owner: implementation -->
-- [ ] REFACTOR: Desacoplar la resolución de fuente en funciones privadas puras, validar que `SeparateVocals` siga el principio de 1 struct por caso de uso, y asegurar el aislamiento de las capas de dominio frente a detalles de I/O. <!-- sdd-owner: implementation -->
 - [ ] RED: Escribir pruebas unitarias y de integración para backend y frontend (en `tests/agent_tools_tests.rs`, `tests/agent_chat_tests.rs` y `tests/agent-chat-state.test.mjs`) que verifiquen: esquema estricto de `separate_vocals`; rechazo en dispatcher/context si falta destino confirmado; rechazo si el modo es inválido; flujo conversacional en dos turnos donde Shirley pregunta modo y destino antes de ejecutar GPU; encadenamiento en el mismo turno cuando la presentación activa ya existe (`separate_vocals` seguido de `add_track_from_staged`); deduplicación de llamadas idénticas; deadline dinámico de hasta 600 segundos para separación; y en el frontend, activación del label "separando voces…" en el estado del chat al detectar intención vocal, preservación de `stagedAudioId` en memoria y restauración limpia del composer en éxito, error o timeout. <!-- sdd-owner: implementation -->
 - [ ] GREEN: Declarar `separate_vocals` en `tool_schemas.rs`, despacharlo en `tool_dispatcher.rs`, proteger la precondición de destino confirmado en `turn_context.rs`, actualizar instrucciones en `system_prompt.rs`, implementar la política de deadline dinámico en `agent_chat.rs` y `config.rs`, e implementar `is-vocal-separation-intent.js`, la gestión de estado en `chat-state.js` y el controlador en `agent-chat-controller.js`. <!-- sdd-owner: implementation -->
 - [ ] TRIANGULATE: Añadir pruebas de integración completas (en `tests/agent_chat_api_tests.rs` e integración frontend) que verifiquen: turno con timeout a los 600s reportando acciones previas y liberando GPU; respuesta amable ante PolarFormer ausente sin agregar pista fantasma; llamada repetida ignorada sin segunda ejecución en GPU; desconexión de cliente abortando la petición; y persistencia en un solo paso hacia el show activo cuando todos los parámetros están presentes. <!-- sdd-owner: implementation -->
@@ -112,6 +131,6 @@ The following 8 implementation tasks remain for subsequent slices (PR3 and PR4):
 ## Workload & PR Boundary
 
 - PR 1: `vsep-s1-domain-dsp` (merged/committed) — `VocalSeparationMode`, `avg_wave`, `encode_mp3_320k`.
-- PR 2 (current slice): `vsep-s2-infra-gpu` — `VocalSeparator` port, `ProcessVocalSeparator`, `VocalProcessGuard`, `resolve_stem`, `ProcessVocalSeparatorConfig`, `LocalAudioStorage.vocal_work_dir`, `reconcile_audio_files`, `AppState.gpu_semaphore`. Cohesive and isolated infrastructure layer.
-- PR 3: Slice 3 (Caso de uso `SeparateVocals`, Staging y `StagedAudioRegistry`).
+- PR 2: `vsep-s2-infra-gpu` (merged/committed) — `VocalSeparator` port, `ProcessVocalSeparator`, `VocalProcessGuard`, `resolve_stem`, `ProcessVocalSeparatorConfig`, `LocalAudioStorage.vocal_work_dir`, `reconcile_audio_files`, `AppState.gpu_semaphore`.
+- PR 3 (current slice): `vsep-s3-usecase-staging` — `SeparateVocals` use case, `StagedAudioLeaseGuard`, `StagedAudioRegistry` (`reserve_guarded`, `commit_processed`), `AppState.separate_vocals`. Cohesive and isolated use case and staging layer.
 - PR 4: Slice 4 (Tool `separate_vocals`, Prompt Ressy, Timeout 600s y Frontend).

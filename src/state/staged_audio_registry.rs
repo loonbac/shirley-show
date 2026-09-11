@@ -1,3 +1,4 @@
+use crate::state::staged_audio_lease_guard::StagedAudioLeaseGuard;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
@@ -226,6 +227,14 @@ impl StagedAudioRegistry {
         }
     }
 
+    pub fn reserve_guarded(
+        &self,
+        staged_audio_id: &str,
+    ) -> Result<StagedAudioLeaseGuard, StagedAudioRegistryError> {
+        let lease = self.reserve(staged_audio_id)?;
+        Ok(StagedAudioLeaseGuard::new(self.clone(), lease))
+    }
+
     pub fn release(
         &self,
         staged_audio_id: &str,
@@ -275,6 +284,30 @@ impl StagedAudioRegistry {
                 lease_id: current_lease,
             } if current_lease == lease_id => {
                 entry.state = StagedAudioState::Consumed;
+                Ok(())
+            }
+            _ => Err(StagedAudioRegistryError::InvalidLease),
+        }
+    }
+
+    pub fn commit_processed(
+        &self,
+        staged_audio_id: &str,
+        lease_id: &str,
+    ) -> Result<(), StagedAudioRegistryError> {
+        let mut map = self.inner.lock().expect("lock poisoned");
+
+        let entry = map
+            .get_mut(staged_audio_id)
+            .ok_or(StagedAudioRegistryError::NotFound)?;
+
+        match &entry.state {
+            StagedAudioState::Reserved {
+                lease_id: current_lease,
+            } if current_lease == lease_id => {
+                let path = entry.file_path.clone();
+                entry.state = StagedAudioState::Consumed;
+                let _ = std::fs::remove_file(path);
                 Ok(())
             }
             _ => Err(StagedAudioRegistryError::InvalidLease),
