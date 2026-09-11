@@ -15,6 +15,7 @@
   --radius-full: 9999px;
 
   --touch-target-min: 44px;
+  --touch-target-action: 48px;
   --max-content-width: 860px;
   --max-content-width-tablet: 900px;
   --max-content-width-pc: 1200px;
@@ -31,4 +32,3 @@
     --max-content-width: var(--max-content-width-pc);
   }
 }
-

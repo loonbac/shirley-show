@@ -66,24 +66,24 @@ Chain strategy: pending
 
 ### 2.1 Tokens de Diseño y Utilidad de Fecha
 
-- [ ] Ajustar tokens en `frontend/styles/tokens/colors.css`, `elevations.css` y `spacing.css` incorporando la paleta marfil cálido (`#FAF8F5`), oro envejecido (`#B8860B`), acentos temáticos (violeta `#6D28D9`, cian profundo `#0E7490`, ámbar cálido `#B45309`) y elevaciones suaves de papel. <!-- sdd-owner: implementation -->
-- [ ] Implementar la micro-utilidad pura `frontend/js/utils/format/relative-date.js` para formatear timestamps ISO en texto humano en español ("Actualizado hoy", "Hace 2 días", neutral fallback para fechas inválidas). <!-- sdd-owner: implementation -->
+- [x] Ajustar tokens en `frontend/styles/tokens/colors.css`, `elevations.css` y `spacing.css` incorporando la paleta marfil cálido (`#FAF8F5`), oro envejecido (`#B8860B`), acentos temáticos (violeta `#6D28D9`, cian profundo `#0E7490`, ámbar cálido `#B45309`) y elevaciones suaves de papel. <!-- sdd-owner: implementation -->
+- [x] Implementar la micro-utilidad pura `frontend/js/utils/format/relative-date.js` para formatear timestamps ISO en texto humano en español ("Actualizado hoy", "Hace 2 días", neutral fallback para fechas inválidas). <!-- sdd-owner: implementation -->
 
 ### 2.2 Componente Welcome Header
 
-- [ ] Implementar el organismo puro `frontend/js/components/organisms/welcome-header.js` que recibe saludo personalizado, métricas agregadas de la biblioteca (repertorios y pistas) y callback `onCreatePresentation`. <!-- sdd-owner: implementation -->
-- [ ] Crear la hoja de estilo atómica 1:1 `frontend/styles/organisms/welcome-header.css` con tipografía cálida, distribución responsive y botón de acción primaria con área táctil mínima de 48 px. <!-- sdd-owner: implementation -->
+- [x] Implementar el organismo puro `frontend/js/components/organisms/welcome-header.js` que recibe saludo personalizado, métricas agregadas de la biblioteca (repertorios y pistas) y callback `onCreatePresentation`. <!-- sdd-owner: implementation -->
+- [x] Crear la hoja de estilo atómica 1:1 `frontend/styles/organisms/welcome-header.css` con tipografía cálida, distribución responsive y botón de acción primaria con área táctil mínima de 48 px. <!-- sdd-owner: implementation -->
 
 ### 2.3 Rediseño de Presentation Card
 
-- [ ] Rediseñar el organismo `frontend/js/components/organisms/presentation-card.js` para recibir el summary enriquecido (`tracks_count`, `lyrics_count`, `notes_count`, `total_items`, `preview_items`), renderizar fecha humana, badges cromáticos por tipo, caja de preview con los primeros 3 temas/snippets, botón dominante "Abrir show" (touch target >= 48 px) y menú discreto para renombrar/eliminar. <!-- sdd-owner: implementation -->
-- [ ] Rediseñar la hoja de estilo `frontend/styles/organisms/presentation-card.css` con elevación física, estados interactivos claros (hover/active/focus-visible) y separación visual entre acción primaria y destructivas. <!-- sdd-owner: implementation -->
+- [x] Rediseñar el organismo `frontend/js/components/organisms/presentation-card.js` para recibir el summary enriquecido (`tracks_count`, `lyrics_count`, `notes_count`, `total_items`, `preview_items`), renderizar fecha humana, badges cromáticos por tipo, caja de preview con los primeros 3 temas/snippets, botón dominante "Abrir show" (touch target >= 48 px) y menú discreto para renombrar/eliminar. <!-- sdd-owner: implementation -->
+- [x] Rediseñar la hoja de estilo `frontend/styles/organisms/presentation-card.css` con elevación física, estados interactivos claros (hover/active/focus-visible) y separación visual entre acción primaria y destructivas. <!-- sdd-owner: implementation -->
 
 ### 2.4 Integración en Vista y Controlador de Catálogo
 
-- [ ] Actualizar `frontend/js/components/views/presentations-view.js` y `frontend/styles/views/presentations-view.css` para orquestar `welcome-header` cuando hay repertorios, mantener el `empty-state` canónico cuando la lista está vacía, y montar el grid de tarjetas ricas. <!-- sdd-owner: implementation -->
-- [ ] Actualizar `frontend/js/controllers/presentations-controller.js` para consumir los datos enriquecidos de `listPresentations()`, calcular totales agregados para el header y enlazar el callback de "Abrir show" con la navegación directa. <!-- sdd-owner: implementation -->
-- [ ] Registrar `welcome-header.css` en `frontend/styles/index.css` y verificar visualmente en navegador con 0 presentaciones, con 1 presentación sin items y con múltiples presentaciones con items variados. <!-- sdd-owner: implementation -->
+- [x] Actualizar `frontend/js/components/views/presentations-view.js` y `frontend/styles/views/presentations-view.css` para orquestar `welcome-header` cuando hay repertorios, mantener el `empty-state` canónico cuando la lista está vacía, y montar el grid de tarjetas ricas. <!-- sdd-owner: implementation -->
+- [x] Actualizar `frontend/js/controllers/presentations-controller.js` para consumir los datos enriquecidos de `listPresentations()`, calcular totales agregados para el header y enlazar el callback de "Abrir show" con la navegación directa. <!-- sdd-owner: implementation -->
+- [x] Registrar `welcome-header.css` en `frontend/styles/index.css` y verificar visualmente en navegador con 0 presentaciones, con 1 presentación sin items y con múltiples presentaciones con items variados. <!-- sdd-owner: implementation -->
 
 ---
 

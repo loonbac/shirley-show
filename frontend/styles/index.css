@@ -30,6 +30,7 @@
 
 /* Organisms */
 @import "./organisms/app-topbar.css";
+@import "./organisms/welcome-header.css";
 @import "./organisms/presentation-card.css";
 @import "./organisms/presentation-form-dialog.css";
 @import "./organisms/track-item.css";

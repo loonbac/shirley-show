@@ -28,10 +28,12 @@
   --color-success-subtle: rgba(21, 128, 61, 0.08);
 
   /* Item Type Accents - Harmonized Warm Jewel Tones */
+  --color-accent-track: #6d28d9;
+  --color-accent-track-subtle: rgba(109, 40, 217, 0.08);
+  --color-accent-lyrics: #0e7490;
+  --color-accent-lyrics-subtle: rgba(14, 116, 144, 0.08);
   --color-accent-note: #b45309;
   --color-accent-note-subtle: rgba(180, 83, 9, 0.08);
-  --color-accent-track: #6d28d9;
-  --color-accent-lyrics: #0e7490;
 
   /* Focus & Overlay */
   --color-focus-ring: #b8860b;

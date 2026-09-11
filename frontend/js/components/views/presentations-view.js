@@ -4,11 +4,17 @@ import { createSpinner } from '../atoms/spinner.js';
 import { createStatusMessage } from '../atoms/status-message.js';
 import { createEmptyState } from '../molecules/empty-state.js';
 import { createPresentationCard } from '../organisms/presentation-card.js';
+import { createWelcomeHeader } from '../organisms/welcome-header.js';
 
 /**
- * Pure view for presentations catalog.
+ * Pure view for presentations home catalog.
+ * Orchestrates welcome-header and rich presentation cards when presentations exist,
+ * and maintains the warm canonical empty state when the catalog is empty.
+ *
  * @param {{
- *   presentations?: Array<{ id: string, title: string, created_at: string, updated_at: string }>,
+ *   presentations?: Array<any>,
+ *   totalPresentations?: number,
+ *   totalTracks?: number,
  *   isLoading?: boolean,
  *   errorMessage?: string | null,
  *   onCreateClick: () => void,
@@ -24,6 +30,8 @@ import { createPresentationCard } from '../organisms/presentation-card.js';
 export function createPresentationsView(props) {
   let {
     presentations = [],
+    totalPresentations = 0,
+    totalTracks = 0,
     isLoading = false,
     errorMessage = null,
     onCreateClick,
@@ -46,7 +54,7 @@ export function createPresentationsView(props) {
     if (isLoading) {
       const loadingBox = createElement(
         'div',
-        { style: { display: 'flex', justifyContent: 'center', padding: '40px' } },
+        { class: 'presentations-loading' },
         [createSpinner({ size: 'lg' })]
       );
       contentArea.appendChild(loadingBox);
@@ -62,7 +70,7 @@ export function createPresentationsView(props) {
 
       const empty = createEmptyState({
         iconName: 'track',
-        title: 'No hay presentaciones aún',
+        title: 'Tu biblioteca está lista',
         description: 'Crea tu primera presentación para organizar tus pistas de audio, letras para el atril y notas de escenario.',
         actions: [createFirstBtn.el],
       });
@@ -70,6 +78,16 @@ export function createPresentationsView(props) {
       contentArea.appendChild(empty);
       return;
     }
+
+    // When presentations exist, render the welcome header followed by the rich cards grid
+    const welcomeHeader = createWelcomeHeader({
+      greeting: '¡Hola, Shirley!',
+      subtitle: 'Tu biblioteca de repertorios para el escenario',
+      phrase: 'Organiza tus pistas, letras y notas para brillar en vivo.',
+      totalPresentations,
+      totalTracks,
+      onCreatePresentation: onCreateClick,
+    });
 
     const listEl = createElement('ul', { class: 'presentations-list' });
     for (const pres of presentations) {
@@ -81,6 +99,8 @@ export function createPresentationsView(props) {
       });
       listEl.appendChild(card);
     }
+
+    contentArea.appendChild(welcomeHeader.el);
     contentArea.appendChild(listEl);
   }
 
@@ -88,6 +108,8 @@ export function createPresentationsView(props) {
 
   function update(nextProps = {}) {
     if (nextProps.presentations !== undefined) presentations = nextProps.presentations;
+    if (nextProps.totalPresentations !== undefined) totalPresentations = nextProps.totalPresentations;
+    if (nextProps.totalTracks !== undefined) totalTracks = nextProps.totalTracks;
     if (nextProps.isLoading !== undefined) isLoading = nextProps.isLoading;
     if (nextProps.errorMessage !== undefined) {
       errorMessage = nextProps.errorMessage;

@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
      Running `target/debug/shirley-show`
 ====================================================================
 ADVERTENCIA: Shirley Show no incluye autenticación ni control de acceso.

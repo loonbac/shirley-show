@@ -13,6 +13,9 @@ import { toPresentation } from '../router/navigate.js';
 
 /**
  * Controller orchestrating the presentations catalog.
+ * Consumes enriched presentation summaries, calculates aggregate library metrics,
+ * and handles presentation lifecycle actions (open, create, rename, delete).
+ *
  * @param {{
  *   audioController: { stop: () => void },
  * }} deps 
@@ -56,6 +59,8 @@ export function createPresentationsController(deps) {
 
   const view = createPresentationsView({
     presentations,
+    totalPresentations: 0,
+    totalTracks: 0,
     isLoading,
     errorMessage,
     onCreateClick: () => openCreateDialog(),
@@ -72,8 +77,21 @@ export function createPresentationsController(deps) {
     try {
       const data = await listPresentations();
       presentations = (data && data.presentations) || [];
+
+      const totalPresentations = presentations.length;
+      const totalTracks = presentations.reduce(
+        (acc, pres) => acc + (Number(pres.tracks_count) || 0),
+        0
+      );
+
       isLoading = false;
-      view.update({ presentations, isLoading: false });
+      view.update({
+        presentations,
+        totalPresentations,
+        totalTracks,
+        isLoading: false,
+        errorMessage: null,
+      });
     } catch (err) {
       isLoading = false;
       errorMessage = err.message || 'Error al cargar las presentaciones.';
