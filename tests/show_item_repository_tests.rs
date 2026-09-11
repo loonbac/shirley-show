@@ -2,10 +2,12 @@ use shirley_show::domain::move_direction::MoveDirection;
 use shirley_show::domain::presentation::Presentation;
 use shirley_show::domain::show_item::{LyricsPayload, NotePayload, ShowItemPayload, TrackPayload};
 use shirley_show::domain::show_item_kind::ShowItemKind;
+use shirley_show::domain::show_item_update::ShowItemUpdate;
 use shirley_show::infra::sqlite::connect::{init_pool, DbPool};
 use shirley_show::infra::sqlite::migrate::migrate_pool;
 use shirley_show::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use shirley_show::infra::sqlite::show_item_repository::SqliteShowItemRepository;
+use shirley_show::ports::presentation_reader::PresentationReader;
 use shirley_show::ports::presentation_writer::PresentationWriter;
 use shirley_show::ports::show_item_reader::ShowItemReader;
 use shirley_show::ports::show_item_writer::ShowItemWriter;
@@ -244,4 +246,127 @@ fn test_delete_first_and_last_items_recompaction() {
     // Delete remaining single item (i1 at pos 0)
     let res2 = item_repo.delete(&pres.id, &i1.id).unwrap();
     assert_eq!(res2.items.len(), 0);
+}
+
+#[test]
+fn test_update_show_item_success_and_invariants() {
+    let (item_repo, pres_repo, _pool, _dir) = setup_repo();
+
+    let pres = Presentation::new("Update Test Show").unwrap();
+    pres_repo.create(&pres).unwrap();
+    let initial_updated_at = pres.updated_at.clone();
+
+    // Append a track
+    let track_payload = ShowItemPayload::Track(
+        TrackPayload::new("Original Title", "audio-123.mp3", "audio/mpeg", 4096).unwrap(),
+    );
+    let track_item = item_repo.append(&pres.id, track_payload).unwrap();
+
+    // Append a lyrics item
+    let lyrics_payload = ShowItemPayload::Lyrics(LyricsPayload::new("Original Lyrics").unwrap());
+    let lyrics_item = item_repo.append(&pres.id, lyrics_payload).unwrap();
+
+    // 1. Update track title
+    let update_track = ShowItemUpdate::new_track_title("Updated Title").unwrap();
+    let updated_at_ts = "2026-03-30T12:00:00Z";
+    let updated_track = item_repo.update(&pres.id, &track_item.id, update_track, updated_at_ts).unwrap();
+
+    assert_eq!(updated_track.id, track_item.id);
+    assert_eq!(updated_track.position, 0);
+    match &updated_track.payload {
+        ShowItemPayload::Track(t) => {
+            assert_eq!(t.title, "Updated Title");
+            assert_eq!(t.audio_key, "audio-123.mp3");
+            assert_eq!(t.media_type, "audio/mpeg");
+            assert_eq!(t.byte_size, 4096);
+        }
+        _ => panic!("Expected track payload"),
+    }
+
+    // Verify parent presentation updated_at timestamp updated
+    let pres_after = pres_repo.get(&pres.id).unwrap().unwrap();
+    assert_eq!(pres_after.updated_at, updated_at_ts);
+    assert_ne!(pres_after.updated_at, initial_updated_at);
+
+    // 2. Update lyrics body
+    let update_lyrics = ShowItemUpdate::new_text_body("Updated Lyrics Body").unwrap();
+    let updated_at_ts2 = "2026-03-30T12:05:00Z";
+    let updated_lyrics = item_repo.update(&pres.id, &lyrics_item.id, update_lyrics, updated_at_ts2).unwrap();
+    match &updated_lyrics.payload {
+        ShowItemPayload::Lyrics(l) => {
+            assert_eq!(l.body, "Updated Lyrics Body");
+        }
+        _ => panic!("Expected lyrics payload"),
+    }
+
+    // 3. Error on non-existent item or non-existent presentation
+    let err1 = item_repo.update(&pres.id, "non-existent-item", ShowItemUpdate::TrackTitle("X".into()), "2026-03-30T12:10:00Z");
+    assert!(err1.is_err());
+
+    let err2 = item_repo.update("non-existent-pres", &track_item.id, ShowItemUpdate::TrackTitle("X".into()), "2026-03-30T12:10:00Z");
+    assert!(err2.is_err());
+}
+
+#[test]
+fn test_move_to_absolute_reordering_and_boundaries() {
+    let (item_repo, pres_repo, _pool, _dir) = setup_repo();
+
+    let pres = Presentation::new("Move To Test").unwrap();
+    pres_repo.create(&pres).unwrap();
+
+    let i0 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 0").unwrap())).unwrap();
+    let i1 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 1").unwrap())).unwrap();
+    let i2 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 2").unwrap())).unwrap();
+    let i3 = item_repo.append(&pres.id, ShowItemPayload::Note(NotePayload::new("Item 3").unwrap())).unwrap();
+
+    // Sequence is [0, 1, 2, 3]
+
+    // 1. Move to same position is a no-op returning current sequence
+    let noop_res = item_repo.move_to(&pres.id, &i1.id, 1).unwrap();
+    assert_eq!(noop_res.len(), 4);
+    assert_eq!(noop_res[0].id, i0.id);
+    assert_eq!(noop_res[1].id, i1.id);
+    assert_eq!(noop_res[2].id, i2.id);
+    assert_eq!(noop_res[3].id, i3.id);
+
+    // 2. Out of bounds: target_position < 0 -> 409 conflict
+    let err_neg = item_repo.move_to(&pres.id, &i1.id, -1);
+    assert!(err_neg.is_err());
+
+    // Out of bounds: target_position >= N (here N=4, target=4) -> 409 conflict
+    let err_overflow = item_repo.move_to(&pres.id, &i1.id, 4);
+    assert!(err_overflow.is_err());
+
+    // 3. Move forward / down: move i0 from 0 to 2 -> [1, 2, 0, 3]
+    let res_down = item_repo.move_to(&pres.id, &i0.id, 2).unwrap();
+    assert_eq!(res_down[0].id, i1.id);
+    assert_eq!(res_down[0].position, 0);
+    assert_eq!(res_down[1].id, i2.id);
+    assert_eq!(res_down[1].position, 1);
+    assert_eq!(res_down[2].id, i0.id);
+    assert_eq!(res_down[2].position, 2);
+    assert_eq!(res_down[3].id, i3.id);
+    assert_eq!(res_down[3].position, 3);
+
+    // 4. Move backward / up: move i3 from 3 to 0 -> [3, 1, 2, 0]
+    let res_up = item_repo.move_to(&pres.id, &i3.id, 0).unwrap();
+    assert_eq!(res_up[0].id, i3.id);
+    assert_eq!(res_up[0].position, 0);
+    assert_eq!(res_up[1].id, i1.id);
+    assert_eq!(res_up[1].position, 1);
+    assert_eq!(res_up[2].id, i2.id);
+    assert_eq!(res_up[2].position, 2);
+    assert_eq!(res_up[3].id, i0.id);
+    assert_eq!(res_up[3].position, 3);
+
+    // 5. Move to last position (from 0 to 3) -> [1, 2, 0, 3]
+    let res_last = item_repo.move_to(&pres.id, &i3.id, 3).unwrap();
+    assert_eq!(res_last[0].id, i1.id);
+    assert_eq!(res_last[0].position, 0);
+    assert_eq!(res_last[1].id, i2.id);
+    assert_eq!(res_last[1].position, 1);
+    assert_eq!(res_last[2].id, i0.id);
+    assert_eq!(res_last[2].position, 2);
+    assert_eq!(res_last[3].id, i3.id);
+    assert_eq!(res_last[3].position, 3);
 }

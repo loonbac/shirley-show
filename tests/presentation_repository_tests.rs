@@ -1,9 +1,15 @@
+use shirley_show::domain::presentation_summary::ShowItemPreview;
+use shirley_show::domain::show_item::{LyricsPayload, NotePayload, ShowItemPayload, TrackPayload};
 use shirley_show::domain::Presentation;
 use shirley_show::error::AppError;
 use shirley_show::infra::sqlite::presentation_repository::SqlitePresentationRepository;
+use shirley_show::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
+use shirley_show::infra::sqlite::show_item_repository::SqliteShowItemRepository;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
 use shirley_show::ports::presentation_reader::PresentationReader;
+use shirley_show::ports::presentation_summary_reader::PresentationSummaryReader;
 use shirley_show::ports::presentation_writer::PresentationWriter;
+use shirley_show::ports::show_item_writer::ShowItemWriter;
 use tempfile::NamedTempFile;
 
 fn setup_repo() -> (SqlitePresentationRepository, tempfile::NamedTempFile) {
@@ -197,4 +203,95 @@ fn test_delete_presentation_physical_audio_cleanup() {
         )
         .expect("count pending deletions");
     assert_eq!(pending_count, 0, "Pending queue must have 0 entries after successful cleanup");
+}
+
+#[test]
+fn test_presentation_summary_repository_list_summaries() {
+    let temp_file = NamedTempFile::new().expect("temp file");
+    let path = temp_file.path().to_str().expect("valid path");
+    let pool = init_pool(path).expect("init pool");
+    migrate_pool(&pool).expect("migrate pool");
+
+    let pres_repo = SqlitePresentationRepository::new(pool.clone());
+    let summary_repo = PresentationSummaryRepository::new(pool.clone());
+
+    // 1. Empty database returns empty list
+    let empty_list = summary_repo.list_summaries().unwrap();
+    assert!(empty_list.is_empty());
+
+    // 2. Presentation with 0 items
+    let p_empty = Presentation::new("Repertorio Vacío").unwrap();
+    pres_repo.create(&p_empty).unwrap();
+
+    let summaries1 = summary_repo.list_summaries().unwrap();
+    assert_eq!(summaries1.len(), 1);
+    assert_eq!(summaries1[0].id, p_empty.id);
+    assert_eq!(summaries1[0].title, "Repertorio Vacío");
+    assert_eq!(summaries1[0].tracks_count, 0);
+    assert_eq!(summaries1[0].lyrics_count, 0);
+    assert_eq!(summaries1[0].notes_count, 0);
+    assert_eq!(summaries1[0].total_items, 0);
+    assert!(summaries1[0].preview_items.is_empty());
+
+    // 3. Presentation with 5 items (2 tracks, 2 lyrics, 1 note)
+    let p_full = Presentation::new("Show Principal").unwrap();
+    pres_repo.create(&p_full).unwrap();
+
+    let item_repo = SqliteShowItemRepository::new(pool.clone());
+    // Pos 0: Track
+    item_repo.append(&p_full.id, ShowItemPayload::Track(
+        TrackPayload::new("Intro Acústica", "track-1.mp3", "audio/mpeg", 1024).unwrap()
+    )).unwrap();
+    // Pos 1: Lyrics
+    item_repo.append(&p_full.id, ShowItemPayload::Lyrics(
+        LyricsPayload::new("Verso 1\nLínea 2\n\nEstribillo potente").unwrap()
+    )).unwrap();
+    // Pos 2: Note
+    item_repo.append(&p_full.id, ShowItemPayload::Note(
+        NotePayload::new("Revisar afinación en D").unwrap()
+    )).unwrap();
+    // Pos 3: Track
+    item_repo.append(&p_full.id, ShowItemPayload::Track(
+        TrackPayload::new("Tema Principal", "track-2.mp3", "audio/mpeg", 2048).unwrap()
+    )).unwrap();
+    // Pos 4: Lyrics
+    item_repo.append(&p_full.id, ShowItemPayload::Lyrics(
+        LyricsPayload::new("Outro suave").unwrap()
+    )).unwrap();
+
+    let summaries2 = summary_repo.list_summaries().unwrap();
+    assert_eq!(summaries2.len(), 2);
+
+    let summary = summaries2.iter().find(|s| s.id == p_full.id).unwrap();
+    assert_eq!(summary.tracks_count, 2);
+    assert_eq!(summary.lyrics_count, 2);
+    assert_eq!(summary.notes_count, 1);
+    assert_eq!(summary.total_items, 5);
+
+    // Only up to 3 preview items, ordered by position 0, 1, 2
+    assert_eq!(summary.preview_items.len(), 3);
+
+    match &summary.preview_items[0] {
+        ShowItemPreview::Track { position, title, .. } => {
+            assert_eq!(*position, 0);
+            assert_eq!(title.as_str(), "Intro Acústica");
+        }
+        _ => panic!("Expected track preview at pos 0"),
+    }
+
+    match &summary.preview_items[1] {
+        ShowItemPreview::Lyrics { position, snippet, .. } => {
+            assert_eq!(*position, 1);
+            assert_eq!(snippet.as_str(), "Verso 1 Línea 2 Estribillo potente");
+        }
+        _ => panic!("Expected lyrics preview at pos 1"),
+    }
+
+    match &summary.preview_items[2] {
+        ShowItemPreview::Note { position, snippet, .. } => {
+            assert_eq!(*position, 2);
+            assert_eq!(snippet.as_str(), "Revisar afinación en D");
+        }
+        _ => panic!("Expected note preview at pos 2"),
+    }
 }

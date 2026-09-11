@@ -466,3 +466,216 @@ async fn test_multipart_track_upload_duplicate_audio_rejected_and_cleaned() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     assert_eq!(std::fs::read_dir(storage.staging_dir()).unwrap().count(), 0, "No leftover staging files after duplicate audio");
 }
+
+#[tokio::test]
+async fn test_patch_item_endpoint_and_validations() {
+    let (app, pres_id, _storage, _dir) = setup_test_app().await;
+
+    // 1. Add a lyrics item
+    let req_lyrics = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/items"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "type": "lyrics", "body": "Original Lyrics" }).to_string()))
+        .unwrap();
+    let res_lyrics = app.clone().oneshot(req_lyrics).await.unwrap();
+    assert_eq!(res_lyrics.status(), StatusCode::CREATED);
+    let lyrics_json = body_to_json(res_lyrics.into_body()).await;
+    let lyrics_id = lyrics_json["id"].as_str().unwrap().to_string();
+
+    // 2. Add a track item via raw DB for quick setup
+    // Or upload track via endpoint
+    let boundary = "boundaryPatchTest123";
+    let mp3 = [0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let body_bytes = build_multipart_body(boundary, "Original Song", "song.mp3", &mp3);
+    let req_track = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/tracks"))
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(body_bytes))
+        .unwrap();
+    let res_track = app.clone().oneshot(req_track).await.unwrap();
+    assert_eq!(res_track.status(), StatusCode::CREATED);
+    let track_json = body_to_json(res_track.into_body()).await;
+    let track_id = track_json["id"].as_str().unwrap().to_string();
+
+    // 3. Success PATCH lyrics body -> 200
+    let req_patch_lyrics = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{pres_id}/items/{lyrics_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "body": "Updated Lyrics Text" }).to_string()))
+        .unwrap();
+    let res_patch_lyrics = app.clone().oneshot(req_patch_lyrics).await.unwrap();
+    assert_eq!(res_patch_lyrics.status(), StatusCode::OK);
+    let patched_lyrics_json = body_to_json(res_patch_lyrics.into_body()).await;
+    assert_eq!(patched_lyrics_json["type"], "lyrics");
+    assert_eq!(patched_lyrics_json["body"], "Updated Lyrics Text");
+    assert_eq!(patched_lyrics_json["id"], lyrics_id);
+
+    // 4. Success PATCH track title -> 200
+    let req_patch_track = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{pres_id}/items/{track_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Updated Song Title" }).to_string()))
+        .unwrap();
+    let res_patch_track = app.clone().oneshot(req_patch_track).await.unwrap();
+    assert_eq!(res_patch_track.status(), StatusCode::OK);
+    let patched_track_json = body_to_json(res_patch_track.into_body()).await;
+    assert_eq!(patched_track_json["type"], "track");
+    assert_eq!(patched_track_json["title"], "Updated Song Title");
+    assert_eq!(patched_track_json["id"], track_id);
+
+    // 5. 400 on empty payload
+    let req_empty_payload = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{pres_id}/items/{lyrics_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({}).to_string()))
+        .unwrap();
+    let res_empty_payload = app.clone().oneshot(req_empty_payload).await.unwrap();
+    assert_eq!(res_empty_payload.status(), StatusCode::BAD_REQUEST);
+
+    // 6. 400 on whitespace value
+    let req_ws = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{pres_id}/items/{lyrics_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "body": "   \n\t " }).to_string()))
+        .unwrap();
+    let res_ws = app.clone().oneshot(req_ws).await.unwrap();
+    assert_eq!(res_ws.status(), StatusCode::BAD_REQUEST);
+
+    // 7. 400 on incompatible field (body on track)
+    let req_incompat_track = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{pres_id}/items/{track_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "body": "Trying to set body on track" }).to_string()))
+        .unwrap();
+    let res_incompat_track = app.clone().oneshot(req_incompat_track).await.unwrap();
+    assert_eq!(res_incompat_track.status(), StatusCode::BAD_REQUEST);
+
+    // 8. 400 on incompatible field (title on lyrics)
+    let req_incompat_lyrics = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{pres_id}/items/{lyrics_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Trying to set title on lyrics" }).to_string()))
+        .unwrap();
+    let res_incompat_lyrics = app.clone().oneshot(req_incompat_lyrics).await.unwrap();
+    assert_eq!(res_incompat_lyrics.status(), StatusCode::BAD_REQUEST);
+
+    // 9. 404 on missing item or missing presentation
+    let req_404_item = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/{pres_id}/items/missing-item-id"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "body": "valid text" }).to_string()))
+        .unwrap();
+    let res_404_item = app.clone().oneshot(req_404_item).await.unwrap();
+    assert_eq!(res_404_item.status(), StatusCode::NOT_FOUND);
+
+    let req_404_pres = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/presentations/missing-pres-id/items/{lyrics_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "body": "valid text" }).to_string()))
+        .unwrap();
+    let res_404_pres = app.clone().oneshot(req_404_pres).await.unwrap();
+    assert_eq!(res_404_pres.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_move_item_target_position_and_validations() {
+    let (app, pres_id, _storage, _dir) = setup_test_app().await;
+
+    // Add 3 notes: pos 0, 1, 2
+    let mut item_ids = Vec::new();
+    for title in ["Note 0", "Note 1", "Note 2"] {
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/api/presentations/{pres_id}/items"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "type": "note", "body": title }).to_string()))
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        let j = body_to_json(res.into_body()).await;
+        item_ids.push(j["id"].as_str().unwrap().to_string());
+    }
+
+    // 1. Success move Note 2 to target_position 0 -> [Note 2, Note 0, Note 1]
+    let req_move = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[2]))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "target_position": 0 }).to_string()))
+        .unwrap();
+    let res_move = app.clone().oneshot(req_move).await.unwrap();
+    assert_eq!(res_move.status(), StatusCode::OK);
+    let moved_json = body_to_json(res_move.into_body()).await;
+    let items = moved_json["items"].as_array().unwrap();
+    assert_eq!(items[0]["id"], item_ids[2]);
+    assert_eq!(items[0]["position"], 0);
+    assert_eq!(items[1]["id"], item_ids[0]);
+    assert_eq!(items[1]["position"], 1);
+    assert_eq!(items[2]["id"], item_ids[1]);
+    assert_eq!(items[2]["position"], 2);
+
+    // 2. Target position out of bounds (< 0) -> 409
+    let req_oob_neg = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "target_position": -1 }).to_string()))
+        .unwrap();
+    let res_oob_neg = app.clone().oneshot(req_oob_neg).await.unwrap();
+    assert_eq!(res_oob_neg.status(), StatusCode::CONFLICT);
+
+    // Target position out of bounds (>= N, here N=3, target=3) -> 409
+    let req_oob_high = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "target_position": 3 }).to_string()))
+        .unwrap();
+    let res_oob_high = app.clone().oneshot(req_oob_high).await.unwrap();
+    assert_eq!(res_oob_high.status(), StatusCode::CONFLICT);
+
+    // 3. Ambiguity: both direction and target_position provided -> 400
+    let req_both = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "direction": "up", "target_position": 0 }).to_string()))
+        .unwrap();
+    let res_both = app.clone().oneshot(req_both).await.unwrap();
+    assert_eq!(res_both.status(), StatusCode::BAD_REQUEST);
+
+    // 4. Neither direction nor target_position provided -> 400
+    let req_neither = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[0]))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({}).to_string()))
+        .unwrap();
+    let res_neither = app.clone().oneshot(req_neither).await.unwrap();
+    assert_eq!(res_neither.status(), StatusCode::BAD_REQUEST);
+
+    // 5. Retrocompatibility: direction "down" works
+    // Currently order is [Note 2, Note 0, Note 1]. Move Note 2 down -> [Note 0, Note 2, Note 1]
+    let req_retro = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres_id}/items/{}/move", item_ids[2]))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "direction": "down" }).to_string()))
+        .unwrap();
+    let res_retro = app.clone().oneshot(req_retro).await.unwrap();
+    assert_eq!(res_retro.status(), StatusCode::OK);
+    let retro_json = body_to_json(res_retro.into_body()).await;
+    let retro_items = retro_json["items"].as_array().unwrap();
+    assert_eq!(retro_items[0]["id"], item_ids[0]);
+    assert_eq!(retro_items[1]["id"], item_ids[2]);
+    assert_eq!(retro_items[2]["id"], item_ids[1]);
+}

@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
-use crate::domain::Presentation;
+use crate::domain::presentation_summary::PresentationSummary;
 use crate::error::AppError;
-use crate::ports::presentation_reader::PresentationReader;
+use crate::ports::presentation_summary_reader::PresentationSummaryReader;
 
-pub struct ListPresentations<R: PresentationReader> {
+pub struct ListPresentations<R: PresentationSummaryReader> {
     reader: Arc<R>,
 }
 
-impl<R: PresentationReader> ListPresentations<R> {
+impl<R: PresentationSummaryReader> ListPresentations<R> {
     pub fn new(reader: Arc<R>) -> Self {
         Self { reader }
     }
 
-    pub fn execute(&self) -> Result<Vec<Presentation>, AppError> {
-        self.reader.list()
+    pub fn execute(&self) -> Result<Vec<PresentationSummary>, AppError> {
+        self.reader.list_summaries()
     }
 }

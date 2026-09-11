@@ -273,3 +273,81 @@ async fn test_delete_presentation_with_cascade_audio_file_cleanup() {
     let pending_count: i64 = conn.query_row("SELECT count(*) FROM pending_audio_deletions WHERE audio_key = ?1;", [&audio_key], |r| r.get(0)).unwrap();
     assert_eq!(pending_count, 0, "Pending queue must be 0 after successful physical cleanup");
 }
+
+#[tokio::test]
+async fn test_get_presentations_enriched_summary() {
+    let (app, _dir) = setup_app();
+
+    // 1. Create a presentation with 0 items
+    let req1 = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Empty Presentation" }).to_string()))
+        .unwrap();
+    let res1 = app.clone().oneshot(req1).await.unwrap();
+    assert_eq!(res1.status(), StatusCode::CREATED);
+    let pres1_id = body_to_json(res1.into_body()).await["presentation"]["id"].as_str().unwrap().to_string();
+
+    // 2. Create second presentation and add items
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/api/presentations")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "title": "Rich Presentation" }).to_string()))
+        .unwrap();
+    let res2 = app.clone().oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::CREATED);
+    let pres2_id = body_to_json(res2.into_body()).await["presentation"]["id"].as_str().unwrap().to_string();
+
+    // Add note and lyrics to pres2
+    let req_item1 = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres2_id}/items"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "type": "note", "body": "Opening Cue" }).to_string()))
+        .unwrap();
+    app.clone().oneshot(req_item1).await.unwrap();
+
+    let req_item2 = Request::builder()
+        .method("POST")
+        .uri(format!("/api/presentations/{pres2_id}/items"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({ "type": "lyrics", "body": "First verse lyrics" }).to_string()))
+        .unwrap();
+    app.clone().oneshot(req_item2).await.unwrap();
+
+    // 3. GET /api/presentations
+    let req_list = Request::builder()
+        .method("GET")
+        .uri("/api/presentations")
+        .body(Body::empty())
+        .unwrap();
+    let res_list = app.oneshot(req_list).await.unwrap();
+    assert_eq!(res_list.status(), StatusCode::OK);
+    let list_json = body_to_json(res_list.into_body()).await;
+
+    let presentations = list_json["presentations"].as_array().unwrap();
+    assert_eq!(presentations.len(), 2);
+
+    let p1 = presentations.iter().find(|p| p["id"] == pres1_id).unwrap();
+    assert_eq!(p1["title"], "Empty Presentation");
+    assert_eq!(p1["tracks_count"], 0);
+    assert_eq!(p1["lyrics_count"], 0);
+    assert_eq!(p1["notes_count"], 0);
+    assert_eq!(p1["total_items"], 0);
+    assert_eq!(p1["preview_items"].as_array().unwrap().len(), 0);
+
+    let p2 = presentations.iter().find(|p| p["id"] == pres2_id).unwrap();
+    assert_eq!(p2["title"], "Rich Presentation");
+    assert_eq!(p2["tracks_count"], 0);
+    assert_eq!(p2["lyrics_count"], 1);
+    assert_eq!(p2["notes_count"], 1);
+    assert_eq!(p2["total_items"], 2);
+    let previews = p2["preview_items"].as_array().unwrap();
+    assert_eq!(previews.len(), 2);
+    assert_eq!(previews[0]["type"], "note");
+    assert_eq!(previews[0]["snippet"], "Opening Cue");
+    assert_eq!(previews[1]["type"], "lyrics");
+    assert_eq!(previews[1]["snippet"], "First verse lyrics");
+}

@@ -8,6 +8,7 @@ pub mod list_presentations;
 pub mod open_track_audio;
 pub mod rename_presentation;
 pub mod reorder_item;
+pub mod update_show_item;
 pub mod upload_track;
 
 pub use add_lyrics::AddLyrics;
@@ -20,4 +21,5 @@ pub use list_presentations::ListPresentations;
 pub use open_track_audio::{OpenTrackAudio, OpenedAudioTrack};
 pub use rename_presentation::RenamePresentation;
 pub use reorder_item::ReorderItem;
+pub use update_show_item::UpdateShowItem;
 pub use upload_track::UploadTrack;

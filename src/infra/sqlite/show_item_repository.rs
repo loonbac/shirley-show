@@ -3,6 +3,7 @@ use rusqlite::params;
 
 use crate::domain::move_direction::MoveDirection;
 use crate::domain::show_item::{ShowItem, ShowItemPayload};
+use crate::domain::show_item_update::ShowItemUpdate;
 use crate::error::AppError;
 use crate::infra::sqlite::connect::DbPool;
 use crate::ports::show_item_reader::ShowItemReader;
@@ -367,5 +368,215 @@ impl ShowItemWriter for SqliteShowItemRepository {
             items,
             audio_key,
         })
+    }
+
+    fn update(
+        &self,
+        presentation_id: &str,
+        item_id: &str,
+        update: ShowItemUpdate,
+        updated_at: &str,
+    ) -> Result<ShowItem, AppError> {
+        let mut conn = self
+            .pool
+            .get()
+            .map_err(|e| AppError::Database(format!("Failed to acquire connection: {e}")))?;
+
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+
+        let pres_exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM presentations WHERE id = ?1;",
+                [presentation_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| AppError::Database(format!("Failed to check presentation existence: {e}")))?;
+
+        if pres_exists == 0 {
+            return Err(AppError::not_found(
+                "presentation_not_found",
+                "Presentación no encontrada.",
+            ));
+        }
+
+        let rows_affected = match &update {
+            ShowItemUpdate::TrackTitle(title) => tx
+                .execute(
+                    "UPDATE show_items SET title = ?1 WHERE presentation_id = ?2 AND id = ?3;",
+                    params![title, presentation_id, item_id],
+                )
+                .map_err(|e| AppError::Database(format!("Failed to update track title: {e}")))?,
+            ShowItemUpdate::TextBody(body) => tx
+                .execute(
+                    "UPDATE show_items SET body = ?1 WHERE presentation_id = ?2 AND id = ?3;",
+                    params![body, presentation_id, item_id],
+                )
+                .map_err(|e| AppError::Database(format!("Failed to update text body: {e}")))?,
+        };
+
+        if rows_affected == 0 {
+            return Err(AppError::not_found(
+                "item_not_found",
+                "Elemento no encontrado en esta presentación.",
+            ));
+        }
+
+        tx.execute(
+            "UPDATE presentations SET updated_at = ?1 WHERE id = ?2;",
+            params![updated_at, presentation_id],
+        )
+        .map_err(|e| AppError::Database(format!("Failed to update presentation updated_at: {e}")))?;
+
+        let updated_item = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, presentation_id, position, kind, title, body, audio_key, media_type, byte_size, created_at
+                     FROM show_items
+                     WHERE presentation_id = ?1 AND id = ?2;",
+                )
+                .map_err(|e| AppError::Database(format!("Failed to prepare select updated item query: {e}")))?;
+
+            let mut rows = stmt
+                .query(params![presentation_id, item_id])
+                .map_err(|e| AppError::Database(format!("Failed to query updated item: {e}")))?;
+
+            if let Some(row) = rows
+                .next()
+                .map_err(|e| AppError::Database(format!("Failed to fetch updated item: {e}")))?
+            {
+                Self::row_to_item(row)?
+            } else {
+                return Err(AppError::not_found(
+                    "item_not_found",
+                    "Elemento no encontrado en esta presentación.",
+                ));
+            }
+        };
+
+        tx.commit()
+            .map_err(|e| AppError::Database(format!("Failed to commit update transaction: {e}")))?;
+
+        Ok(updated_item)
+    }
+
+    fn move_to(
+        &self,
+        presentation_id: &str,
+        item_id: &str,
+        target_position: i64,
+    ) -> Result<Vec<ShowItem>, AppError> {
+        let mut conn = self
+            .pool
+            .get()
+            .map_err(|e| AppError::Database(format!("Failed to acquire connection: {e}")))?;
+
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| AppError::Database(format!("Failed to begin immediate transaction: {e}")))?;
+
+        let pres_exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM presentations WHERE id = ?1;",
+                [presentation_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| AppError::Database(format!("Failed to check presentation existence: {e}")))?;
+
+        if pres_exists == 0 {
+            return Err(AppError::not_found(
+                "presentation_not_found",
+                "Presentación no encontrada.",
+            ));
+        }
+
+        let curr_pos: Option<i64> = tx
+            .query_row(
+                "SELECT position FROM show_items WHERE presentation_id = ?1 AND id = ?2;",
+                params![presentation_id, item_id],
+                |r| r.get(0),
+            )
+            .ok();
+
+        let curr_pos = match curr_pos {
+            Some(p) => p,
+            None => {
+                return Err(AppError::not_found(
+                    "item_not_found",
+                    "Elemento no encontrado en esta presentación.",
+                ))
+            }
+        };
+
+        let max_pos: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position), 0) FROM show_items WHERE presentation_id = ?1;",
+                [presentation_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| AppError::Database(format!("Failed to query max position: {e}")))?;
+
+        if target_position < 0 || target_position > max_pos {
+            return Err(AppError::conflict(
+                "reorder_boundary",
+                "La posición destino está fuera de los límites.",
+            ));
+        }
+
+        if target_position == curr_pos {
+            // No-op
+            return self.list_by_presentation(presentation_id);
+        }
+
+        let temp_pos = max_pos + 1000;
+
+        // Step 1: move current item to temporary safe position
+        tx.execute(
+            "UPDATE show_items SET position = ?1 WHERE presentation_id = ?2 AND id = ?3;",
+            params![temp_pos, presentation_id, item_id],
+        )
+        .map_err(|e| AppError::Database(format!("Failed to shift item to temp position: {e}")))?;
+
+        // Step 2: shift intervening items with temporal offset
+        if target_position > curr_pos {
+            // Moving down: shift items between (curr_pos + 1) and target_position down by 1 (position - 1)
+            tx.execute(
+                "UPDATE show_items SET position = position + 1000000 WHERE presentation_id = ?1 AND position > ?2 AND position <= ?3;",
+                params![presentation_id, curr_pos, target_position],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to shift range with offset: {e}")))?;
+
+            tx.execute(
+                "UPDATE show_items SET position = position - 1000000 - 1 WHERE presentation_id = ?1 AND position >= 1000000;",
+                params![presentation_id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to recompact range: {e}")))?;
+        } else {
+            // Moving up: shift items between target_position and (curr_pos - 1) up by 1 (position + 1)
+            tx.execute(
+                "UPDATE show_items SET position = position + 1000000 WHERE presentation_id = ?1 AND position >= ?2 AND position < ?3;",
+                params![presentation_id, target_position, curr_pos],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to shift range with offset: {e}")))?;
+
+            tx.execute(
+                "UPDATE show_items SET position = position - 1000000 + 1 WHERE presentation_id = ?1 AND position >= 1000000;",
+                params![presentation_id],
+            )
+            .map_err(|e| AppError::Database(format!("Failed to recompact range: {e}")))?;
+        }
+
+        // Step 3: move current item to target_position
+        tx.execute(
+            "UPDATE show_items SET position = ?1 WHERE presentation_id = ?2 AND id = ?3;",
+            params![target_position, presentation_id, item_id],
+        )
+        .map_err(|e| AppError::Database(format!("Failed to set target position: {e}")))?;
+
+        tx.commit()
+            .map_err(|e| AppError::Database(format!("Failed to commit move_to transaction: {e}")))?;
+
+        self.list_by_presentation(presentation_id)
     }
 }

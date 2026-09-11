@@ -1,8 +1,10 @@
 use std::sync::Mutex;
 
+use shirley_show::domain::presentation_summary::PresentationSummary;
 use shirley_show::domain::Presentation;
 use shirley_show::error::AppError;
 use shirley_show::ports::presentation_reader::PresentationReader;
+use shirley_show::ports::presentation_summary_reader::PresentationSummaryReader;
 use shirley_show::ports::presentation_writer::{DeleteResult, PresentationWriter};
 use shirley_show::use_cases::create_presentation::CreatePresentation;
 use shirley_show::use_cases::delete_presentation::DeletePresentation;
@@ -23,6 +25,26 @@ impl PresentationReader for MockPresentationPort {
     fn get(&self, id: &str) -> Result<Option<Presentation>, AppError> {
         let items = self.items.lock().unwrap();
         Ok(items.iter().find(|p| p.id == id).cloned())
+    }
+}
+
+impl PresentationSummaryReader for MockPresentationPort {
+    fn list_summaries(&self) -> Result<Vec<PresentationSummary>, AppError> {
+        let items = self.items.lock().unwrap();
+        Ok(items
+            .iter()
+            .map(|p| PresentationSummary {
+                id: p.id.clone(),
+                title: p.title.clone(),
+                created_at: p.created_at.clone(),
+                updated_at: p.updated_at.clone(),
+                tracks_count: 0,
+                lyrics_count: 0,
+                notes_count: 0,
+                total_items: 0,
+                preview_items: Vec::new(),
+            })
+            .collect())
     }
 }
 

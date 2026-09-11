@@ -35,7 +35,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/api/presentations/{presentation_id}/items/{item_id}",
-            axum::routing::delete(items::delete::delete),
+            patch(items::update::update).delete(items::delete::delete),
         )
         .route(
             "/api/tracks/{id}/audio",

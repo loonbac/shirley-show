@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use crate::domain::presentation_summary::PresentationSummary;
 use crate::domain::show_item::{ShowItem, ShowItemPayload};
 use crate::domain::Presentation;
+
+pub type PresentationSummaryResponse = PresentationSummary;
 
 #[derive(Debug, Deserialize)]
 pub struct CreatePresentationRequest {
@@ -15,7 +18,7 @@ pub struct RenamePresentationRequest {
 
 #[derive(Debug, Serialize)]
 pub struct ListPresentationsResponse {
-    pub presentations: Vec<Presentation>,
+    pub presentations: Vec<PresentationSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -91,8 +94,15 @@ pub struct CreateItemRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UpdateItemRequest {
+    pub title: Option<String>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct MoveItemRequest {
-    pub direction: String,
+    pub direction: Option<String>,
+    pub target_position: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]

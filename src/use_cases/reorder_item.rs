@@ -22,4 +22,13 @@ impl<W: ShowItemWriter> ReorderItem<W> {
     ) -> Result<Vec<ShowItem>, AppError> {
         self.writer.swap(presentation_id, item_id, direction)
     }
+
+    pub fn execute_target_position(
+        &self,
+        presentation_id: &str,
+        item_id: &str,
+        target_position: i64,
+    ) -> Result<Vec<ShowItem>, AppError> {
+        self.writer.move_to(presentation_id, item_id, target_position)
+    }
 }

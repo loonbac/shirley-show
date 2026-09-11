@@ -5,6 +5,7 @@ use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::domain::move_direction::MoveDirection;
 use shirley_show::domain::presentation::Presentation;
 use shirley_show::domain::show_item_kind::ShowItemKind;
+use shirley_show::error::AppError;
 use shirley_show::infra::filesystem::local_audio_storage::LocalAudioStorage;
 use shirley_show::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use shirley_show::infra::sqlite::connect::{init_pool, DbPool};
@@ -18,6 +19,7 @@ use shirley_show::use_cases::add_note::AddNote;
 use shirley_show::use_cases::delete_item::DeleteItem;
 use shirley_show::use_cases::open_track_audio::OpenTrackAudio;
 use shirley_show::use_cases::reorder_item::ReorderItem;
+use shirley_show::use_cases::update_show_item::UpdateShowItem;
 use shirley_show::use_cases::upload_track::UploadTrack;
 
 struct TestContext {
@@ -234,4 +236,104 @@ fn test_open_track_audio_use_case() {
 
     let missing_file_err = open_audio.execute(&track_item.id);
     assert!(missing_file_err.is_err());
+}
+
+#[test]
+fn test_update_show_item_use_case() {
+    let ctx = setup();
+    let pres = Presentation::new("Show to Edit").unwrap();
+    ctx.pres_repo.create(&pres).unwrap();
+
+    let upload_track = UploadTrack::new(ctx.item_repo.clone(), ctx.storage.clone());
+    let (stage_id, stage_path) = ctx.storage.create_staging_file().unwrap();
+    std::fs::write(&stage_path, b"audio sample").unwrap();
+    let track_item = upload_track
+        .execute(&pres.id, "Original Title", &stage_id, AudioFormat::Mp3, 12)
+        .unwrap();
+
+    let add_lyrics = AddLyrics::new(ctx.item_repo.clone());
+    let lyrics_item = add_lyrics.execute(&pres.id, "Original Lyrics").unwrap();
+
+    let update_uc = UpdateShowItem::new(ctx.item_repo.clone(), ctx.item_repo.clone());
+
+    // 1. Valid track update
+    let updated_track = update_uc
+        .execute(&pres.id, &track_item.id, Some("Renamed Song".into()), None)
+        .unwrap();
+    match &updated_track.payload {
+        shirley_show::domain::show_item::ShowItemPayload::Track(t) => {
+            assert_eq!(t.title, "Renamed Song");
+        }
+        _ => panic!("Expected track payload"),
+    }
+
+    // 2. Reject incompatible field on track (body instead of title)
+    let err_incompatible = update_uc
+        .execute(&pres.id, &track_item.id, None, Some("Some text".into()))
+        .unwrap_err();
+    assert!(matches!(err_incompatible, AppError::BadRequest { code: "incompatible_field", .. }));
+
+    // 3. Valid lyrics update
+    let updated_lyrics = update_uc
+        .execute(&pres.id, &lyrics_item.id, None, Some("New Lyrics".into()))
+        .unwrap();
+    match &updated_lyrics.payload {
+        shirley_show::domain::show_item::ShowItemPayload::Lyrics(l) => {
+            assert_eq!(l.body, "New Lyrics");
+        }
+        _ => panic!("Expected lyrics payload"),
+    }
+
+    // 4. Reject incompatible field on lyrics (title instead of body)
+    let err_incompatible_lyrics = update_uc
+        .execute(&pres.id, &lyrics_item.id, Some("New Title".into()), None)
+        .unwrap_err();
+    assert!(matches!(err_incompatible_lyrics, AppError::BadRequest { code: "incompatible_field", .. }));
+
+    // 5. Reject both fields provided
+    let err_both = update_uc
+        .execute(&pres.id, &track_item.id, Some("Title".into()), Some("Body".into()))
+        .unwrap_err();
+    assert!(matches!(err_both, AppError::BadRequest { code: "invalid_update_fields", .. }));
+
+    // 6. Reject empty fields provided
+    let err_none = update_uc
+        .execute(&pres.id, &track_item.id, None, None)
+        .unwrap_err();
+    assert!(matches!(err_none, AppError::BadRequest { code: "invalid_update_fields", .. }));
+
+    // 7. Reject empty string after trim
+    let err_empty = update_uc
+        .execute(&pres.id, &track_item.id, Some("   ".into()), None)
+        .unwrap_err();
+    assert!(matches!(err_empty, AppError::BadRequest { code: "empty_update_value", .. }));
+
+    // 8. 404 on missing item
+    let err_not_found = update_uc
+        .execute(&pres.id, "missing-item-id", Some("Title".into()), None)
+        .unwrap_err();
+    assert!(matches!(err_not_found, AppError::NotFound { .. }));
+}
+
+#[test]
+fn test_reorder_item_target_position_use_case() {
+    let ctx = setup();
+    let pres = Presentation::new("Reorder UC Test").unwrap();
+    ctx.pres_repo.create(&pres).unwrap();
+
+    let add_note = AddNote::new(ctx.item_repo.clone());
+    let i0 = add_note.execute(&pres.id, "Zero").unwrap();
+    let i1 = add_note.execute(&pres.id, "One").unwrap();
+    let i2 = add_note.execute(&pres.id, "Two").unwrap();
+
+    let reorder = ReorderItem::new(ctx.item_repo.clone());
+
+    // Move i2 to position 0 -> [i2, i0, i1]
+    let items = reorder.execute_target_position(&pres.id, &i2.id, 0).unwrap();
+    assert_eq!(items[0].id, i2.id);
+    assert_eq!(items[0].position, 0);
+    assert_eq!(items[1].id, i0.id);
+    assert_eq!(items[1].position, 1);
+    assert_eq!(items[2].id, i1.id);
+    assert_eq!(items[2].position, 2);
 }

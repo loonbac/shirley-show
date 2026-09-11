@@ -1,7 +1,9 @@
 use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::domain::move_direction::MoveDirection;
+use shirley_show::domain::presentation_summary::{PresentationSummary, ShowItemPreview};
 use shirley_show::domain::show_item::{LyricsPayload, NotePayload, ShowItem, ShowItemPayload, TrackPayload};
 use shirley_show::domain::show_item_kind::ShowItemKind;
+use shirley_show::domain::show_item_update::ShowItemUpdate;
 
 #[test]
 fn test_audio_format_properties() {
@@ -180,4 +182,86 @@ fn test_show_item_from_db_mappings_and_corruption() {
         "2026-03-30T00:00:00Z".into(),
     );
     assert!(err_lyrics.is_err());
+}
+
+#[test]
+fn test_show_item_update_validation_and_trim() {
+    // Valid track title with trimming
+    let update_track = ShowItemUpdate::new_track_title("  Updated Song Title  ").unwrap();
+    assert_eq!(update_track, ShowItemUpdate::TrackTitle("Updated Song Title".to_string()));
+
+    // Empty or whitespace-only track title rejected
+    let empty_track = ShowItemUpdate::new_track_title("   ");
+    assert!(empty_track.is_err());
+    let empty_track2 = ShowItemUpdate::new_track_title("");
+    assert!(empty_track2.is_err());
+
+    // Valid text body with trimming
+    let update_body = ShowItemUpdate::new_text_body("  First line\nSecond line  ").unwrap();
+    assert_eq!(update_body, ShowItemUpdate::TextBody("First line\nSecond line".to_string()));
+
+    // Empty or whitespace-only body rejected
+    let empty_body = ShowItemUpdate::new_text_body("   \n\t  ");
+    assert!(empty_body.is_err());
+    let empty_body2 = ShowItemUpdate::new_text_body("");
+    assert!(empty_body2.is_err());
+}
+
+#[test]
+fn test_presentation_summary_and_preview_serialization() {
+    let preview1 = ShowItemPreview::Track {
+        id: "item-1".into(),
+        position: 0,
+        title: "Intro Acústico".into(),
+    };
+    let preview2 = ShowItemPreview::Lyrics {
+        id: "item-2".into(),
+        position: 1,
+        snippet: "Primera estrofa normalizada...".into(),
+    };
+    let preview3 = ShowItemPreview::Note {
+        id: "item-3".into(),
+        position: 2,
+        snippet: "Cambio de afinación".into(),
+    };
+
+    let summary = PresentationSummary {
+        id: "pres-1".into(),
+        title: "Concierto Íntimo".into(),
+        created_at: "2026-03-30T10:00:00Z".into(),
+        updated_at: "2026-03-30T10:30:00Z".into(),
+        tracks_count: 1,
+        lyrics_count: 1,
+        notes_count: 1,
+        total_items: 3,
+        preview_items: vec![preview1.clone(), preview2.clone(), preview3.clone()],
+    };
+
+    let json_val = serde_json::to_value(&summary).unwrap();
+    assert_eq!(json_val["id"], "pres-1");
+    assert_eq!(json_val["title"], "Concierto Íntimo");
+    assert_eq!(json_val["tracks_count"], 1);
+    assert_eq!(json_val["lyrics_count"], 1);
+    assert_eq!(json_val["notes_count"], 1);
+    assert_eq!(json_val["total_items"], 3);
+    assert_eq!(json_val["preview_items"].as_array().unwrap().len(), 3);
+    assert_eq!(json_val["preview_items"][0]["type"], "track");
+    assert_eq!(json_val["preview_items"][0]["title"], "Intro Acústico");
+    assert_eq!(json_val["preview_items"][1]["type"], "lyrics");
+    assert_eq!(json_val["preview_items"][1]["snippet"], "Primera estrofa normalizada...");
+    assert_eq!(json_val["preview_items"][2]["type"], "note");
+    assert_eq!(json_val["preview_items"][2]["snippet"], "Cambio de afinación");
+
+    // Deserialization roundtrip
+    let deserialized: PresentationSummary = serde_json::from_value(json_val).unwrap();
+    assert_eq!(deserialized, summary);
+}
+
+#[test]
+fn test_show_item_preview_snippet_normalization() {
+    let long_text = "Line 1\nLine 2\n\n\nLine 3 with lots of additional details that should be cleanly truncated";
+    let snippet = ShowItemPreview::normalize_snippet(long_text, 60);
+    assert!(!snippet.contains('\n'));
+    assert!(snippet.chars().count() <= 60);
+    assert_eq!(ShowItemPreview::normalize_snippet("   Single   line   ", 60), "Single line");
 }
