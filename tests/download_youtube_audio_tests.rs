@@ -50,7 +50,8 @@ impl YoutubeDownloader for FakeDownloader {
         &self,
         _url: YouTubeUrl,
         target: YoutubeDownloadTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>>
+    {
         if let Some(err) = self.fail_with_error.clone() {
             return Box::pin(async move { Err(err) });
         }
@@ -110,7 +111,8 @@ async fn test_title_fallback_hierarchy() {
 
     // 1. Requested title takes precedence when non-empty
     let downloader1 = Arc::new(FakeDownloader::new("Metadata Title", 180, 1024));
-    let use_case1 = DownloadYouTubeAudio::new(downloader1, ctx.storage.clone(), ctx.registry.clone());
+    let use_case1 =
+        DownloadYouTubeAudio::new(downloader1, ctx.storage.clone(), ctx.registry.clone());
     let out1 = use_case1
         .execute(
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -122,7 +124,8 @@ async fn test_title_fallback_hierarchy() {
 
     // 2. Requested title is whitespace -> fallback to metadata title
     let downloader2 = Arc::new(FakeDownloader::new("  Metadata Title From YT  ", 180, 1024));
-    let use_case2 = DownloadYouTubeAudio::new(downloader2, ctx.storage.clone(), ctx.registry.clone());
+    let use_case2 =
+        DownloadYouTubeAudio::new(downloader2, ctx.storage.clone(), ctx.registry.clone());
     let out2 = use_case2
         .execute(
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -134,7 +137,8 @@ async fn test_title_fallback_hierarchy() {
 
     // 3. Requested title is None and metadata title is whitespace -> fallback to 11-char video ID
     let downloader3 = Arc::new(FakeDownloader::new("    ", 180, 1024));
-    let use_case3 = DownloadYouTubeAudio::new(downloader3, ctx.storage.clone(), ctx.registry.clone());
+    let use_case3 =
+        DownloadYouTubeAudio::new(downloader3, ctx.storage.clone(), ctx.registry.clone());
     let out3 = use_case3
         .execute("https://www.youtube.com/watch?v=dQw4w9WgXcQ", None)
         .await
@@ -142,8 +146,13 @@ async fn test_title_fallback_hierarchy() {
     assert_eq!(out3.title, "dQw4w9WgXcQ");
 
     // 4. Sanitization: control characters stripped and collapsed spaces
-    let downloader4 = Arc::new(FakeDownloader::new("Raw\x00 Title\r\n\tWith\x1bControls", 180, 1024));
-    let use_case4 = DownloadYouTubeAudio::new(downloader4, ctx.storage.clone(), ctx.registry.clone());
+    let downloader4 = Arc::new(FakeDownloader::new(
+        "Raw\x00 Title\r\n\tWith\x1bControls",
+        180,
+        1024,
+    ));
+    let use_case4 =
+        DownloadYouTubeAudio::new(downloader4, ctx.storage.clone(), ctx.registry.clone());
     let out4 = use_case4
         .execute("https://www.youtube.com/watch?v=dQw4w9WgXcQ", None)
         .await
@@ -170,13 +179,18 @@ async fn test_download_success_registers_in_staging_and_registry() {
     // Assert that the audio can be reserved from the registry
     let lease = ctx.registry.reserve(&out.staged_audio_id).unwrap();
     assert_eq!(lease.title, "My Song");
-    assert!(lease.file_path.exists(), "Staged .part file must exist on disk");
+    assert!(
+        lease.file_path.exists(),
+        "Staged .part file must exist on disk"
+    );
 }
 
 #[tokio::test]
 async fn test_download_failure_purges_staging_file() {
     let ctx = TestContext::new();
-    let downloader = Arc::new(FakeDownloader::failing(YoutubeDownloadError::DownloadTimeout));
+    let downloader = Arc::new(FakeDownloader::failing(
+        YoutubeDownloadError::DownloadTimeout,
+    ));
     let use_case = DownloadYouTubeAudio::new(downloader, ctx.storage.clone(), ctx.registry.clone());
 
     let err = use_case
@@ -214,8 +228,14 @@ fn test_staged_promotion_guard_reversion_on_drop() {
     }
 
     // Reversion must move dest_path BACK to stage_path
-    assert!(stage_path.exists(), "Staged file must be safely restored to staging on guard drop");
-    assert!(!dest_path.exists(), "Promoted file must not remain in files directory");
+    assert!(
+        stage_path.exists(),
+        "Staged file must be safely restored to staging on guard drop"
+    );
+    assert!(
+        !dest_path.exists(),
+        "Promoted file must not remain in files directory"
+    );
 }
 
 #[test]
@@ -234,7 +254,10 @@ fn test_staged_promotion_guard_persists_on_defuse() {
     }
 
     assert!(!stage_path.exists());
-    assert!(dest_path.exists(), "Promoted file must remain in files dir when defused");
+    assert!(
+        dest_path.exists(),
+        "Promoted file must remain in files dir when defused"
+    );
 }
 
 #[test]

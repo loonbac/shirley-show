@@ -71,9 +71,9 @@ impl AppState {
 
     pub fn new_with_items(pool: DbPool, storage: Arc<LocalAudioStorage>) -> Self {
         let staged_audio_registry = Arc::new(StagedAudioRegistry::new());
-        let youtube_downloader: Arc<dyn YoutubeDownloader> = Arc::new(ProcessYoutubeDownloader::new(
-            ProcessYoutubeDownloaderConfig::default(),
-        ));
+        let youtube_downloader: Arc<dyn YoutubeDownloader> = Arc::new(
+            ProcessYoutubeDownloader::new(ProcessYoutubeDownloaderConfig::default()),
+        );
         Self::new_with_all_components(pool, storage, staged_audio_registry, youtube_downloader)
     }
 

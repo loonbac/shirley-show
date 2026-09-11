@@ -27,9 +27,10 @@ impl YouTubeUrlError {
         match self {
             Self::InvalidCharacters => "invalid_characters",
             Self::InvalidVideoId => "invalid_video_id",
-            Self::UnsupportedHost | Self::UnsupportedPath | Self::InvalidScheme | Self::Malformed => {
-                "unsupported_url"
-            }
+            Self::UnsupportedHost
+            | Self::UnsupportedPath
+            | Self::InvalidScheme
+            | Self::Malformed => "unsupported_url",
         }
     }
 
@@ -39,7 +40,10 @@ impl YouTubeUrlError {
             Self::InvalidVideoId => {
                 "El enlace no contiene un identificador de video válido de 11 caracteres"
             }
-            Self::UnsupportedHost | Self::UnsupportedPath | Self::InvalidScheme | Self::Malformed => {
+            Self::UnsupportedHost
+            | Self::UnsupportedPath
+            | Self::InvalidScheme
+            | Self::Malformed => {
                 "Solo se admiten enlaces públicos de YouTube (youtube.com o youtu.be)"
             }
         }

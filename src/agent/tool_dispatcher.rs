@@ -448,10 +448,9 @@ impl AgentToolDispatcher {
                                 lease.size_bytes as i64,
                             ) {
                                 Ok(item) => {
-                                    let _ = self.staged_audio_registry.commit_consumed(
-                                        &lease.staged_audio_id,
-                                        &lease.lease_id,
-                                    );
+                                    let _ = self
+                                        .staged_audio_registry
+                                        .commit_consumed(&lease.staged_audio_id, &lease.lease_id);
                                     context.set_staged_audio_id(None);
 
                                     let res = json!({
@@ -478,10 +477,9 @@ impl AgentToolDispatcher {
                                     res
                                 }
                                 Err(e) => {
-                                    let _ = self.staged_audio_registry.release(
-                                        &lease.staged_audio_id,
-                                        &lease.lease_id,
-                                    );
+                                    let _ = self
+                                        .staged_audio_registry
+                                        .release(&lease.staged_audio_id, &lease.lease_id);
                                     json!({
                                         "error": "track_upload_failed",
                                         "message": e.to_string()

@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::process::Stdio;
 use std::time::Duration;
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{self, AsyncReadExt};
 use tokio::process::Command;
 
 use crate::domain::youtube_url::YouTubeUrl;
@@ -67,7 +67,8 @@ impl YoutubeDownloader for ProcessYoutubeDownloader {
         &self,
         url: YouTubeUrl,
         target: YoutubeDownloadTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>>
+    {
         let config = self.config.clone();
 
         Box::pin(async move {
@@ -136,19 +137,26 @@ impl YoutubeDownloader for ProcessYoutubeDownloader {
                 .and_then(|c| c.stderr.take())
                 .ok_or(YoutubeDownloadError::DownloadFailed)?;
 
-            let wait_fut = async {
+            // Drain stdout and stderr concurrently with child execution by spawning reader tasks before wait
+            let stdout_task = tokio::spawn(async move {
                 let mut stdout_buf = Vec::new();
+                let mut stdout_take = (&mut stdout_pipe).take(1024 * 1024);
+                let _ = stdout_take.read_to_end(&mut stdout_buf).await;
+                let mut sink = io::sink();
+                let _ = io::copy(&mut stdout_pipe, &mut sink).await;
+                stdout_buf
+            });
+
+            let stderr_task = tokio::spawn(async move {
                 let mut stderr_buf = Vec::new();
+                let mut stderr_take = (&mut stderr_pipe).take(1024 * 1024);
+                let _ = stderr_take.read_to_end(&mut stderr_buf).await;
+                let mut sink = io::sink();
+                let _ = io::copy(&mut stderr_pipe, &mut sink).await;
+                stderr_buf
+            });
 
-                let read_fut = async {
-                    let mut stdout_take = (&mut stdout_pipe).take(1024 * 1024);
-                    let mut stderr_take = (&mut stderr_pipe).take(1024 * 1024);
-                    let _ = tokio::join!(
-                        stdout_take.read_to_end(&mut stdout_buf),
-                        stderr_take.read_to_end(&mut stderr_buf)
-                    );
-                };
-
+            let wait_fut = async {
                 let status = match guard.child_mut() {
                     Some(c) => c.wait().await,
                     None => {
@@ -156,7 +164,8 @@ impl YoutubeDownloader for ProcessYoutubeDownloader {
                     }
                 };
 
-                read_fut.await;
+                let stdout_buf = stdout_task.await.unwrap_or_default();
+                let stderr_buf = stderr_task.await.unwrap_or_default();
                 Ok((status, stdout_buf, stderr_buf))
             };
 
@@ -186,7 +195,9 @@ impl YoutubeDownloader for ProcessYoutubeDownloader {
 
             if !status_ok {
                 guard.kill_and_wait().await;
-                if stderr_str.contains("duration <= 1200") || stdout_str.contains("duration <= 1200") {
+                if stderr_str.contains("duration <= 1200")
+                    || stdout_str.contains("duration <= 1200")
+                {
                     return Err(YoutubeDownloadError::DurationExceeded);
                 }
                 if stderr_str.contains("max-filesize") || stdout_str.contains("max-filesize") {
@@ -266,7 +277,12 @@ impl YoutubeDownloader for ProcessYoutubeDownloader {
             }
 
             // 6. Real duration verification using ffprobe
-            let ffprobe_duration = run_ffprobe_duration(&target.staging_dir, &target.stage_id, binary.prepended_path.as_deref()).await;
+            let ffprobe_duration = run_ffprobe_duration(
+                &target.staging_dir,
+                &target.stage_id,
+                binary.prepended_path.as_deref(),
+            )
+            .await;
             let duration_secs = match ffprobe_duration {
                 Ok(dur) if dur > 0.0 && dur <= 1200.0 => dur.ceil() as u32,
                 _ => {

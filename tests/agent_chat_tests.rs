@@ -56,7 +56,8 @@ impl YoutubeDownloader for FakeDownloader {
         &self,
         _url: YouTubeUrl,
         target: YoutubeDownloadTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>>
+    {
         if let Some(err) = self.fail_with_error.clone() {
             return Box::pin(async move { Err(err) });
         }
@@ -67,8 +68,11 @@ impl YoutubeDownloader for FakeDownloader {
 
         Box::pin(async move {
             let part_path = target.staging_dir.join(format!("{}.part", target.stage_id));
-            std::fs::write(&part_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
-                .expect("write fake mp3 part");
+            std::fs::write(
+                &part_path,
+                &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+            )
+            .expect("write fake mp3 part");
 
             Ok(DownloadedYoutubeAudio {
                 title,
@@ -516,7 +520,10 @@ fn test_system_prompt_never_assumes_intent_and_never_fetches_lyrics() {
 #[tokio::test]
 async fn test_agent_chat_same_turn_chaining_download_and_add_track_when_presentation_active() {
     let (state, _tmp) = setup_test_state();
-    let pres = state.create_presentation.execute("Peña Folclórica").unwrap();
+    let pres = state
+        .create_presentation
+        .execute("Peña Folclórica")
+        .unwrap();
     let state = state.with_youtube_downloader(Arc::new(FakeDownloader::new(
         "Zamba de mi Esperanza",
         180,
@@ -532,7 +539,8 @@ async fn test_agent_chat_same_turn_chaining_download_and_add_track_when_presenta
         fn complete(
             &self,
             request: CompletionRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>> {
+        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>>
+        {
             let pres_id = self.pres_id.clone();
             let iter = self.iter.clone();
             Box::pin(async move {
@@ -544,7 +552,9 @@ async fn test_agent_chat_same_turn_chaining_download_and_add_track_when_presenta
                         tool_calls: vec![ToolCall {
                             id: "call_dl_1".to_string(),
                             name: "download_youtube_track".to_string(),
-                            arguments: json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }).to_string(),
+                            arguments:
+                                json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" })
+                                    .to_string(),
                         }],
                     })
                 } else if *i == 2 {
@@ -552,7 +562,8 @@ async fn test_agent_chat_same_turn_chaining_download_and_add_track_when_presenta
                     for m in &request.messages {
                         if let AgentMessage::Tool { content, .. } = m {
                             if let Ok(v) = serde_json::from_str::<serde_json::Value>(content) {
-                                if let Some(id) = v.get("staged_audio_id").and_then(|s| s.as_str()) {
+                                if let Some(id) = v.get("staged_audio_id").and_then(|s| s.as_str())
+                                {
                                     staged_id = Some(id.to_string());
                                 }
                             }
@@ -567,12 +578,16 @@ async fn test_agent_chat_same_turn_chaining_download_and_add_track_when_presenta
                                 "presentation_id": pres_id,
                                 "title": "Zamba de mi Esperanza",
                                 "staged_audio_id": staged_id,
-                            }).to_string(),
+                            })
+                            .to_string(),
                         }],
                     })
                 } else {
                     Ok(CompletionResponse {
-                        content: Some("Descargué el audio y lo agregué a la presentación Peña Folclórica.".to_string()),
+                        content: Some(
+                            "Descargué el audio y lo agregué a la presentación Peña Folclórica."
+                                .to_string(),
+                        ),
                         tool_calls: vec![],
                     })
                 }
@@ -591,7 +606,9 @@ async fn test_agent_chat_same_turn_chaining_download_and_add_track_when_presenta
     );
 
     let input = AgentChatInput {
-        message: "Descarga este video https://www.youtube.com/watch?v=dQw4w9WgXcQ y agrégalo como pista".to_string(),
+        message:
+            "Descarga este video https://www.youtube.com/watch?v=dQw4w9WgXcQ y agrégalo como pista"
+                .to_string(),
         history: vec![],
         presentation_id: Some(pres.id.clone()),
         staged_audio_id: None,
@@ -603,8 +620,15 @@ async fn test_agent_chat_same_turn_chaining_download_and_add_track_when_presenta
     assert_eq!(output.actions_taken.len(), 2);
     assert_eq!(output.actions_taken[0].tool, "download_youtube_track");
     assert_eq!(output.actions_taken[1].tool, "add_track_from_staged");
-    assert_eq!(output.staged_audio_id, None, "staged_audio_id should be cleared when consumed in same turn");
-    assert!(output.message.contains("preparado") || output.message.contains("descargado") || output.message.contains("Pista"));
+    assert_eq!(
+        output.staged_audio_id, None,
+        "staged_audio_id should be cleared when consumed in same turn"
+    );
+    assert!(
+        output.message.contains("preparado")
+            || output.message.contains("descargado")
+            || output.message.contains("Pista")
+    );
     assert!(output.message.contains("añadida") || output.message.contains("agreg"));
 
     let items = state.item_repo.list_by_presentation(&pres.id).unwrap();
@@ -656,7 +680,10 @@ async fn test_agent_chat_stop_with_question_when_no_active_presentation_emits_st
     let output = agent_chat.execute(input).await;
     assert_eq!(output.actions_taken.len(), 1);
     assert_eq!(output.actions_taken[0].tool, "download_youtube_track");
-    assert!(output.staged_audio_id.is_some(), "Must emit staged_audio_id in output");
+    assert!(
+        output.staged_audio_id.is_some(),
+        "Must emit staged_audio_id in output"
+    );
     let staged_id = output.staged_audio_id.unwrap();
     assert!(staged_id.starts_with("staged-"));
     assert!(output.message.to_lowercase().contains("presentación"));
@@ -666,10 +693,17 @@ async fn test_agent_chat_stop_with_question_when_no_active_presentation_emits_st
 #[tokio::test]
 async fn test_agent_chat_second_turn_consumes_structured_staged_audio_id() {
     let (state, _tmp) = setup_test_state();
-    let pres = state.create_presentation.execute("Repertorio Final").unwrap();
+    let pres = state
+        .create_presentation
+        .execute("Repertorio Final")
+        .unwrap();
 
     let (stage_id, stage_path) = state.storage.create_staging_file().unwrap();
-    std::fs::write(&stage_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    std::fs::write(
+        &stage_path,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
     let desc = state.staged_audio_registry.register(
         stage_id,
         stage_path,
@@ -691,7 +725,8 @@ async fn test_agent_chat_second_turn_consumes_structured_staged_audio_id() {
                     "presentation_id": pres.id,
                     "title": "Audio Previo",
                     "staged_audio_id": staged_id.clone(),
-                }).to_string(),
+                })
+                .to_string(),
             }],
         }),
         Ok(CompletionResponse {
@@ -710,8 +745,14 @@ async fn test_agent_chat_second_turn_consumes_structured_staged_audio_id() {
     let input = AgentChatInput {
         message: "Agrégalo a Repertorio Final".to_string(),
         history: vec![
-            HistoryMessage { role: "user".to_string(), content: "Descarga el tema".to_string() },
-            HistoryMessage { role: "assistant".to_string(), content: "Audio preparado. ¿A qué presentación deseas agregarlo?".to_string() },
+            HistoryMessage {
+                role: "user".to_string(),
+                content: "Descarga el tema".to_string(),
+            },
+            HistoryMessage {
+                role: "assistant".to_string(),
+                content: "Audio preparado. ¿A qué presentación deseas agregarlo?".to_string(),
+            },
         ],
         presentation_id: Some(pres.id.clone()),
         staged_audio_id: Some(staged_id),
@@ -722,7 +763,10 @@ async fn test_agent_chat_second_turn_consumes_structured_staged_audio_id() {
     let output = agent_chat.execute(input).await;
     assert_eq!(output.actions_taken.len(), 1);
     assert_eq!(output.actions_taken[0].tool, "add_track_from_staged");
-    assert_eq!(output.staged_audio_id, None, "staged_audio_id must be cleared after addition");
+    assert_eq!(
+        output.staged_audio_id, None,
+        "staged_audio_id must be cleared after addition"
+    );
     assert!(output.message.contains("Pista “Audio Previo” añadida"));
 
     let items = state.item_repo.list_by_presentation(&pres.id).unwrap();
@@ -738,8 +782,14 @@ async fn test_agent_chat_second_turn_consumes_structured_staged_audio_id() {
 #[tokio::test]
 async fn test_agent_chat_clarification_on_ambiguous_presentation_names() {
     let (state, _tmp) = setup_test_state();
-    let _pres1 = state.create_presentation.execute("Festival de Verano - Tarde").unwrap();
-    let _pres2 = state.create_presentation.execute("Festival de Verano - Noche").unwrap();
+    let _pres1 = state
+        .create_presentation
+        .execute("Festival de Verano - Tarde")
+        .unwrap();
+    let _pres2 = state
+        .create_presentation
+        .execute("Festival de Verano - Noche")
+        .unwrap();
 
     let dispatcher = AgentToolDispatcher::new(state.clone());
 
@@ -789,7 +839,9 @@ async fn test_agent_chat_grounding_suppresses_false_claims_without_tool_executio
     // The model hallucinates in text that it downloaded the YouTube video and added the track,
     // but did NOT invoke any tool calls!
     let provider = Arc::new(StubChatProvider::new(vec![Ok(CompletionResponse {
-        content: Some("Ya descargué el video de YouTube y agregué la pista a tu presentación.".to_string()),
+        content: Some(
+            "Ya descargué el video de YouTube y agregué la pista a tu presentación.".to_string(),
+        ),
         tool_calls: vec![],
     })]));
 
@@ -814,7 +866,11 @@ async fn test_agent_chat_grounding_suppresses_false_claims_without_tool_executio
     // Grounding must suppress false completion claim
     assert!(!output.message.contains("agregué la pista"));
     assert!(!output.message.contains("descargué el video"));
-    assert!(output.message.contains("No se completaron acciones en este turno"));
+    assert!(
+        output
+            .message
+            .contains("No se completaron acciones en este turno")
+    );
 }
 
 #[tokio::test]
@@ -832,10 +888,13 @@ async fn test_agent_chat_download_error_downloader_not_configured_returns_friend
         fn complete(
             &self,
             request: CompletionRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>> {
+        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>>
+        {
             Box::pin(async move {
                 let has_tool_error = request.messages.iter().any(|m| match m {
-                    AgentMessage::Tool { content, .. } => content.contains("downloader_not_configured"),
+                    AgentMessage::Tool { content, .. } => {
+                        content.contains("downloader_not_configured")
+                    }
                     _ => false,
                 });
 
@@ -845,7 +904,9 @@ async fn test_agent_chat_download_error_downloader_not_configured_returns_friend
                         tool_calls: vec![ToolCall {
                             id: "call_fail_cfg".to_string(),
                             name: "download_youtube_track".to_string(),
-                            arguments: json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }).to_string(),
+                            arguments:
+                                json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" })
+                                    .to_string(),
                         }],
                     })
                 } else {
@@ -895,7 +956,8 @@ async fn test_agent_chat_download_error_timeout_returns_friendly_message() {
         fn complete(
             &self,
             request: CompletionRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>> {
+        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>>
+        {
             Box::pin(async move {
                 let has_tool_error = request.messages.iter().any(|m| match m {
                     AgentMessage::Tool { content, .. } => content.contains("download_timeout"),
@@ -908,12 +970,17 @@ async fn test_agent_chat_download_error_timeout_returns_friendly_message() {
                         tool_calls: vec![ToolCall {
                             id: "call_fail_to".to_string(),
                             name: "download_youtube_track".to_string(),
-                            arguments: json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }).to_string(),
+                            arguments:
+                                json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" })
+                                    .to_string(),
                         }],
                     })
                 } else {
                     Ok(CompletionResponse {
-                        content: Some("La descarga tardó demasiado tiempo y fue cancelada por seguridad.".to_string()),
+                        content: Some(
+                            "La descarga tardó demasiado tiempo y fue cancelada por seguridad."
+                                .to_string(),
+                        ),
                         tool_calls: vec![],
                     })
                 }
@@ -939,7 +1006,9 @@ async fn test_agent_chat_download_error_timeout_returns_friendly_message() {
 
     let output = agent_chat.execute(input).await;
     assert_eq!(output.actions_taken.len(), 0);
-    assert!(output.message.contains("tardó demasiado tiempo") || output.message.contains("cancelada"));
+    assert!(
+        output.message.contains("tardó demasiado tiempo") || output.message.contains("cancelada")
+    );
     assert!(!output.message.contains("kill-and-wait"));
     assert!(!output.message.contains("SIGKILL"));
     assert!(!output.message.contains("/staging/"));

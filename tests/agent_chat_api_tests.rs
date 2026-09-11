@@ -555,13 +555,22 @@ fn test_config_reads_yt_dlp_bin_and_agent_timeout_secs() {
 
         // 4. Invalid SHIRLEY_AGENT_TIMEOUT_SECS values rejected
         std::env::set_var("SHIRLEY_AGENT_TIMEOUT_SECS", "0");
-        assert!(Config::from_env().is_err(), "0 seconds timeout must be rejected");
+        assert!(
+            Config::from_env().is_err(),
+            "0 seconds timeout must be rejected"
+        );
 
         std::env::set_var("SHIRLEY_AGENT_TIMEOUT_SECS", "-5");
-        assert!(Config::from_env().is_err(), "negative timeout must be rejected");
+        assert!(
+            Config::from_env().is_err(),
+            "negative timeout must be rejected"
+        );
 
         std::env::set_var("SHIRLEY_AGENT_TIMEOUT_SECS", "invalid_number");
-        assert!(Config::from_env().is_err(), "non-numeric timeout must be rejected");
+        assert!(
+            Config::from_env().is_err(),
+            "non-numeric timeout must be rejected"
+        );
 
         // Clean up
         std::env::remove_var("YT_DLP_BIN");
@@ -692,7 +701,9 @@ impl ChatCompletionProvider for DelayedChainedProvider {
                 > + Send,
         >,
     > {
-        let count = self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let count = self
+            .call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Box::pin(async move {
             if count == 0 {
                 // Turn 1: create presentation
@@ -729,11 +740,8 @@ async fn test_chat_api_unified_deadline_preserves_actions_and_returns_200_on_tim
         max_iterations: 5,
         request_timeout: Duration::from_millis(150),
     };
-    let state = state.with_agent_provider(
-        Some(provider),
-        limits,
-        "openai/gpt-oss-120b".to_string(),
-    );
+    let state =
+        state.with_agent_provider(Some(provider), limits, "openai/gpt-oss-120b".to_string());
     let app = create_router(state);
 
     let payload = json!({
@@ -758,15 +766,26 @@ async fn test_chat_api_unified_deadline_preserves_actions_and_returns_200_on_tim
     assert_eq!(json["notice"]["retryable"], true);
 
     // 2. Actions committed before timeout MUST be preserved!
-    let actions = json["actions_taken"].as_array().expect("actions_taken array");
-    assert_eq!(actions.len(), 1, "create_presentation must be preserved in actions_taken");
+    let actions = json["actions_taken"]
+        .as_array()
+        .expect("actions_taken array");
+    assert_eq!(
+        actions.len(),
+        1,
+        "create_presentation must be preserved in actions_taken"
+    );
     assert_eq!(actions[0]["tool"], "create_presentation");
 
     // 3. Message reports committed actions and timeout notice without hardcoded "(30 s)"
     let message = json["message"].as_str().expect("message string");
     assert!(
-        message.contains("Show Deadline Test") || message.contains("creada") || message.contains("creé"),
+        message.contains("Show Deadline Test")
+            || message.contains("creada")
+            || message.contains("creé"),
         "Message must reflect committed action"
     );
-    assert!(!message.contains("(30 s)"), "Message must not hardcode (30 s)");
+    assert!(
+        !message.contains("(30 s)"),
+        "Message must not hardcode (30 s)"
+    );
 }

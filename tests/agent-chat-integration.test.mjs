@@ -248,4 +248,119 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   console.log('✓ 6. Spoofed or non-youtube host retains general thinking label');
 }
 
+// 7. REGRESSION: Unrelated command clears staged capability and does NOT forward stale ID
+{
+  const state = createChatState({ stagedAudioId: 'staged-old-cap-to-invalidate' });
+  let interceptedPayload = null;
+
+  globalThis.fetch = async (_url, opts) => {
+    interceptedPayload = JSON.parse(opts.body);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ message: 'ok', actions_taken: [] }),
+    };
+  };
+
+  const ctrl = createAgentChatController({ chatState: state });
+  await ctrl.sendAndOpen('Crea una presentación para el show');
+
+  assert.equal(
+    interceptedPayload.staged_audio_id,
+    null,
+    'Stale staged_audio_id must be null in dispatch payload for unrelated command'
+  );
+  assert.equal(
+    state.get().stagedAudioId,
+    null,
+    'Chat state stagedAudioId must be cleared'
+  );
+
+  ctrl.destroy();
+  console.log('✓ 7. Unrelated command invalidates capability and sends null staged_audio_id');
+}
+
+// 8. REGRESSION: 3s timer typing indicator specializes only for YouTube URLs
+{
+  // 8a. Non-YouTube slow command retains generic thinking label after 3.1s
+  {
+    const state = createChatState();
+    let resolveFetch;
+    globalThis.fetch = () =>
+      new Promise((res) => {
+        resolveFetch = () =>
+          res({
+            ok: true,
+            status: 200,
+            headers: { get: () => 'application/json' },
+            json: async () => ({ message: 'ok', actions_taken: [] }),
+          });
+      });
+
+    const ctrl = createAgentChatController({ chatState: state });
+    const pendingPromise = ctrl.sendAndOpen('Lista mis presentaciones');
+
+    // Wait >3s to let timer fire
+    await new Promise((r) => setTimeout(r, 3100));
+
+    const typingEl = ctrl.panelEl.querySelector('.agent-typing-indicator');
+    assert.ok(typingEl !== null, 'Typing indicator must be present while pending');
+    assert.equal(
+      typingEl.getAttribute('aria-label'),
+      'Ressy está pensando...',
+      'Non-YouTube slow request must retain generic label'
+    );
+    assert.ok(
+      !typingEl.textContent.includes('descargando el audio'),
+      'Non-YouTube slow request must never show download label'
+    );
+
+    resolveFetch();
+    await pendingPromise;
+    ctrl.destroy();
+  }
+
+  // 8b. YouTube slow command shows specialized download label after 3.1s
+  {
+    const state = createChatState();
+    let resolveFetch;
+    globalThis.fetch = () =>
+      new Promise((res) => {
+        resolveFetch = () =>
+          res({
+            ok: true,
+            status: 200,
+            headers: { get: () => 'application/json' },
+            json: async () => ({ message: 'ok', actions_taken: [] }),
+          });
+      });
+
+    const ctrl = createAgentChatController({ chatState: state });
+    const pendingPromise = ctrl.sendAndOpen(
+      'Descarga https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    );
+
+    await new Promise((r) => setTimeout(r, 3100));
+
+    const typingEl = ctrl.panelEl.querySelector('.agent-typing-indicator');
+    assert.ok(typingEl !== null, 'Typing indicator must be present while pending');
+    assert.equal(
+      typingEl.getAttribute('aria-label'),
+      'Ressy está descargando el audio…',
+      'YouTube slow request must show download label'
+    );
+    assert.ok(
+      typingEl.textContent.includes('descargando el audio…'),
+      'YouTube slow request must include download label text'
+    );
+
+    resolveFetch();
+    await pendingPromise;
+    ctrl.destroy();
+  }
+
+  console.log('✓ 8. 3s timer typing indicator specializes only for YouTube URLs');
+}
+
 console.log('All Agent Chat Route and Composition integration tests passed!');

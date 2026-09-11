@@ -55,12 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     ));
 
-    let mut state = AppState::new_with_all_components(
-        pool,
-        storage,
-        staged_audio_registry,
-        youtube_downloader,
-    );
+    let mut state =
+        AppState::new_with_all_components(pool, storage, staged_audio_registry, youtube_downloader);
     state.frontend_dir = config.frontend_dir;
 
     let agent_limits = AgentLimits {
@@ -86,11 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        state = state.with_agent_provider(
-            None,
-            agent_limits,
-            config.groq.model.clone(),
-        );
+        state = state.with_agent_provider(None, agent_limits, config.groq.model.clone());
         println!("Asistente Ressy en modo no configurado (GROQ_API_KEY no detectada).");
     }
 

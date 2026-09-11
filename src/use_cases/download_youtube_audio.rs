@@ -92,7 +92,8 @@ impl DownloadYouTubeAudio {
 
         // 2. Reserve a stage_id and guard the staging file
         let (stage_id, stage_path) = self.storage.create_staging_file()?;
-        let guard = StagingFileGuard::new(self.storage.clone(), stage_id.clone(), stage_path.clone());
+        let guard =
+            StagingFileGuard::new(self.storage.clone(), stage_id.clone(), stage_path.clone());
 
         // 3. Invoke downloader port with canonical URL and internal target
         let target = YoutubeDownloadTarget {
@@ -100,12 +101,15 @@ impl DownloadYouTubeAudio {
             staging_dir: self.storage.staging_dir().to_path_buf(),
         };
 
-        let downloaded: DownloadedYoutubeAudio =
-            self.downloader.download(youtube_url.clone(), target).await?;
+        let downloaded: DownloadedYoutubeAudio = self
+            .downloader
+            .download(youtube_url.clone(), target)
+            .await?;
 
         // 4. Resolve and sanitize title:
         //    requested title (if non-empty) > metadata title (if non-empty) > 11-character video ID
-        let final_title = self.resolve_title(requested_title, &downloaded.title, youtube_url.video_id());
+        let final_title =
+            self.resolve_title(requested_title, &downloaded.title, youtube_url.video_id());
 
         // 5. Transfer cleanup responsibility to registry by defusing the staging guard
         guard.defuse();

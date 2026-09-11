@@ -2,6 +2,7 @@ import { createAgentChatPanel } from '../components/organisms/agent-chat-panel.j
 import { sendAgentChatMessage } from '../data/agent-chat-api.js';
 import { emitAgentRefresh } from '../core/state/agent-refresh.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
+import { containsYouTubeUrl } from '../utils/validation/contains-youtube-url.js';
 
 let activeAgentChatController = null;
 
@@ -83,27 +84,33 @@ export function createAgentChatController(deps) {
   });
 
   async function handleSend(userMessage) {
-    const currentState = chatState.get();
-    if (currentState.pending) return;
+    const priorState = chatState.get();
+    if (priorState.pending) return;
 
-    const stagedAudioId = currentState.stagedAudioId;
-    const attachment = currentState.attachment;
+    const attachment = priorState.attachment;
     const turn = chatState.beginTurn({
       message: userMessage,
       attachment,
     });
 
+    const stagedAudioId = chatState.get().stagedAudioId;
+
     // Prune history for the backend: extract only textual user & assistant messages
-    const history = currentState.messages
+    const history = priorState.messages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
 
-    const presentationId = currentState.activeContext ? currentState.activeContext.id : null;
+    const presentationId = priorState.activeContext ? priorState.activeContext.id : null;
 
-    // >3s wait timer: update typing indicator label if request takes >3s
+    // >3s wait timer: update typing indicator label if request takes >3s and contains YouTube URL;
+    // otherwise preserve standard thinking label
     const waitTimer = setTimeout(() => {
       if (chatState.get().pending) {
-        panel.update({ pendingLabel: 'Ressy está descargando el audio…' });
+        if (containsYouTubeUrl(userMessage)) {
+          panel.update({ pendingLabel: 'Ressy está descargando el audio…' });
+        } else {
+          panel.update({ pendingLabel: 'Ressy está pensando...' });
+        }
       }
     }, 3000);
 

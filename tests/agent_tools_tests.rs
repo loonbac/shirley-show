@@ -51,7 +51,8 @@ impl YoutubeDownloader for FakeDownloader {
         &self,
         _url: YouTubeUrl,
         target: YoutubeDownloadTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>> {
+    ) -> Pin<Box<dyn Future<Output = Result<DownloadedYoutubeAudio, YoutubeDownloadError>> + Send>>
+    {
         if let Some(err) = self.fail_with_error.clone() {
             return Box::pin(async move { Err(err) });
         }
@@ -392,7 +393,9 @@ async fn test_dispatcher_staged_audio_track_lifecycle() {
         })
         .to_string(),
     };
-    let res3 = dispatcher.dispatch(&track_call_no_audio, &mut empty_context).await;
+    let res3 = dispatcher
+        .dispatch(&track_call_no_audio, &mut empty_context)
+        .await;
     assert_eq!(res3["error"], "no_audio_staged");
 }
 
@@ -487,7 +490,8 @@ async fn test_dispatcher_rejects_unknown_fields_in_tool_arguments() {
     let call_yt = ToolCall {
         id: "call_extra_5".to_string(),
         name: "download_youtube_track".to_string(),
-        arguments: json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "extra": 123 }).to_string(),
+        arguments: json!({ "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "extra": 123 })
+            .to_string(),
     };
     let res_yt = dispatcher.dispatch(&call_yt, &mut context).await;
     assert_eq!(res_yt["error"], "validation_error");
@@ -560,7 +564,10 @@ async fn test_dispatcher_download_youtube_track_success_and_deduplication() {
 #[tokio::test]
 async fn test_dispatcher_download_youtube_track_chained_with_add_track_from_staged() {
     let (state, _tmp) = setup_test_state();
-    let pres = state.create_presentation.execute("Repertorio Peña").unwrap();
+    let pres = state
+        .create_presentation
+        .execute("Repertorio Peña")
+        .unwrap();
     let state = state.with_youtube_downloader(Arc::new(FakeDownloader::new(
         "Chacarera del 55",
         150,
@@ -627,7 +634,11 @@ async fn test_dispatcher_add_track_from_staged_with_explicit_staged_audio_id() {
 
     // Register an audio file directly in registry
     let (stage_id, stage_path) = state.storage.create_staging_file().unwrap();
-    std::fs::write(&stage_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    std::fs::write(
+        &stage_path,
+        &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00],
+    )
+    .unwrap();
 
     let descriptor = state.staged_audio_registry.register(
         stage_id,

@@ -367,7 +367,10 @@ fn sanitize_ungrounded_claims(content: &str) -> String {
         "he añadido la pista",
     ];
 
-    if false_claim_patterns.iter().any(|pattern| lower.contains(pattern)) {
+    if false_claim_patterns
+        .iter()
+        .any(|pattern| lower.contains(pattern))
+    {
         "No se completaron acciones en este turno. Si deseas realizar una acción como descargar un audio o gestionar una presentación, por favor indícamelo.".to_string()
     } else {
         content.to_string()

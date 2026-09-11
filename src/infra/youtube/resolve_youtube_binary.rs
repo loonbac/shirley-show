@@ -22,7 +22,8 @@ pub fn resolve_youtube_binary(
                 return Err(YoutubeDownloadError::DownloaderNotConfigured);
             }
 
-            let metadata = fs::metadata(path).map_err(|_| YoutubeDownloadError::DownloaderNotConfigured)?;
+            let metadata =
+                fs::metadata(path).map_err(|_| YoutubeDownloadError::DownloaderNotConfigured)?;
             if !metadata.is_file() {
                 return Err(YoutubeDownloadError::DownloaderNotConfigured);
             }

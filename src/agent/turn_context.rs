@@ -61,7 +61,12 @@ impl TurnToolContext {
         staged_audio: Option<StagedAudioHandle>,
         committed_tracker: Option<Arc<Mutex<CommittedTurnState>>>,
     ) -> Self {
-        Self::with_full_context(active_presentation_id, staged_audio, None, committed_tracker)
+        Self::with_full_context(
+            active_presentation_id,
+            staged_audio,
+            None,
+            committed_tracker,
+        )
     }
 
     pub fn with_full_context(

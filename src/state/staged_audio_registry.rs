@@ -183,7 +183,10 @@ impl StagedAudioRegistry {
         }
     }
 
-    pub fn reserve(&self, staged_audio_id: &str) -> Result<StagedAudioLease, StagedAudioRegistryError> {
+    pub fn reserve(
+        &self,
+        staged_audio_id: &str,
+    ) -> Result<StagedAudioLease, StagedAudioRegistryError> {
         let mut map = self.inner.lock().expect("lock poisoned");
         let now = Instant::now();
 

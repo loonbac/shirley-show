@@ -14,8 +14,12 @@ use shirley_show::ports::youtube_downloader::{
 fn create_executable_script(dir: &Path, name: &str, content: &str) -> PathBuf {
     let path = dir.join(name);
     let mut file = File::create(&path).expect("failed to create script");
-    file.write_all(content.as_bytes()).expect("failed to write script");
-    let mut perms = file.metadata().expect("failed to get metadata").permissions();
+    file.write_all(content.as_bytes())
+        .expect("failed to write script");
+    let mut perms = file
+        .metadata()
+        .expect("failed to get metadata")
+        .permissions();
     perms.set_mode(0o755);
     fs::set_permissions(&path, perms).expect("failed to set script executable");
     path
@@ -129,7 +133,10 @@ async fn test_process_downloader_exact_structured_arguments_and_320k_mp3() {
     let part_path = env.staging_dir.join(format!("{stage_id}.part"));
     let mp3_path = env.staging_dir.join(format!("{stage_id}.mp3"));
     assert!(part_path.exists(), "staged .part file must exist");
-    assert!(!mp3_path.exists(), ".mp3 file should have been renamed to .part");
+    assert!(
+        !mp3_path.exists(),
+        ".mp3 file should have been renamed to .part"
+    );
 
     // Verify exact arguments passed to yt-dlp
     let logged_args = fs::read_to_string(&env.log_file).expect("should read logged args");
@@ -326,15 +333,22 @@ exit 0
 
     // Verify child process was reaped (no longer in /proc)
     let is_running = Path::new(&format!("/proc/{pid}")).exists();
-    assert!(!is_running, "child process with pid {pid} must be terminated when future is dropped");
+    assert!(
+        !is_running,
+        "child process with pid {pid} must be terminated when future is dropped"
+    );
 
     // Verify partial files were purged
     let part_path = env.staging_dir.join(format!("{stage_id}.part"));
-    assert!(!part_path.exists(), "partial file must be purged after future cancellation");
+    assert!(
+        !part_path.exists(),
+        "partial file must be purged after future cancellation"
+    );
 }
 
 #[tokio::test]
-async fn test_process_downloader_nonexistent_yt_dlp_bin_returns_controlled_error_without_fallback() {
+async fn test_process_downloader_nonexistent_yt_dlp_bin_returns_controlled_error_without_fallback()
+{
     let env = TestEnvironment::new();
 
     let invalid_config = ProcessYoutubeDownloaderConfig {
@@ -376,4 +390,61 @@ exit 0
     let err = downloader.download(url, target).await.unwrap_err();
     assert_eq!(err, YoutubeDownloadError::DownloadFailed);
     assert_eq!(err.code(), "download_failed");
+}
+
+#[tokio::test]
+async fn test_process_downloader_drains_large_stdout_and_stderr_concurrently_without_deadlock() {
+    let env = TestEnvironment::new();
+
+    // Stub that writes 200 KB to stderr and 200 KB to stdout before creating output file and JSON metadata.
+    // 200 KB exceeds standard OS pipe buffers (64 KB).
+    // If the process waits for child to exit before reading pipes, this script deadlocks on write.
+    let deadlock_script = r#"#!/bin/sh
+output_arg=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    output_arg="$2"
+    shift 2
+  else
+    shift 1
+  fi
+done
+
+# Write >128KB to stderr
+head -c 200000 /dev/zero | tr '\0' 'E' >&2
+
+# Write >128KB to stdout
+head -c 200000 /dev/zero | tr '\0' 'O'
+echo ""
+
+stage_id=$(echo "$output_arg" | sed 's/\.%(ext)s//')
+mp3_file="${stage_id}.mp3"
+printf 'ID3\03\00\00\00\00\00\00\00\00' > "$mp3_file"
+head -c 1000 /dev/zero >> "$mp3_file"
+
+echo '{"title": "Large Buffer Output", "duration": 150.0, "is_live": false, "live_status": "not_live"}'
+exit 0
+"#;
+    create_executable_script(&env.bin_dir, "yt-dlp", deadlock_script);
+
+    let mut config = env.config();
+    config.timeout = Duration::from_secs(3);
+    let downloader = ProcessYoutubeDownloader::new(config);
+
+    let stage_id = "test-stage-large-pipes";
+    let url = YouTubeUrl::parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ").unwrap();
+    let target = YoutubeDownloadTarget {
+        stage_id: stage_id.to_string(),
+        staging_dir: env.staging_dir.clone(),
+    };
+
+    let res = downloader.download(url, target).await;
+    assert!(
+        res.is_ok(),
+        "Downloader must drain stdout and stderr concurrently without deadlocking on full pipe buffers: {:?}",
+        res.err()
+    );
+    let downloaded = res.unwrap();
+    assert_eq!(downloaded.title, "Large Buffer Output");
+    assert_eq!(downloaded.duration_secs, 212);
 }

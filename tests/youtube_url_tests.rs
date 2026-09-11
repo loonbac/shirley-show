@@ -21,16 +21,16 @@ fn test_valid_youtube_watch_urls() {
 
 #[test]
 fn test_valid_youtu_be_urls() {
-    let parsed = YouTubeUrl::parse("https://youtu.be/dQw4w9WgXcQ")
-        .expect("should parse valid youtu.be URL");
+    let parsed =
+        YouTubeUrl::parse("https://youtu.be/dQw4w9WgXcQ").expect("should parse valid youtu.be URL");
     assert_eq!(parsed.video_id(), "dQw4w9WgXcQ");
     assert_eq!(
         parsed.canonical_url(),
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     );
 
-    let parsed_http = YouTubeUrl::parse("http://youtu.be/dQw4w9WgXcQ")
-        .expect("should parse http youtu.be URL");
+    let parsed_http =
+        YouTubeUrl::parse("http://youtu.be/dQw4w9WgXcQ").expect("should parse http youtu.be URL");
     assert_eq!(parsed_http.video_id(), "dQw4w9WgXcQ");
     assert_eq!(
         parsed_http.canonical_url(),

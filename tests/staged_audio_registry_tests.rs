@@ -210,7 +210,8 @@ async fn test_automatic_disk_purge_after_ttl_expiration() {
     // Subsequent reserve must fail
     let err = registry.reserve(&descriptor.staged_audio_id).unwrap_err();
     assert!(
-        err == StagedAudioRegistryError::NotFound || err == StagedAudioRegistryError::AlreadyConsumed,
+        err == StagedAudioRegistryError::NotFound
+            || err == StagedAudioRegistryError::AlreadyConsumed,
         "Expired entry must no longer be reservable"
     );
 }

@@ -109,11 +109,13 @@ impl Config {
                 if trimmed.is_empty() {
                     120
                 } else {
-                    let parsed: u64 = trimmed
-                        .parse()
-                        .map_err(|e| format!("Invalid SHIRLEY_AGENT_TIMEOUT_SECS '{trimmed}': {e}"))?;
+                    let parsed: u64 = trimmed.parse().map_err(|e| {
+                        format!("Invalid SHIRLEY_AGENT_TIMEOUT_SECS '{trimmed}': {e}")
+                    })?;
                     if parsed == 0 {
-                        return Err("SHIRLEY_AGENT_TIMEOUT_SECS must be strictly positive".to_string());
+                        return Err(
+                            "SHIRLEY_AGENT_TIMEOUT_SECS must be strictly positive".to_string()
+                        );
                     }
                     parsed
                 }
