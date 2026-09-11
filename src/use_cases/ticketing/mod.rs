@@ -1,7 +1,10 @@
+pub mod checkin;
 pub mod events;
 pub mod expenses;
 pub mod summary;
+pub mod tickets;
 
+pub use checkin::CheckInTicket;
 pub use events::{
     CreateEvent, CreateEventInput, DeleteEvent, FinalizeEvent, GetEvent, ListEvents, ReopenEvent,
     UpdateEvent, UpdateEventInput,
@@ -11,3 +14,7 @@ pub use expenses::{
     UpdateExpenseInput,
 };
 pub use summary::GetEventSummary;
+pub use tickets::{
+    ConfirmTicketPayment, DeleteTicket, GetPublicTicket, GetTicket, ListTickets, PublicTicketDto,
+    SellTickets, UpdateTicketContact,
+};

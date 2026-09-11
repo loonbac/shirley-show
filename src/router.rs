@@ -72,5 +72,27 @@ pub fn create_router(state: AppState) -> Router {
             "/api/eventos/{id}/resumen",
             get(ticketing::summary::get_summary),
         )
+        .route(
+            "/api/eventos/{id}/entradas",
+            get(ticketing::tickets::list).post(ticketing::tickets::sell),
+        )
+        .route(
+            "/api/entradas/{id}",
+            get(ticketing::tickets::get)
+                .patch(ticketing::tickets::update_contact)
+                .delete(ticketing::tickets::delete),
+        )
+        .route(
+            "/api/entradas/{id}/confirmar-pago",
+            post(ticketing::tickets::confirm_payment),
+        )
+        .route(
+            "/api/entradas/checkin",
+            post(ticketing::tickets::check_in),
+        )
+        .route(
+            "/api/public/ticket/{scan_token}",
+            get(ticketing::tickets::get_public_ticket),
+        )
         .with_state(state)
 }

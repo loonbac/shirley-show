@@ -1,6 +1,7 @@
 pub mod events;
 pub mod expenses;
 pub mod summary;
+pub mod tickets;
 
 use crate::infra::sqlite::connect::DbPool;
 

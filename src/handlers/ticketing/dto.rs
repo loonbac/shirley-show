@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::domain::ticketing::ticket::Ticket;
 use crate::domain::ticketing::{
     Event, EventSummary, Expense, ExpenseCategoryBreakdown, Money, PaymentMethodBreakdown,
     TicketType,
@@ -220,4 +221,91 @@ impl EventSummaryDto {
 #[derive(Debug, Clone, Serialize)]
 pub struct EventSummaryResponse {
     pub resumen: EventSummaryDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TicketDto {
+    pub id: String,
+    pub evento_id: String,
+    pub interesado_id: Option<String>,
+    pub nombre_comprador: String,
+    pub contacto: String,
+    pub tipo_entrada: String,
+    pub precio: f64,
+    pub medio_pago: String,
+    pub estado_pago: String,
+    pub scan_token: String,
+    pub ticket_path: String,
+    pub estado_checkin: String,
+    pub hora_ingreso: Option<String>,
+    pub qr_svg: Option<String>,
+    pub fecha_creacion: String,
+    pub fecha_actualizacion: String,
+}
+
+impl TicketDto {
+    pub fn from_domain(t: &Ticket, include_qr: bool) -> Self {
+        let qr_svg = if include_qr {
+            t.render_qr_svg()
+        } else {
+            None
+        };
+        let ticket_path = format!("#/ticket/{}", t.scan_token.as_str());
+
+        Self {
+            id: t.id.clone(),
+            evento_id: t.evento_id.clone(),
+            interesado_id: t.interesado_id.clone(),
+            nombre_comprador: t.nombre_comprador.clone(),
+            contacto: t.contacto.clone(),
+            tipo_entrada: t.tipo_entrada.clone(),
+            precio: t.precio.to_soles(),
+            medio_pago: t.medio_pago.as_str().to_string(),
+            estado_pago: t.estado_pago.as_str().to_string(),
+            scan_token: t.scan_token.as_str().to_string(),
+            ticket_path,
+            estado_checkin: t.estado_checkin.as_str().to_string(),
+            hora_ingreso: t.hora_ingreso.clone(),
+            qr_svg,
+            fecha_creacion: t.fecha_creacion.clone(),
+            fecha_actualizacion: t.fecha_actualizacion.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SellTicketsRequest {
+    pub nombre_comprador: String,
+    pub contacto: String,
+    pub tipo_entrada: String,
+    pub cantidad: u32,
+    pub medio_pago: String,
+    pub estado_pago: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SellTicketsResponse {
+    pub entradas: Vec<TicketDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ListTicketsResponse {
+    pub entradas: Vec<TicketDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TicketResponse {
+    pub entrada: TicketDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateTicketContactRequest {
+    pub nombre_comprador: String,
+    pub contacto: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CheckInRequest {
+    pub evento_id: String,
+    pub codigo: String,
 }
