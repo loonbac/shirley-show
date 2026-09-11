@@ -22,3 +22,31 @@
   padding: 0;
   margin: 0;
 }
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .timeline-layout {
+    gap: var(--space-5);
+  }
+
+  .timeline-items {
+    gap: var(--space-3);
+  }
+}
+
+@media (min-width: 1024px) {
+  .timeline-layout {
+    gap: var(--space-5);
+  }
+
+  .timeline-header {
+    gap: var(--space-4);
+  }
+
+  .timeline-items {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    width: 100%;
+  }
+}
+

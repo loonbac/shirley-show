@@ -16,4 +16,19 @@
 
   --touch-target-min: 44px;
   --max-content-width: 860px;
+  --max-content-width-tablet: 900px;
+  --max-content-width-pc: 1200px;
 }
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  :root {
+    --max-content-width: var(--max-content-width-tablet);
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --max-content-width: var(--max-content-width-pc);
+  }
+}
+

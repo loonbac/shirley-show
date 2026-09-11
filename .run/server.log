@@ -1,0 +1,8 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/shirley-show`
+====================================================================
+ADVERTENCIA: Shirley Show no incluye autenticación ni control de acceso.
+No exponer públicamente sin una capa de seguridad o proxy inverso.
+====================================================================
+Reconciliación de audio: 0 limpiezas completadas, 0 fallos, 0 temporales purgados
+Shirley Show escuchando en http://0.0.0.0:3100

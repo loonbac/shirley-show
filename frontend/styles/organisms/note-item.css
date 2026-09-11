@@ -47,3 +47,31 @@
   align-items: center;
   gap: var(--space-1);
 }
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .note-item {
+    width: 100%;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-4);
+  }
+}
+
+@media (min-width: 1024px) {
+  .note-item {
+    width: 100%;
+    padding: var(--space-4) var(--space-5);
+    border-radius: var(--radius-sm);
+    gap: var(--space-4);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .note-item:hover {
+    background-color: rgba(245, 158, 11, 0.15);
+    border-color: var(--color-accent-note);
+  }
+
+  .note-body {
+    max-width: 100%;
+  }
+}
+

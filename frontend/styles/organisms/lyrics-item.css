@@ -46,3 +46,32 @@
   align-items: center;
   gap: var(--space-1);
 }
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .lyrics-item {
+    width: 100%;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-4);
+  }
+}
+
+@media (min-width: 1024px) {
+  .lyrics-item {
+    width: 100%;
+    padding: var(--space-4) var(--space-5);
+    border-radius: var(--radius-sm);
+    gap: var(--space-4);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .lyrics-item:hover {
+    background-color: var(--color-surface-hover);
+    border-color: var(--color-border-subtle);
+  }
+
+  .lyrics-body {
+    max-width: 100%;
+    padding: var(--space-2) 0;
+  }
+}
+

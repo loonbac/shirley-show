@@ -60,3 +60,32 @@
   align-items: center;
   gap: var(--space-1);
 }
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .track-item {
+    width: 100%;
+    padding: var(--space-4) var(--space-5);
+    gap: var(--space-4);
+  }
+}
+
+@media (min-width: 1024px) {
+  .track-item {
+    width: 100%;
+    padding: var(--space-3) var(--space-5);
+    border-radius: var(--radius-sm);
+    gap: var(--space-4);
+    align-items: center;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .track-item:hover {
+    background-color: var(--color-surface-hover);
+    border-color: var(--color-border-subtle);
+  }
+
+  .track-item-content {
+    gap: var(--space-2);
+  }
+}
+
