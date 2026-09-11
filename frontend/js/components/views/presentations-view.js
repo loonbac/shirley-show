@@ -8,8 +8,8 @@ import { createWelcomeHeader } from '../organisms/welcome-header.js';
 
 /**
  * Pure view for presentations home catalog.
- * Orchestrates welcome-header and rich presentation cards when presentations exist,
- * and maintains the warm canonical empty state when the catalog is empty.
+ * Orchestrates the protagonist Shirley AI chat hero card and presentation cards,
+ * maintaining the warm canonical catalog underneath on desktop and mobile.
  *
  * @param {{
  *   presentations?: Array<any>,
@@ -21,6 +21,7 @@ import { createWelcomeHeader } from '../organisms/welcome-header.js';
  *   onSelect: (id: string) => void,
  *   onRename: (id: string, currentTitle: string) => void,
  *   onDelete: (id: string, title: string) => void,
+ *   onSendMessage?: (message: string) => void,
  * }} props 
  * @returns {{
  *   el: HTMLElement,
@@ -38,6 +39,7 @@ export function createPresentationsView(props) {
     onSelect,
     onRename,
     onDelete,
+    onSendMessage,
   } = props;
 
   const errorBanner = createStatusMessage({ message: errorMessage || '', type: 'error' });
@@ -61,33 +63,35 @@ export function createPresentationsView(props) {
       return;
     }
 
+    // Always render the Shirley AI Chat Hero at the top
+    const welcomeHeader = createWelcomeHeader({
+      greeting: '¡Hola, Shirley!',
+      subtitle: 'Tu asistente personal para el escenario',
+      phrase: 'Pídeme lo que necesites como si me escribieras por WhatsApp: crear presentaciones, preparar canciones o buscar letras.',
+      totalPresentations,
+      totalTracks,
+      onCreatePresentation: onCreateClick,
+      onSendMessage,
+    });
+    contentArea.appendChild(welcomeHeader.el);
+
     if (presentations.length === 0) {
       const createFirstBtn = createButton({
         text: 'Crear Primera Presentación',
-        variant: 'primary',
+        variant: 'secondary',
         onClick: onCreateClick,
       });
 
       const empty = createEmptyState({
         iconName: 'track',
         title: 'Tu biblioteca está lista',
-        description: 'Crea tu primera presentación para organizar tus pistas de audio, letras para el atril y notas de escenario.',
+        description: 'Escríbele a Shirley arriba qué repertorio quieres preparar o usa la opción manual.',
         actions: [createFirstBtn.el],
       });
 
       contentArea.appendChild(empty);
       return;
     }
-
-    // When presentations exist, render the welcome header followed by the rich cards grid
-    const welcomeHeader = createWelcomeHeader({
-      greeting: '¡Hola, Shirley!',
-      subtitle: 'Tu biblioteca de repertorios para el escenario',
-      phrase: 'Organiza tus pistas, letras y notas para brillar en vivo.',
-      totalPresentations,
-      totalTracks,
-      onCreatePresentation: onCreateClick,
-    });
 
     const listEl = createElement('ul', { class: 'presentations-list' });
     for (const pres of presentations) {
@@ -100,7 +104,6 @@ export function createPresentationsView(props) {
       listEl.appendChild(card);
     }
 
-    contentArea.appendChild(welcomeHeader.el);
     contentArea.appendChild(listEl);
   }
 
@@ -119,6 +122,7 @@ export function createPresentationsView(props) {
     if (nextProps.onSelect !== undefined) onSelect = nextProps.onSelect;
     if (nextProps.onRename !== undefined) onRename = nextProps.onRename;
     if (nextProps.onDelete !== undefined) onDelete = nextProps.onDelete;
+    if (nextProps.onSendMessage !== undefined) onSendMessage = nextProps.onSendMessage;
 
     renderContent();
   }

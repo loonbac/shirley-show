@@ -4,6 +4,7 @@ import { createPresentationsView } from '../components/views/presentations-view.
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
 import { createAgentChatTrigger } from '../components/molecules/agent-chat-trigger.js';
+import { getActiveAgentChatController } from './agent-chat-controller.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
 import { onAgentRefresh } from '../core/state/agent-refresh.js';
 import { listPresentations } from '../data/list-presentations.js';
@@ -15,11 +16,12 @@ import { toPresentation } from '../router/navigate.js';
 /**
  * Controller orchestrating the presentations catalog.
  * Consumes enriched presentation summaries, calculates aggregate library metrics,
- * and handles presentation lifecycle actions (open, create, rename, delete).
+ * handles presentation lifecycle actions (open, create, rename, delete),
+ * and routes messages from the Shirley Hero chat directly to the AI agent controller.
  *
  * @param {{
  *   audioController: { stop: () => void },
- *   onOpenAgent?: () => void,
+ *   onOpenAgent?: (initialMessage?: string) => void,
  * }} deps 
  * @returns {{
  *   topbarEl: HTMLElement,
@@ -50,14 +52,35 @@ export function createPresentationsController(deps) {
     }
   }
 
+  function handleHeroSend(message) {
+    const agentController = getActiveAgentChatController();
+    if (agentController && typeof agentController.sendAndOpen === 'function') {
+      agentController.sendAndOpen(message);
+    } else if (typeof onOpenAgent === 'function') {
+      onOpenAgent(message);
+    }
+  }
+
   // Agent Chat Trigger button in topbar
   const agentChatTrigger = createAgentChatTrigger({
     onClick: () => {
-      if (typeof onOpenAgent === 'function') {
+      const agentController = getActiveAgentChatController();
+      if (agentController && typeof agentController.toggle === 'function') {
+        agentController.toggle();
+      } else if (typeof onOpenAgent === 'function') {
         onOpenAgent();
       }
     },
   });
+
+  // Keep topbar trigger active state synced with the chat panel
+  const agentController = getActiveAgentChatController();
+  let unsubscribeChat = null;
+  if (agentController && typeof agentController.subscribe === 'function') {
+    unsubscribeChat = agentController.subscribe((chatState) => {
+      agentChatTrigger.update({ isOpen: chatState.isOpen });
+    });
+  }
 
   const topbar = createAppTopbar({
     title: 'Shirley Show',
@@ -74,6 +97,7 @@ export function createPresentationsController(deps) {
     onSelect: (id) => toPresentation(id),
     onRename: (id, currentTitle) => openRenameDialog(id, currentTitle),
     onDelete: (id, title) => openDeleteDialog(id, title),
+    onSendMessage: (message) => handleHeroSend(message),
   });
 
   async function loadData() {
@@ -175,6 +199,9 @@ export function createPresentationsController(deps) {
   loadData();
 
   function destroy() {
+    if (unsubscribeChat) {
+      unsubscribeChat();
+    }
     unsubscribeRefresh();
     closeActiveDialog();
   }

@@ -3,6 +3,16 @@ import { sendAgentChatMessage } from '../data/agent-chat-api.js';
 import { emitAgentRefresh } from '../core/state/agent-refresh.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
 
+let activeAgentChatController = null;
+
+/**
+ * Returns the currently active agent chat controller singleton instance, if initialized.
+ * @returns {ReturnType<typeof createAgentChatController> | null}
+ */
+export function getActiveAgentChatController() {
+  return activeAgentChatController;
+}
+
 /**
  * Controller orchestrating the Shirley AI Agent conversational lifecycle.
  * Manages the singleton panel, network dispatch, reactive view refresh signals,
@@ -12,9 +22,11 @@ import { activePresentationContextSignal } from '../core/state/active-presentati
  *   chatState: any,
  * }} deps
  * @returns {{
- *   open: () => void,
+ *   open: (initialMessage?: string) => void,
  *   close: () => void,
  *   toggle: () => void,
+ *   sendAndOpen: (message: string) => Promise<void> | void,
+ *   subscribe: (listener: (state: any) => void) => () => void,
  *   panelEl: HTMLElement,
  *   destroy: () => void,
  * }}
@@ -133,8 +145,11 @@ export function createAgentChatController(deps) {
     }
   }
 
-  function open() {
+  function open(initialMessage) {
     chatState.open();
+    if (initialMessage && typeof initialMessage === 'string' && initialMessage.trim()) {
+      handleSend(initialMessage.trim());
+    }
   }
 
   function close() {
@@ -149,18 +164,31 @@ export function createAgentChatController(deps) {
     }
   }
 
+  function sendAndOpen(message) {
+    open(message);
+  }
+
   function destroy() {
+    if (activeAgentChatController === controller) {
+      activeAgentChatController = null;
+    }
     unsubscribeContext();
     unsubscribeState();
     chatState.cancelTurn();
     panel.destroy();
   }
 
-  return {
+  const controller = {
     open,
     close,
     toggle,
+    sendAndOpen,
+    subscribe: (listener) => chatState.subscribe(listener),
     panelEl: panel.el,
     destroy,
   };
+
+  activeAgentChatController = controller;
+
+  return controller;
 }

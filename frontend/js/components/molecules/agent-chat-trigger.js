@@ -3,7 +3,8 @@ import { createIcon } from '../atoms/icon.js';
 
 /**
  * Creates the primary navigation trigger for the Shirley AI Assistant chat.
- * Enforces a minimum tactile target of >= 48x48px and clear visual hierarchy.
+ * Enforces a minimum tactile target of >= 48x48px, high-contrast visible label "Shirley",
+ * and prominent gold brand styling.
  *
  * @param {{
  *   onClick: () => void,
@@ -18,7 +19,8 @@ export function createAgentChatTrigger(props = {}) {
   let { onClick, isOpen = false } = props;
 
   const icon = createIcon({ name: 'sparkles', size: 'base', className: 'agent-chat-trigger-icon' });
-  const labelText = createElement('span', { class: 'agent-chat-trigger-text' }, ['Asistente Shirley']);
+  const srPrefix = createElement('span', { class: 'agent-chat-trigger-sr-only' }, ['Asistente ']);
+  const labelText = createElement('span', { class: 'agent-chat-trigger-text' }, ['Shirley']);
   const kbdHint = createElement('kbd', { class: 'agent-chat-trigger-kbd' }, ['⌘K']);
 
   const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform || '');
@@ -29,7 +31,7 @@ export function createAgentChatTrigger(props = {}) {
     {
       type: 'button',
       class: `agent-chat-trigger ${isOpen ? 'is-active' : ''}`,
-      'aria-label': 'Abrir asistente Shirley (Ctrl+K)',
+      'aria-label': 'Abrir asistente Shirley',
       'aria-haspopup': 'dialog',
       'aria-expanded': isOpen ? 'true' : 'false',
       onClick: (e) => {
@@ -39,7 +41,7 @@ export function createAgentChatTrigger(props = {}) {
         }
       },
     },
-    [icon, labelText, kbdHint]
+    [icon, srPrefix, labelText, kbdHint]
   );
 
   function update(nextProps = {}) {
