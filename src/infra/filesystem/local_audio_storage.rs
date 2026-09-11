@@ -10,6 +10,7 @@ use crate::infra::filesystem::staged_promotion_guard::StagedPromotionGuard;
 pub struct LocalAudioStorage {
     files_dir: PathBuf,
     staging_dir: PathBuf,
+    vocal_work_dir: PathBuf,
 }
 
 impl LocalAudioStorage {
@@ -17,13 +18,16 @@ impl LocalAudioStorage {
         let base = base_dir.into();
         let files_dir = base.join("files");
         let staging_dir = base.join("staging");
+        let vocal_work_dir = base.join("vocal-work");
 
         let _ = std::fs::create_dir_all(&files_dir);
         let _ = std::fs::create_dir_all(&staging_dir);
+        let _ = std::fs::create_dir_all(&vocal_work_dir);
 
         Self {
             files_dir,
             staging_dir,
+            vocal_work_dir,
         }
     }
 
@@ -33,6 +37,10 @@ impl LocalAudioStorage {
 
     pub fn staging_dir(&self) -> &Path {
         &self.staging_dir
+    }
+
+    pub fn vocal_work_dir(&self) -> &Path {
+        &self.vocal_work_dir
     }
 
     pub fn create_staging_file(&self) -> Result<(String, PathBuf), AppError> {

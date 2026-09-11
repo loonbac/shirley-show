@@ -9,8 +9,10 @@ use crate::infra::sqlite::connect::DbPool;
 use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
+use crate::infra::vocal::{ProcessVocalSeparator, ProcessVocalSeparatorConfig};
 use crate::infra::youtube::{ProcessYoutubeDownloader, ProcessYoutubeDownloaderConfig};
 use crate::ports::chat_completion_provider::ChatCompletionProvider;
+use crate::ports::vocal_separator::VocalSeparator;
 use crate::ports::youtube_downloader::YoutubeDownloader;
 use crate::state::staged_audio_registry::StagedAudioRegistry;
 use crate::use_cases::add_lyrics::AddLyrics;
@@ -57,6 +59,8 @@ pub struct AppState {
     pub staged_audio_registry: Arc<StagedAudioRegistry>,
     pub youtube_downloader: Arc<dyn YoutubeDownloader>,
     pub download_youtube_audio: Arc<DownloadYouTubeAudio>,
+    pub gpu_semaphore: Arc<tokio::sync::Semaphore>,
+    pub vocal_separator: Arc<dyn VocalSeparator>,
     pub agent_runtime: AgentRuntime,
     pub agent_chat: Arc<AgentChat>,
 }
@@ -110,6 +114,14 @@ impl AppState {
             staged_audio_registry.clone(),
         ));
 
+        let gpu_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let vocal_separator: Arc<dyn VocalSeparator> = Arc::new(ProcessVocalSeparator::new(
+            ProcessVocalSeparatorConfig::from_env(
+                storage.vocal_work_dir().to_path_buf(),
+                gpu_semaphore.clone(),
+            ),
+        ));
+
         let dispatcher = AgentToolDispatcher::from_components(
             create_presentation.clone(),
             list_presentations.clone(),
@@ -157,6 +169,8 @@ impl AppState {
             staged_audio_registry,
             youtube_downloader,
             download_youtube_audio,
+            gpu_semaphore,
+            vocal_separator,
             agent_runtime,
             agent_chat,
         }
@@ -169,6 +183,11 @@ impl AppState {
             self.storage.clone(),
             self.staged_audio_registry.clone(),
         ));
+        self
+    }
+
+    pub fn with_vocal_separator(mut self, separator: Arc<dyn VocalSeparator>) -> Self {
+        self.vocal_separator = separator;
         self
     }
 

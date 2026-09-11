@@ -7,6 +7,7 @@ pub struct ReconcileReport {
     pub processed_deletions: usize,
     pub failed_deletions: usize,
     pub purged_staging: usize,
+    pub purged_vocal_work: usize,
 }
 
 pub fn reconcile_audio_files(
@@ -37,6 +38,22 @@ pub fn reconcile_audio_files(
             if path.is_file() {
                 if let Ok(()) = std::fs::remove_file(&path) {
                     report.purged_staging += 1;
+                }
+            }
+        }
+    }
+
+    // 3. Purge orphan vocal work directories and files
+    if let Ok(entries) = std::fs::read_dir(storage.vocal_work_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Ok(()) = std::fs::remove_dir_all(&path) {
+                    report.purged_vocal_work += 1;
+                }
+            } else if path.is_file() {
+                if let Ok(()) = std::fs::remove_file(&path) {
+                    report.purged_vocal_work += 1;
                 }
             }
         }
