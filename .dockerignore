@@ -1,0 +1,28 @@
+# Build artifacts
+target/
+
+# VCS
+.git/
+.gitignore
+
+# Local runtime & secrets (NEVER in the image)
+.env
+.env.*
+!.env.example
+.run/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+secrets/
+*.pem
+*id_ed25519*
+*id_rsa*
+
+# Local dev & SDD paperwork
+atl/
+.pi/
+openspec/
+.codegraph/
+tmp/
+*.log
+.DS_Store
