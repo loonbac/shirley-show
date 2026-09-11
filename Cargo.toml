@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-axum = { version = "0.8", features = ["json"] }
+axum = { version = "0.8", features = ["json", "multipart"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
 rusqlite = { version = "0.40", features = ["bundled", "chrono"] }
@@ -18,6 +18,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 http = "1"
 http-body-util = "0.1"
+tokio-util = { version = "0.7", features = ["io"] }
 
 [dev-dependencies]
 tempfile = "3"

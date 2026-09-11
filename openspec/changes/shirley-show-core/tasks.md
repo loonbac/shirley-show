@@ -50,34 +50,34 @@ Chain strategy: pending
 ## Slice B: Show Items, Audio Upload, Range Streaming & Reordering
 
 ### 6. Show Item Domain Entities and Validation
-- [ ] RED: Write unit tests in `tests/domain_item_tests.rs` verifying invariants for `ShowItem`, `ShowItemPayload` (`Track`, `Lyrics`, `Note`), `ShowItemKind`, and `MoveDirection`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement domain types in `src/domain/show_item.rs`, `src/domain/show_item_kind.rs`, `src/domain/move_direction.rs`, and `src/domain/audio_format.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Verify validation rules: multiline lyrics non-empty, note non-empty, track requiring valid metadata and audio key reference. <!-- sdd-owner: implementation -->
+- [x] RED: Write unit tests in `tests/domain_item_tests.rs` verifying invariants for `ShowItem`, `ShowItemPayload` (`Track`, `Lyrics`, `Note`), `ShowItemKind`, and `MoveDirection`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement domain types in `src/domain/show_item.rs`, `src/domain/show_item_kind.rs`, `src/domain/move_direction.rs`, and `src/domain/audio_format.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Verify validation rules: multiline lyrics non-empty, note non-empty, track requiring valid metadata and audio key reference. <!-- sdd-owner: implementation -->
 
 ### 7. Show Item Repository with Atomic Append, Swap and Compact
-- [ ] RED: Write repository tests in `tests/show_item_repository_tests.rs` testing append to end (`COALESCE(MAX)+1`), atomic swap between neighbors with `BEGIN IMMEDIATE`, and deletion with index recompaction. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Define ports in `src/ports/show_item_reader.rs`, `src/ports/show_item_writer.rs`, and implement `SqliteShowItemRepository` in `src/infra/sqlite/show_item_repository.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Add concurrency and boundary tests for swap (first item up rejected, last item down rejected with boundary error; rapid successive swaps maintaining contiguous `0..N-1` indices). <!-- sdd-owner: implementation -->
+- [x] RED: Write repository tests in `tests/show_item_repository_tests.rs` testing append to end (`COALESCE(MAX)+1`), atomic swap between neighbors with `BEGIN IMMEDIATE`, and deletion with index recompaction. <!-- sdd-owner: implementation -->
+- [x] GREEN: Define ports in `src/ports/show_item_reader.rs`, `src/ports/show_item_writer.rs`, and implement `SqliteShowItemRepository` in `src/infra/sqlite/show_item_repository.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Add concurrency and boundary tests for swap (first item up rejected, last item down rejected with boundary error; rapid successive swaps maintaining contiguous `0..N-1` indices). <!-- sdd-owner: implementation -->
 
 ### 8. Local Audio Storage, Format Detection and Cleanup Reconciliation
-- [ ] RED: Write tests in `tests/audio_storage_tests.rs` covering magic byte format detection (MP3 ID3/frame, WAV RIFF, M4A ftyp), path traversal resistance via safe generated keys, and pending cleanup queue. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement `src/infra/filesystem/generated_audio_key.rs`, `src/infra/filesystem/detect_audio_format.rs`, `src/infra/filesystem/local_audio_storage.rs`, `src/infra/sqlite/cleanup_repository.rs`, and `src/infra/filesystem/reconcile_audio_files.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Test cleanup queue behavior when physical file deletion fails post-commit (record retained in `pending_audio_deletions` for startup retry without breaking database state). <!-- sdd-owner: implementation -->
+- [x] RED: Write tests in `tests/audio_storage_tests.rs` covering magic byte format detection (MP3 ID3/frame, WAV RIFF, M4A ftyp), path traversal resistance via safe generated keys, and pending cleanup queue. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement `src/infra/filesystem/generated_audio_key.rs`, `src/infra/filesystem/detect_audio_format.rs`, `src/infra/filesystem/local_audio_storage.rs`, `src/infra/sqlite/cleanup_repository.rs`, and `src/infra/filesystem/reconcile_audio_files.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Test cleanup queue behavior when physical file deletion fails post-commit (record retained in `pending_audio_deletions` for startup retry without breaking database state). <!-- sdd-owner: implementation -->
 
 ### 9. Show Item and Audio Use Cases
-- [ ] RED: Write unit tests in `tests/item_use_cases_tests.rs` for `AddLyrics`, `AddNote`, `UploadTrack`, `ReorderItem`, `DeleteItem`, and `OpenTrackAudio`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement use case modules in `src/use_cases/add_lyrics.rs`, `add_note.rs`, `upload_track.rs`, `reorder_item.rs`, `delete_item.rs`, and `open_track_audio.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Test compensation logic: failed track database insertion triggers immediate removal of staged audio file from disk. <!-- sdd-owner: implementation -->
+- [x] RED: Write unit tests in `tests/item_use_cases_tests.rs` for `AddLyrics`, `AddNote`, `UploadTrack`, `ReorderItem`, `DeleteItem`, and `OpenTrackAudio`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement use case modules in `src/use_cases/add_lyrics.rs`, `add_note.rs`, `upload_track.rs`, `reorder_item.rs`, `delete_item.rs`, and `open_track_audio.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Test compensation logic: failed track database insertion triggers immediate removal of staged audio file from disk. <!-- sdd-owner: implementation -->
 
 ### 10. HTTP Range Parsing and Streaming Handler
-- [ ] RED: Write unit tests in `tests/range_parser_tests.rs` and integration tests in `tests/audio_stream_api_tests.rs` for `parse_range` and `GET /api/tracks/:id/audio` (full request 200, byte range 206, out of bounds 416, HEAD request without body). <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement pure range parser in `src/handlers/audio/parse_range.rs` and audio stream handler in `src/handlers/audio/stream.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Verify RFC 9110 compliance: `Accept-Ranges: bytes`, `Content-Range: bytes 0-1023/total`, ignore malformed or multi-range headers with full 200 response, and handle missing audio files with 404. <!-- sdd-owner: implementation -->
+- [x] RED: Write unit tests in `tests/range_parser_tests.rs` and integration tests in `tests/audio_stream_api_tests.rs` for `parse_range` and `GET /api/tracks/:id/audio` (full request 200, byte range 206, out of bounds 416, HEAD request without body). <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement pure range parser in `src/handlers/audio/parse_range.rs` and audio stream handler in `src/handlers/audio/stream.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Verify RFC 9110 compliance: `Accept-Ranges: bytes`, `Content-Range: bytes 0-1023/total`, ignore malformed or multi-range headers with full 200 response, and handle missing audio files with 404. <!-- sdd-owner: implementation -->
 
 ### 11. Item Management and Multipart Upload HTTP Handlers
-- [ ] RED: Write HTTP integration tests in `tests/item_api_tests.rs` for adding text items, multipart track upload, reordering, and item deletion. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implement `src/handlers/items/add_text.rs`, `src/handlers/items/upload_track.rs` (with route-scoped 101 MiB body limit and exact 100 MiB byte counter), `src/handlers/items/reorder.rs`, and `src/handlers/items/delete.rs`. <!-- sdd-owner: implementation -->
-- [ ] TRIANGULATE/REFACTOR: Verify that payload exceeding 100 MiB returns 413, unsupported format returns 415, empty title returns 422, and reorder boundary returns 409. <!-- sdd-owner: implementation -->
+- [x] RED: Write HTTP integration tests in `tests/item_api_tests.rs` for adding text items, multipart track upload, reordering, and item deletion. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implement `src/handlers/items/add_text.rs`, `src/handlers/items/upload_track.rs` (with route-scoped 101 MiB body limit and exact 100 MiB byte counter), `src/handlers/items/reorder.rs`, and `src/handlers/items/delete.rs`. <!-- sdd-owner: implementation -->
+- [x] TRIANGULATE/REFACTOR: Verify that payload exceeding 100 MiB returns 413, unsupported format returns 415, empty title returns 422, and reorder boundary returns 409. <!-- sdd-owner: implementation -->
 
 ---
 

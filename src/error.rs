@@ -6,6 +6,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
+    #[error("Bad request: {message}")]
+    BadRequest {
+        code: &'static str,
+        message: String,
+    },
+
     #[error("Validation error: {message}")]
     Validation {
         code: &'static str,
@@ -25,6 +31,18 @@ pub enum AppError {
         message: String,
     },
 
+    #[error("Payload too large: {message}")]
+    PayloadTooLarge {
+        code: &'static str,
+        message: String,
+    },
+
+    #[error("Unsupported media type: {message}")]
+    UnsupportedMediaType {
+        code: &'static str,
+        message: String,
+    },
+
     #[error("Database error: {0}")]
     Database(String),
 
@@ -33,6 +51,13 @@ pub enum AppError {
 }
 
 impl AppError {
+    pub fn bad_request(code: &'static str, message: impl Into<String>) -> Self {
+        Self::BadRequest {
+            code,
+            message: message.into(),
+        }
+    }
+
     pub fn validation(code: &'static str, message: impl Into<String>, field: impl Into<String>) -> Self {
         Self::Validation {
             code,
@@ -54,6 +79,20 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    pub fn payload_too_large(code: &'static str, message: impl Into<String>) -> Self {
+        Self::PayloadTooLarge {
+            code,
+            message: message.into(),
+        }
+    }
+
+    pub fn unsupported_media_type(code: &'static str, message: impl Into<String>) -> Self {
+        Self::UnsupportedMediaType {
+            code,
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -71,6 +110,14 @@ pub struct ErrorBody {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, body) = match self {
+            AppError::BadRequest { code, message } => (
+                StatusCode::BAD_REQUEST,
+                ErrorBody {
+                    code: code.to_string(),
+                    message,
+                    field: None,
+                },
+            ),
             AppError::Validation { code, message, field } => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 ErrorBody {
@@ -89,6 +136,22 @@ impl IntoResponse for AppError {
             ),
             AppError::Conflict { code, message } => (
                 StatusCode::CONFLICT,
+                ErrorBody {
+                    code: code.to_string(),
+                    message,
+                    field: None,
+                },
+            ),
+            AppError::PayloadTooLarge { code, message } => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                ErrorBody {
+                    code: code.to_string(),
+                    message,
+                    field: None,
+                },
+            ),
+            AppError::UnsupportedMediaType { code, message } => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 ErrorBody {
                     code: code.to_string(),
                     message,

@@ -1,7 +1,8 @@
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post};
 use axum::Router;
 
-use crate::handlers::presentations;
+use crate::handlers::{audio, items, presentations};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
@@ -13,6 +14,27 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/presentations/{id}",
             axum::routing::delete(presentations::delete::delete),
+        )
+        .route(
+            "/api/presentations/{presentation_id}/items",
+            post(items::add_text::add_text),
+        )
+        .route(
+            "/api/presentations/{presentation_id}/tracks",
+            post(items::upload_track::upload_track)
+                .layer(DefaultBodyLimit::max(101 * 1024 * 1024)),
+        )
+        .route(
+            "/api/presentations/{presentation_id}/items/{item_id}/move",
+            post(items::reorder::reorder),
+        )
+        .route(
+            "/api/presentations/{presentation_id}/items/{item_id}",
+            axum::routing::delete(items::delete::delete),
+        )
+        .route(
+            "/api/tracks/{id}/audio",
+            get(audio::stream::stream).head(audio::stream::stream),
         )
         .with_state(state)
 }
