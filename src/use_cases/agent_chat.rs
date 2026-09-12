@@ -380,7 +380,7 @@ impl AgentChat {
             let system_prompt = if is_audio_operation {
                 if has_staged_audio_id {
                     format!(
-                        "Continúa la solicitud de audio usando el historial completo. Hay un audio temporal disponible. Destino confirmado: {has_confirmed_destination}. Si no está confirmado, llama a list_presentations, identifica por el nombre escrito por la usuaria una única presentación y llama a get_presentation con su ID antes de modificarla. Después ejecuta add_track_from_staged o separate_vocals según la intención original. No pidas IDs que puedas obtener con las herramientas. Responde con llamadas de herramienta cuando debas actuar."
+                        "Continúa la solicitud de audio usando el historial completo, incluida la intención original. Hay un audio temporal disponible. Destino confirmado: {has_confirmed_destination}. Si no está confirmado, llama a list_presentations, identifica por el nombre escrito por la usuaria una única presentación y llama a get_presentation con su ID. Si la solicitud original pide sacar, separar, aislar, voz, coros o instrumentación, NO agregues el audio original: llama a separate_vocals. Para quitar solo la voz principal y conservar coros más instrumentación usa mode=chorus. Para quitar todas las voces usa mode=instrumental. Después de separar, agrega el nuevo audio temporal a la presentación con add_track_from_staged y el título devuelto por la separación. Solo usa add_track_from_staged directamente cuando la usuaria no haya pedido ninguna separación. No pidas IDs que puedas obtener con las herramientas."
                     )
                 } else {
                     format!(
@@ -580,10 +580,13 @@ impl AgentChat {
                     // user turn (download first, then add or separate the staged file), so a
                     // second provider round-trip is neither needed nor safe here.
                     if is_audio_operation
-                        && turn_context
-                            .actions_taken
-                            .last()
-                            .is_some_and(|action| action.status == "success")
+                        && turn_context.actions_taken.last().is_some_and(|action| {
+                            action.status == "success"
+                                && matches!(
+                                    action.tool.as_str(),
+                                    "download_youtube_track" | "add_track_from_staged"
+                                )
+                        })
                     {
                         return AgentChatOutput {
                             message: compose_grounded_message(

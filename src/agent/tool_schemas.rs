@@ -93,7 +93,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "separate_vocals".to_string(),
-            description: "Separa voz a staging.".to_string(),
+            description: "Procesa una pista con los modelos vocales. mode=chorus elimina la voz principal y conserva coros más instrumentación; mode=instrumental elimina todas las voces. El resultado queda temporal y después debe agregarse con add_track_from_staged.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
