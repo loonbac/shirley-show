@@ -3,13 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # Host network: reaches nixos-pc over tailscale0 with zero NAT/firewall fuss.
-    # Requires the Coolify host (eje-desarrollo) to be in the tailnet.
-    # Alternative: remove network_mode and see docs/deployment-coolify.md (bridge/sidecar).
-    network_mode: host
+    # Bridge + loopback publish for Coolify proxy on the same host.
+    # NOTE: with bridge mode, reaching nixos-pc over Tailscale needs the host
+    # to forward Docker bridge -> tailscale0 (see docs/deployment-coolify.md).
+    # Alternative: network_mode: host (removes the need for ports: below).
     restart: unless-stopped
+    ports:
+      - '127.0.0.1:65529:3001'
     environment:
-      - SHIRLEY_BIND=0.0.0.0:3000
+      - SHIRLEY_BIND=0.0.0.0:3001
       - SHIRLEY_DATA_DIR=/app/data
       - SHIRLEY_FRONTEND_DIR=/app/frontend
       - GROQ_API_KEY=${GROQ_API_KEY:?GROQ_API_KEY requerida}

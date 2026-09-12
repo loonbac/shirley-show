@@ -27,12 +27,12 @@ COPY --from=builder /build/migrations /app/migrations
 RUN mkdir -p /app/data && chown -R shirley:shirley /app
 USER shirley
 
-ENV SHIRLEY_BIND=0.0.0.0:3000 \
+ENV SHIRLEY_BIND=0.0.0.0:3001 \
     SHIRLEY_DATA_DIR=/app/data \
     SHIRLEY_FRONTEND_DIR=/app/frontend
 
-EXPOSE 3000
+EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:3000/api/presentations || exit 1
+    CMD curl -f http://localhost:3001/api/presentations || exit 1
 
 CMD ["/app/shirley-show"]

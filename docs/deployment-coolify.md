@@ -78,7 +78,7 @@ o equivalente en Nginx `proxy_read_timeout 1500s`).
 
 ```bash
 docker compose up -d --build
-curl http://localhost:3000/api/presentations
+curl http://127.0.0.1:65529/api/presentations
 ```
 
 Datos en el volumen `shirley-data` (`/app/data`: SQLite + audios).
