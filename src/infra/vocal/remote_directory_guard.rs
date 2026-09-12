@@ -162,17 +162,18 @@ impl RemoteDirectoryGuard {
 
         let mut child = spawn_with_retry(&mut cmd).await?;
 
-        let mut stdin_pipe = child.stdin.take();
+        let stdin_pipe = child.stdin.take();
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
 
         self.children.push(child);
         let idx = self.children.len() - 1;
 
-        let write_stdin = async {
-            if let Some(ref mut pipe) = stdin_pipe {
+        let write_stdin = async move {
+            if let Some(mut pipe) = stdin_pipe {
                 let _ = pipe.write_all(script.as_bytes()).await;
                 let _ = pipe.flush().await;
+                let _ = pipe.shutdown().await;
             }
         };
 

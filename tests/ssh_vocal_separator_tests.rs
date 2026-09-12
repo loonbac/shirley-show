@@ -456,6 +456,45 @@ async fn test_remote_directory_guard_lifecycle_and_cleanup_on_drop() {
     );
 }
 
+#[tokio::test]
+async fn test_remote_directory_guard_closes_pipeline_stdin_after_script() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let stdin_copy = temp_dir.path().join("stdin-copy.sh");
+    let consumer = temp_dir.path().join("consume-stdin");
+    create_executable_script(
+        &consumer,
+        &format!("#!/bin/sh\ncat > '{}'\n", stdin_copy.display()),
+    );
+
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let permit = sem.clone().acquire_owned().await.unwrap();
+    let builder = SshCommandBuilder::new(
+        PathBuf::from("/bin/true"),
+        PathBuf::from("/bin/true"),
+        "test".to_string(),
+        "localhost".to_string(),
+        PathBuf::from("/dev/null"),
+        22,
+    );
+    let mut guard = RemoteDirectoryGuard::new(None, permit, builder);
+
+    let status = guard
+        .run_pipeline_script(
+            tokio::process::Command::new(&consumer),
+            "set -eu\nprintf pipeline-complete\n",
+            Duration::from_secs(1),
+        )
+        .await
+        .expect("consumer waiting for EOF must finish");
+
+    assert!(status.success());
+    assert_eq!(
+        std::fs::read_to_string(stdin_copy).unwrap(),
+        "set -eu\nprintf pipeline-complete\n"
+    );
+    guard.complete().await;
+}
+
 #[test]
 fn test_ssh_vocal_separator_config_injectable_bins() {
     let jpc = JoshuaPcConfig {
