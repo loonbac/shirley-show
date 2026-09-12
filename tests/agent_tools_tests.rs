@@ -130,8 +130,8 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     let tools = get_tool_definitions();
     assert_eq!(
         tools.len(),
-        24,
-        "Must expose exactly 24 tools in Slice 1 (11 presentations + 13 ticketing)"
+        31,
+        "Must expose exactly 31 tools in Slice 2 (13 presentations + 18 ticketing)"
     );
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -147,6 +147,9 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     assert!(names.contains(&"renombrar_presentacion"));
     assert!(names.contains(&"reordenar_elemento"));
     assert!(names.contains(&"editar_elemento"));
+    // Destructive presentation tools (Slice 2)
+    assert!(names.contains(&"eliminar_presentacion"));
+    assert!(names.contains(&"eliminar_elemento"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -232,6 +235,22 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
                 assert_eq!(props["elemento_id"]["type"], "string");
                 assert_eq!(props["texto"]["type"], "string");
                 assert_eq!(props["titulo"]["type"], "string");
+            }
+            "eliminar_presentacion" => {
+                let required = params["required"].as_array().unwrap();
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("presentacion_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["presentacion_id"]["type"], "string");
+            }
+            "eliminar_elemento" => {
+                let required = params["required"].as_array().unwrap();
+                assert_eq!(required.len(), 2);
+                assert!(required.contains(&json!("presentacion_id")));
+                assert!(required.contains(&json!("elemento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["presentacion_id"]["type"], "string");
+                assert_eq!(props["elemento_id"]["type"], "string");
             }
             _ => {} // Ticketing tools are validated in ticketing_ressy_tests
         }
@@ -986,13 +1005,8 @@ async fn test_dispatcher_safe_presentation_tools_input_validations() {
     let note = state.add_note.execute(&pres.id, "Nota 1").unwrap();
 
     let dispatcher = AgentToolDispatcher::new(state);
-    let mut context = TurnToolContext::with_event_context(
-        Some(pres.id.clone()),
-        None,
-        None,
-        None,
-        None,
-    );
+    let mut context =
+        TurnToolContext::with_event_context(Some(pres.id.clone()), None, None, None, None);
 
     // 1. renombrar_presentacion: empty or whitespace title rejected
     let rename_empty = ToolCall {
@@ -1100,13 +1114,8 @@ async fn test_dispatcher_safe_presentation_tools_execution_and_actions() {
     let note = state.add_note.execute(&pres.id, "Nota tecnica").unwrap();
 
     let dispatcher = AgentToolDispatcher::new(state);
-    let mut context = TurnToolContext::with_event_context(
-        Some(pres.id.clone()),
-        None,
-        None,
-        None,
-        None,
-    );
+    let mut context =
+        TurnToolContext::with_event_context(Some(pres.id.clone()), None, None, None, None);
 
     // 1. renombrar_presentacion
     let rename_call = ToolCall {
@@ -1125,7 +1134,10 @@ async fn test_dispatcher_safe_presentation_tools_execution_and_actions() {
     assert_eq!(context.actions_taken.len(), 1);
     assert_eq!(context.actions_taken[0].tool, "renombrar_presentacion");
     assert_eq!(context.actions_taken[0].status, "success");
-    assert_eq!(context.actions_taken[0].presentation_id, Some(pres.id.clone()));
+    assert_eq!(
+        context.actions_taken[0].presentation_id,
+        Some(pres.id.clone())
+    );
 
     // 2. editar_elemento (lyrics)
     let edit_call = ToolCall {
@@ -1144,7 +1156,10 @@ async fn test_dispatcher_safe_presentation_tools_execution_and_actions() {
     assert_eq!(context.actions_taken.len(), 2);
     assert_eq!(context.actions_taken[1].tool, "editar_elemento");
     assert_eq!(context.actions_taken[1].status, "success");
-    assert_eq!(context.actions_taken[1].presentation_id, Some(pres.id.clone()));
+    assert_eq!(
+        context.actions_taken[1].presentation_id,
+        Some(pres.id.clone())
+    );
 
     // 3. reordenar_elemento with posicion_destino (move note to position 1)
     let reorder_call = ToolCall {
@@ -1164,7 +1179,10 @@ async fn test_dispatcher_safe_presentation_tools_execution_and_actions() {
     assert_eq!(context.actions_taken.len(), 3);
     assert_eq!(context.actions_taken[2].tool, "reordenar_elemento");
     assert_eq!(context.actions_taken[2].status, "success");
-    assert_eq!(context.actions_taken[2].presentation_id, Some(pres.id.clone()));
+    assert_eq!(
+        context.actions_taken[2].presentation_id,
+        Some(pres.id.clone())
+    );
 
     // 4. reordenar_elemento with direccion: "abajo"
     let reorder_down = ToolCall {
@@ -1205,13 +1223,8 @@ async fn test_dispatcher_safe_presentation_tools_domain_errors() {
     let lyrics = state.add_lyrics.execute(&pres.id, "Letra").unwrap();
 
     let dispatcher = AgentToolDispatcher::new(state);
-    let mut context = TurnToolContext::with_event_context(
-        Some(pres.id.clone()),
-        None,
-        None,
-        None,
-        None,
-    );
+    let mut context =
+        TurnToolContext::with_event_context(Some(pres.id.clone()), None, None, None, None);
 
     // Reorder non-existent item
     let reorder_call = ToolCall {

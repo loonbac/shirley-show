@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use crate::agent::destructive_confirmation::{
+    ConfirmationReply, PendingDestructiveAction, PendingDestructiveRegistry,
+};
 use crate::domain::agent_tool::ToolAction;
 use crate::domain::audio_format::AudioFormat;
 use crate::infra::filesystem::StagingFileGuard;
@@ -38,6 +41,11 @@ pub struct TurnToolContext {
     pub active_presentation_id: Option<String>,
     pub active_event_id: Option<String>,
     pub committed_tracker: Option<Arc<Mutex<CommittedTurnState>>>,
+    pub conversation_id: String,
+    pub pending_destructive_action: Option<PendingDestructiveAction>,
+    pub confirmation_reply: ConfirmationReply,
+    pub confirmation_requested: Option<PendingDestructiveAction>,
+    pub destructive_registry: Option<Arc<PendingDestructiveRegistry>>,
 }
 
 impl Default for TurnToolContext {
@@ -147,6 +155,11 @@ impl TurnToolContext {
             active_presentation_id,
             active_event_id,
             committed_tracker,
+            conversation_id: String::new(),
+            pending_destructive_action: None,
+            confirmation_reply: ConfirmationReply::Other,
+            confirmation_requested: None,
+            destructive_registry: None,
         }
     }
 
@@ -199,5 +212,21 @@ impl TurnToolContext {
             }
         }
         self.staged_audio_id = id;
+    }
+
+    pub fn set_conversation_id(&mut self, id: String) {
+        self.conversation_id = id;
+    }
+
+    pub fn set_pending_destructive_action(&mut self, action: Option<PendingDestructiveAction>) {
+        self.pending_destructive_action = action;
+    }
+
+    pub fn set_confirmation_reply(&mut self, reply: ConfirmationReply) {
+        self.confirmation_reply = reply;
+    }
+
+    pub fn set_destructive_registry(&mut self, reg: Option<Arc<PendingDestructiveRegistry>>) {
+        self.destructive_registry = reg;
     }
 }

@@ -30,8 +30,8 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
     let tools = get_tool_definitions();
     assert_eq!(
         tools.len(),
-        24,
-        "get_tool_definitions() must expose exactly 24 tools in Slice 1 (8 original + 3 safe presentation + 8 original ticketing + 5 safe ticketing)"
+        31,
+        "get_tool_definitions() must expose exactly 31 tools in Slice 2 (13 presentations + 18 ticketing)"
     );
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -62,6 +62,13 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
     assert!(names.contains(&"editar_gasto"));
     assert!(names.contains(&"editar_interesado"));
     assert!(names.contains(&"confirmar_interesado"));
+
+    // 5 destructive ticketing tools (Slice 2)
+    assert!(names.contains(&"eliminar_evento"));
+    assert!(names.contains(&"finalizar_evento"));
+    assert!(names.contains(&"eliminar_entrada"));
+    assert!(names.contains(&"eliminar_gasto"));
+    assert!(names.contains(&"eliminar_interesado"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -285,6 +292,51 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
                 let ep_enum = props["estado_pago"]["enum"].as_array().unwrap();
                 assert!(ep_enum.contains(&json!("Pagado")));
                 assert!(ep_enum.contains(&json!("Pendiente")));
+            }
+            "eliminar_evento" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("eliminar_evento required");
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("evento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["evento_id"]["type"], "string");
+            }
+            "finalizar_evento" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("finalizar_evento required");
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("evento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["evento_id"]["type"], "string");
+            }
+            "eliminar_entrada" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("eliminar_entrada required");
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("entrada_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["entrada_id"]["type"], "string");
+            }
+            "eliminar_gasto" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("eliminar_gasto required");
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("gasto_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["gasto_id"]["type"], "string");
+            }
+            "eliminar_interesado" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("eliminar_interesado required");
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("interesado_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["interesado_id"]["type"], "string");
             }
             _ => {}
         }
@@ -858,7 +910,9 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&edit_event_empty_tiers, &mut context).await;
+    let res = dispatcher
+        .dispatch(&edit_event_empty_tiers, &mut context)
+        .await;
     assert_eq!(res["error"], "validation_error");
 
     // 2. editar_evento: negative price
@@ -876,7 +930,9 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&edit_event_neg_price, &mut context).await;
+    let res = dispatcher
+        .dispatch(&edit_event_neg_price, &mut context)
+        .await;
     assert_eq!(res["error"], "validation_error");
 
     // 3. editar_gasto: invalid closed enum categoria
@@ -892,7 +948,9 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&edit_expense_bad_cat, &mut context).await;
+    let res = dispatcher
+        .dispatch(&edit_expense_bad_cat, &mut context)
+        .await;
     assert_eq!(res["error"], "validation_error");
 
     // 4. editar_gasto: negative monto
@@ -908,7 +966,9 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&edit_expense_neg_monto, &mut context).await;
+    let res = dispatcher
+        .dispatch(&edit_expense_neg_monto, &mut context)
+        .await;
     assert_eq!(res["error"], "validation_error");
 
     // 5. editar_interesado: invalid estado enum
@@ -926,7 +986,9 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&edit_interest_bad_status, &mut context).await;
+    let res = dispatcher
+        .dispatch(&edit_interest_bad_status, &mut context)
+        .await;
     assert_eq!(res["error"], "validation_error");
 
     // 6. editar_interesado: personas 0
@@ -944,7 +1006,9 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&edit_interest_zero_persons, &mut context).await;
+    let res = dispatcher
+        .dispatch(&edit_interest_zero_persons, &mut context)
+        .await;
     assert_eq!(res["error"], "validation_error");
 
     // 7. confirmar_interesado: invalid medio_pago
@@ -960,7 +1024,9 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         })
         .to_string(),
     };
-    let res = dispatcher.dispatch(&confirm_bad_payment, &mut context).await;
+    let res = dispatcher
+        .dispatch(&confirm_bad_payment, &mut context)
+        .await;
     assert_eq!(res["error"], "validation_error");
 
     // 8. confirmar_interesado: invalid estado_pago
@@ -1043,7 +1109,10 @@ async fn test_dispatcher_safe_ticketing_tools_operational_lifecycle() {
     assert_eq!(edit_evt_res["lugar"], "Centro de Convenciones Lima");
     assert_eq!(context.actions_taken.last().unwrap().tool, "editar_evento");
     assert_eq!(context.actions_taken.last().unwrap().status, "success");
-    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+    assert_eq!(
+        context.actions_taken.last().unwrap().event_id,
+        Some(event_id.clone())
+    );
 
     // 3. Register expense then editar_gasto
     let reg_exp_call = ToolCall {
@@ -1078,7 +1147,10 @@ async fn test_dispatcher_safe_ticketing_tools_operational_lifecycle() {
     assert_eq!(edit_exp_res["monto"], 75.0);
     assert_eq!(context.actions_taken.last().unwrap().tool, "editar_gasto");
     assert_eq!(context.actions_taken.last().unwrap().status, "success");
-    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+    assert_eq!(
+        context.actions_taken.last().unwrap().event_id,
+        Some(event_id.clone())
+    );
 
     // 4. Register interest then editar_interesado
     let reg_int_call = ToolCall {
@@ -1115,9 +1187,15 @@ async fn test_dispatcher_safe_ticketing_tools_operational_lifecycle() {
     assert_eq!(edit_int_res["id"], lead_id);
     assert_eq!(edit_int_res["nombre"], "Ana Perez Gomez");
     assert_eq!(edit_int_res["personas"], 3);
-    assert_eq!(context.actions_taken.last().unwrap().tool, "editar_interesado");
+    assert_eq!(
+        context.actions_taken.last().unwrap().tool,
+        "editar_interesado"
+    );
     assert_eq!(context.actions_taken.last().unwrap().status, "success");
-    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+    assert_eq!(
+        context.actions_taken.last().unwrap().event_id,
+        Some(event_id.clone())
+    );
 
     // 5. confirmar_interesado: atomically converts lead into sale
     let conf_int_call = ToolCall {
@@ -1137,10 +1215,21 @@ async fn test_dispatcher_safe_ticketing_tools_operational_lifecycle() {
     assert_eq!(conf_int_res["tickets_creados"], 3);
     let tickets = conf_int_res["tickets"].as_array().unwrap();
     assert_eq!(tickets.len(), 3);
-    assert!(tickets[0]["ticket_url"].as_str().unwrap().contains("https://tickets.shirley.pe/#/ticket/"));
-    assert_eq!(context.actions_taken.last().unwrap().tool, "confirmar_interesado");
+    assert!(
+        tickets[0]["ticket_url"]
+            .as_str()
+            .unwrap()
+            .contains("https://tickets.shirley.pe/#/ticket/")
+    );
+    assert_eq!(
+        context.actions_taken.last().unwrap().tool,
+        "confirmar_interesado"
+    );
     assert_eq!(context.actions_taken.last().unwrap().status, "success");
-    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+    assert_eq!(
+        context.actions_taken.last().unwrap().event_id,
+        Some(event_id.clone())
+    );
 
     // 6. Finalize event directly via use case, then reabrir_evento via dispatcher
     state.ticketing.finalize_event.execute(&event_id).unwrap();
@@ -1158,7 +1247,10 @@ async fn test_dispatcher_safe_ticketing_tools_operational_lifecycle() {
     assert_eq!(reopen_res["estado"], "Activo");
     assert_eq!(context.actions_taken.last().unwrap().tool, "reabrir_evento");
     assert_eq!(context.actions_taken.last().unwrap().status, "success");
-    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+    assert_eq!(
+        context.actions_taken.last().unwrap().event_id,
+        Some(event_id.clone())
+    );
 
     // 7. Safe tool turn deduplication
     let reopen_dup = ToolCall {

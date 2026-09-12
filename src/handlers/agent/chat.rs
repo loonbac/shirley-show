@@ -50,7 +50,7 @@ pub async fn chat(
     })
     .await;
 
-    let input = match parse_result {
+    let mut input = match parse_result {
         Ok(Ok(input)) => input,
         Ok(Err(err)) => return Err(err),
         Err(_) => {
@@ -67,11 +67,21 @@ pub async fn chat(
                         code: "agent_timeout".to_string(),
                         retryable: true,
                     }),
+                    conversation_id: uuid::Uuid::new_v4().to_string(),
                 }),
             ));
         }
     };
 
-    let output = state.agent_chat.execute_dynamic(input, start_time).await;
+    let conversation_id = input
+        .conversation_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let pending_action = state.destructive_registry.take(&conversation_id);
+    input.conversation_id = Some(conversation_id.clone());
+    input.pending_destructive_action = pending_action;
+
+    let mut output = state.agent_chat.execute_dynamic(input, start_time).await;
+    output.conversation_id = conversation_id;
     Ok((StatusCode::OK, Json(output)))
 }

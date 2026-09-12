@@ -3,11 +3,15 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::destructive_confirmation::{
+    ConfirmationReply, DestructiveTool, PendingDestructiveAction,
+};
 use crate::agent::system_prompt::{SHIRLEY_SYSTEM_PROMPT, build_context_system_prompt};
 use crate::agent::tool_dispatcher::AgentToolDispatcher;
 use crate::agent::tool_schemas::get_tool_definitions;
 use crate::agent::turn_context::{CommittedTurnState, StagedAudioHandle, TurnToolContext};
 use crate::domain::agent_message::{AgentMessage, HistoryMessage};
+use crate::domain::agent_tool::ToolCall;
 use crate::domain::agent_tool::{AgentNotice, ToolAction};
 use crate::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
 
@@ -36,6 +40,8 @@ pub struct AgentChatInput {
     pub staged_audio_id: Option<String>,
     pub staged_audio: Option<StagedAudioHandle>,
     pub staged_filename: Option<String>,
+    pub conversation_id: Option<String>,
+    pub pending_destructive_action: Option<PendingDestructiveAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +55,8 @@ pub struct AgentChatOutput {
     pub staged_audio_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<AgentNotice>,
+    #[serde(default)]
+    pub conversation_id: String,
 }
 
 pub struct AgentChat {
@@ -126,6 +134,12 @@ impl AgentChat {
         start_time: tokio::time::Instant,
         fixed_deadline: Option<tokio::time::Instant>,
     ) -> AgentChatOutput {
+        let conversation_id = input
+            .conversation_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let pending_destructive_action = input.pending_destructive_action;
+
         let provider = match self.provider.as_ref() {
             Some(p) => p.clone(),
             None => {
@@ -139,6 +153,7 @@ impl AgentChat {
                         code: "agent_unconfigured".to_string(),
                         retryable: false,
                     }),
+                    conversation_id,
                 };
             }
         };
@@ -148,6 +163,7 @@ impl AgentChat {
         let initial_presentation_id = input.presentation_id.clone();
         let initial_event_id = input.event_id.clone();
         let user_message = input.message.trim().to_string();
+        let confirmation_reply = ConfirmationReply::classify(&user_message);
 
         let context_prompt = build_context_system_prompt(
             initial_presentation_id.as_deref(),
@@ -155,6 +171,7 @@ impl AgentChat {
             has_staged_audio,
             staged_filename.as_deref(),
             input.staged_audio_id.as_deref(),
+            pending_destructive_action.as_ref(),
         );
         let full_system_prompt = format!("{}\n\n{}", SHIRLEY_SYSTEM_PROMPT, context_prompt);
 
@@ -187,6 +204,111 @@ impl AgentChat {
             input.staged_audio_id,
             Some(tracker),
         );
+        turn_context.set_conversation_id(conversation_id.clone());
+        turn_context.set_pending_destructive_action(pending_destructive_action.clone());
+        turn_context.set_confirmation_reply(confirmation_reply);
+        turn_context.set_destructive_registry(self.dispatcher.destructive_registry().cloned());
+
+        // 1. Cancellation reply
+        if confirmation_reply == ConfirmationReply::Cancel && pending_destructive_action.is_some() {
+            let pending = pending_destructive_action.as_ref().unwrap();
+            let msg = match pending.tool {
+                DestructiveTool::FinalizeEvent => {
+                    "Entendido, no he finalizado el evento. Las ventas y operaciones continúan abiertas. ¿En qué más te puedo ayudar?"
+                }
+                _ => {
+                    "Entendido, no he eliminado nada y todo sigue exactamente como estaba. ¿En qué más te puedo ayudar?"
+                }
+            };
+            return AgentChatOutput {
+                message: msg.to_string(),
+                actions_taken: vec![],
+                active_presentation_id: turn_context.active_presentation_id,
+                active_event_id: turn_context.active_event_id,
+                staged_audio_id: turn_context.staged_audio_id,
+                notice: None,
+                conversation_id,
+            };
+        }
+
+        // 2. Ambiguous reply
+        if confirmation_reply == ConfirmationReply::Ambiguous
+            && pending_destructive_action.is_some()
+        {
+            let pending = pending_destructive_action.as_ref().unwrap();
+            if let Some(ref reg) = turn_context.destructive_registry {
+                reg.arm(conversation_id.clone(), pending.clone());
+            }
+            let phrase = pending.tool.required_phrase();
+            let action_desc = match pending.tool {
+                DestructiveTool::FinalizeEvent => {
+                    format!("finalizar el evento \"{}\"", pending.target_label)
+                }
+                _ => format!("la eliminación de \"{}\"", pending.target_label),
+            };
+            let msg = format!(
+                "No se completó la operación porque se requiere confirmación explícita. Para confirmar {}, por favor escribe exactamente: {}",
+                action_desc, phrase
+            );
+            return AgentChatOutput {
+                message: msg,
+                actions_taken: vec![],
+                active_presentation_id: turn_context.active_presentation_id,
+                active_event_id: turn_context.active_event_id,
+                staged_audio_id: turn_context.staged_audio_id,
+                notice: None,
+                conversation_id,
+            };
+        }
+
+        // 3. Exact confirmation reply (Synthetic execution)
+        let is_authorized_confirmation = match (&pending_destructive_action, confirmation_reply) {
+            (Some(p), ConfirmationReply::ExactDelete) if !p.tool.is_finalize() => true,
+            (Some(p), ConfirmationReply::ExactFinalize) if p.tool.is_finalize() => true,
+            _ => false,
+        };
+
+        if is_authorized_confirmation {
+            let pending = pending_destructive_action.as_ref().unwrap();
+            let synth_call = ToolCall {
+                id: format!("call_synth_{}", uuid::Uuid::new_v4().simple()),
+                name: pending.tool.name().to_string(),
+                arguments: pending.target.to_canonical_json_value().to_string(),
+            };
+            let res = self
+                .dispatcher
+                .dispatch(&synth_call, &mut turn_context)
+                .await;
+            let message = if !turn_context.actions_taken.is_empty() {
+                if turn_context
+                    .actions_taken
+                    .iter()
+                    .any(|a| a.status == "success")
+                {
+                    compose_grounded_message(&turn_context.actions_taken, None, None)
+                } else {
+                    res.get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("No se pudo completar la operación.")
+                        .to_string()
+                }
+            } else {
+                res.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("No se pudo completar la operación.")
+                    .to_string()
+            };
+
+            return AgentChatOutput {
+                message,
+                actions_taken: turn_context.actions_taken,
+                active_presentation_id: turn_context.active_presentation_id,
+                active_event_id: turn_context.active_event_id,
+                staged_audio_id: turn_context.staged_audio_id,
+                notice: None,
+                conversation_id,
+            };
+        }
 
         let mut effective_budget = Duration::from_secs(30).min(self.limits.request_timeout);
         let mut current_deadline = fixed_deadline.unwrap_or_else(|| start_time + effective_budget);
@@ -213,6 +335,7 @@ impl AgentChat {
                         code: "agent_timeout".to_string(),
                         retryable: true,
                     }),
+                    conversation_id: conversation_id.clone(),
                 };
             }
 
@@ -247,6 +370,7 @@ impl AgentChat {
                         active_event_id: turn_context.active_event_id.clone(),
                         staged_audio_id: turn_context.staged_audio_id,
                         notice: Some(notice),
+                        conversation_id: conversation_id.clone(),
                     };
                 }
                 Err(_) => {
@@ -269,6 +393,7 @@ impl AgentChat {
                             code: "agent_timeout".to_string(),
                             retryable: true,
                         }),
+                        conversation_id: conversation_id.clone(),
                     };
                 }
             };
@@ -326,6 +451,7 @@ impl AgentChat {
                                 code: "agent_timeout".to_string(),
                                 retryable: true,
                             }),
+                            conversation_id: conversation_id.clone(),
                         };
                     }
 
@@ -357,6 +483,7 @@ impl AgentChat {
                                     code: "agent_timeout".to_string(),
                                     retryable: true,
                                 }),
+                                conversation_id: conversation_id.clone(),
                             };
                         }
                     };
@@ -378,6 +505,7 @@ impl AgentChat {
                                     code: "wake_wait".to_string(),
                                     retryable: true,
                                 }),
+                                conversation_id: conversation_id.clone(),
                             };
                         } else if err_code == "pc_wake_timeout" {
                             let msg = "No pude conectarme con la PC de Joshua después de 10 minutos. Cuando esté encendida, vuelve a pedirme la separación.";
@@ -391,6 +519,7 @@ impl AgentChat {
                                     code: "pc_wake_timeout".to_string(),
                                     retryable: true,
                                 }),
+                                conversation_id: conversation_id.clone(),
                             };
                         }
                     }
@@ -420,14 +549,29 @@ impl AgentChat {
                         active_event_id: turn_context.active_event_id.clone(),
                         staged_audio_id: turn_context.staged_audio_id,
                         notice: Some(notice),
+                        conversation_id: conversation_id.clone(),
                     };
                 }
             } else {
                 let mut message = if turn_context.actions_taken.is_empty() {
-                    let raw = response
-                        .content
-                        .unwrap_or_else(|| "No pude generar una respuesta.".to_string());
-                    sanitize_ungrounded_claims(&raw)
+                    if let Some(ref pending) = turn_context.confirmation_requested {
+                        format!(
+                            "¿Estás segura de que deseas {} \"{}\"? Esta acción {}. Para confirmar, por favor escribe exactamente: {}",
+                            if pending.tool.is_finalize() {
+                                "finalizar el evento"
+                            } else {
+                                "eliminar"
+                            },
+                            pending.target_label,
+                            pending.tool.default_consequence(),
+                            pending.tool.required_phrase()
+                        )
+                    } else {
+                        let raw = response
+                            .content
+                            .unwrap_or_else(|| "No pude generar una respuesta.".to_string());
+                        sanitize_ungrounded_claims(&raw)
+                    }
                 } else {
                     compose_grounded_message(
                         &turn_context.actions_taken,
@@ -452,6 +596,7 @@ impl AgentChat {
                     active_event_id: turn_context.active_event_id.clone(),
                     staged_audio_id: turn_context.staged_audio_id,
                     notice: None,
+                    conversation_id: conversation_id.clone(),
                 };
             }
         }
@@ -478,6 +623,7 @@ impl AgentChat {
             active_event_id: turn_context.active_event_id.clone(),
             staged_audio_id: turn_context.staged_audio_id,
             notice: None,
+            conversation_id,
         }
     }
 }

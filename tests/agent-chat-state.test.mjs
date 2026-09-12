@@ -724,4 +724,79 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   console.log('✓ 18. resolveTurn updates activeContext from active_event_id with fallback title');
 }
 
+// 19. conversationId in-memory propagation across turns
+{
+  const state = createChatState();
+  assert.equal(state.get().conversationId, null, "Initial conversationId must be null");
+
+  const turn1 = state.beginTurn({ message: "Elimina la presentación" });
+  state.resolveTurn({
+    generationId: turn1.generationId,
+    response: {
+      message: "¿Estás segura? Confirma con sí, elimínalo",
+      conversation_id: "conv-session-12345",
+      actions_taken: [],
+    },
+  });
+
+  assert.equal(state.get().conversationId, "conv-session-12345", "conversationId must be stored in state");
+
+  // Subsequent turn preserves conversationId
+  const turn2 = state.beginTurn({ message: "sí, elimínalo" });
+  state.resolveTurn({
+    generationId: turn2.generationId,
+    response: {
+      message: "Presentación eliminada.",
+      conversation_id: "conv-session-12345",
+      actions_taken: [{ tool: "eliminar_presentacion", status: "success", presentation_id: "pres-1" }],
+    },
+  });
+
+  assert.equal(state.get().conversationId, "conv-session-12345");
+  console.log("✓ 19. conversationId in-memory propagation across turns verified");
+}
+
+// 20. Active context cleared when active presentation or event is deleted
+{
+  const state = createChatState({
+    activeContext: { id: "pres-to-delete", title: "Show a Eliminar" },
+  });
+  assert.ok(state.get().activeContext);
+
+  const turn = state.beginTurn({ message: "sí, elimínalo" });
+  state.resolveTurn({
+    generationId: turn.generationId,
+    response: {
+      message: "Presentación eliminada.",
+      actions_taken: [
+        { tool: "eliminar_presentacion", status: "success", presentation_id: "pres-to-delete" },
+      ],
+      active_presentation_id: null,
+    },
+  });
+
+  assert.equal(state.get().activeContext, null, "activeContext must be cleared when presentation is deleted");
+
+  // Event deletion clears activeContext as well
+  const eventState = createChatState({
+    activeContext: { id: "evt-to-delete", title: "Evento a Eliminar", type: "event" },
+  });
+  assert.ok(eventState.get().activeContext);
+
+  const evtTurn = eventState.beginTurn({ message: "sí, elimínalo" });
+  eventState.resolveTurn({
+    generationId: evtTurn.generationId,
+    response: {
+      message: "Evento eliminado.",
+      actions_taken: [
+        { tool: "eliminar_evento", status: "success", event_id: "evt-to-delete" },
+      ],
+      active_event_id: null,
+    },
+  });
+
+  assert.equal(eventState.get().activeContext, null, "activeContext must be cleared when event is deleted");
+  console.log("✓ 20. Active context cleared when active presentation or event is deleted verified");
+}
+
 console.log('All Agent Chat State and API Client unit tests passed!');

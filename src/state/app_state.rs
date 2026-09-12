@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::agent::destructive_confirmation::PendingDestructiveRegistry;
 use crate::agent::tool_dispatcher::AgentToolDispatcher;
 use crate::config::{Config, DEFAULT_GROQ_MODEL};
 use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
@@ -72,6 +73,7 @@ pub struct AppState {
     pub agent_runtime: AgentRuntime,
     pub agent_chat: Arc<AgentChat>,
     pub ticketing: TicketingServices,
+    pub destructive_registry: Arc<PendingDestructiveRegistry>,
 }
 
 impl AppState {
@@ -190,6 +192,7 @@ impl AppState {
             poster_storage.reconcile_orphans(&active_posters);
         }
         let ticketing = TicketingServices::new(ticketing_repo, poster_storage);
+        let destructive_registry = Arc::new(PendingDestructiveRegistry::new());
 
         let dispatcher = AgentToolDispatcher::from_components(
             create_presentation.clone(),
@@ -207,7 +210,9 @@ impl AppState {
             update_show_item.clone(),
         )
         .with_ticketing(ticketing.clone())
-        .with_public_base_url(std::env::var("SHIRLEY_PUBLIC_BASE_URL").ok());
+        .with_public_base_url(std::env::var("SHIRLEY_PUBLIC_BASE_URL").ok())
+        .with_destructive_presentation(delete_presentation.clone(), delete_item.clone())
+        .with_destructive_registry(destructive_registry.clone());
 
         let limits = AgentLimits {
             max_iterations: 5,
@@ -230,6 +235,7 @@ impl AppState {
         };
         Self {
             pool,
+            destructive_registry,
             storage,
             frontend_dir: PathBuf::from("frontend"),
             item_repo,

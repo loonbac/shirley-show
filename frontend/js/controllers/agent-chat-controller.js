@@ -144,6 +144,7 @@ export function createAgentChatController(deps) {
         presentationId,
         eventId,
         stagedAudioId,
+        conversationId: priorState.conversationId || null,
         attachment,
         signal: turn.abortController.signal,
       });
@@ -159,18 +160,39 @@ export function createAgentChatController(deps) {
       let refreshedEvents = false;
 
       for (const act of actions) {
+        if (act.status !== 'success') continue;
+
         if ((act.tool === 'create_presentation' || act.tool === 'renombrar_presentacion') && !refreshedCatalog) {
           emitAgentRefresh({ scope: 'catalog' });
           refreshedCatalog = true;
         }
 
-        if (
+        if (act.tool === 'eliminar_presentacion') {
+          const targetId = act.presentation_id || response.active_presentation_id;
+          if (targetId) {
+            emitAgentRefresh({ scope: 'presentation', presentationId: targetId, removed: true });
+          }
+          if (!refreshedCatalog) {
+            emitAgentRefresh({ scope: 'catalog' });
+            refreshedCatalog = true;
+          }
+        } else if (act.tool === 'eliminar_evento') {
+          const targetEventId = act.event_id || response.active_event_id;
+          if (targetEventId) {
+            emitAgentRefresh({ scope: 'event', eventId: targetEventId, removed: true });
+          }
+          if (!refreshedEvents) {
+            emitAgentRefresh({ scope: 'events' });
+            refreshedEvents = true;
+          }
+        } else if (
           act.tool === 'add_lyrics' ||
           act.tool === 'add_note' ||
           act.tool === 'add_track_from_staged' ||
           act.tool === 'renombrar_presentacion' ||
           act.tool === 'reordenar_elemento' ||
-          act.tool === 'editar_elemento'
+          act.tool === 'editar_elemento' ||
+          act.tool === 'eliminar_elemento'
         ) {
           const targetId = act.presentation_id || response.active_presentation_id;
           if (targetId) {
@@ -179,7 +201,8 @@ export function createAgentChatController(deps) {
         } else if (
           act.tool === 'crear_evento' ||
           act.tool === 'editar_evento' ||
-          act.tool === 'reabrir_evento'
+          act.tool === 'reabrir_evento' ||
+          act.tool === 'finalizar_evento'
         ) {
           if (!refreshedEvents) {
             emitAgentRefresh({ scope: 'events' });
@@ -197,7 +220,10 @@ export function createAgentChatController(deps) {
           act.tool === 'checkin_entrada' ||
           act.tool === 'editar_gasto' ||
           act.tool === 'editar_interesado' ||
-          act.tool === 'confirmar_interesado'
+          act.tool === 'confirmar_interesado' ||
+          act.tool === 'eliminar_entrada' ||
+          act.tool === 'eliminar_gasto' ||
+          act.tool === 'eliminar_interesado'
         ) {
           const targetEventId = act.event_id || response.active_event_id;
           if (targetEventId) {
@@ -205,7 +231,7 @@ export function createAgentChatController(deps) {
           }
         }
       }
-    } catch (err) {
+        } catch (err) {
       chatState.failTurn({
         generationId: turn.generationId,
         error: err,

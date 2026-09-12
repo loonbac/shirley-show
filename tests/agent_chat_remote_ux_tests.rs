@@ -187,6 +187,8 @@ async fn test_agent_chat_remote_pc_offline_returns_wake_wait_notice_and_contract
         staged_audio_id: Some(reg_entry.staged_audio_id.clone()),
         staged_audio: None,
         staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
     };
 
     let output = agent_chat.execute(input).await;
@@ -277,6 +279,8 @@ async fn test_agent_chat_remote_pc_wake_timeout_returns_give_up_copy() {
         staged_audio_id: Some(reg_entry.staged_audio_id.clone()),
         staged_audio: None,
         staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
     };
 
     let output = agent_chat.execute(input).await;
@@ -358,6 +362,8 @@ async fn test_agent_chat_remote_separation_success_appends_idle_shutdown_notice(
         staged_audio_id: Some(reg_entry.staged_audio_id),
         staged_audio: None,
         staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
     };
 
     let output = agent_chat.execute(input).await;
@@ -442,6 +448,8 @@ async fn test_agent_chat_composed_deadline_1500s_not_clamped_to_600s() {
         staged_audio_id: Some(reg_entry.staged_audio_id),
         staged_audio: None,
         staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
     };
 
     let output = agent_chat.execute(input).await;
@@ -541,6 +549,8 @@ async fn test_agent_chat_remote_ux_multi_turn_offline_then_boot_success() {
         staged_audio_id: Some(reg_entry.staged_audio_id.clone()),
         staged_audio: None,
         staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
     };
 
     let output_t1 = agent_chat_t1.execute(input_t1).await;
@@ -609,6 +619,8 @@ async fn test_agent_chat_remote_ux_multi_turn_offline_then_boot_success() {
         staged_audio_id: output_t1.staged_audio_id,
         staged_audio: None,
         staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
     };
 
     let output_t2 = agent_chat_t2.execute(input_t2).await;
@@ -718,6 +730,8 @@ async fn test_agent_chat_remote_pc_boots_mid_wait_same_turn_completes_separation
         staged_audio_id: Some(reg_entry.staged_audio_id.clone()),
         staged_audio: None,
         staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
     };
 
     let output = agent_chat.execute(input).await;

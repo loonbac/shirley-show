@@ -26,6 +26,7 @@ export function createChatState(initialState = {}, options = {}) {
     stagedAudioId: null,
     messages: [],
     activeContext: null,
+    conversationId: null,
     notice: null,
     ...initialState,
   };
@@ -196,6 +197,10 @@ export function createChatState(initialState = {}, options = {}) {
 
     const actions = (response && response.actions_taken) || [];
     const hasConsumedTrack = actions.some((act) => act.tool === 'add_track_from_staged' && act.status === 'success');
+    let nextConversationId = state.conversationId;
+    if (response && response.conversation_id) {
+      nextConversationId = response.conversation_id;
+    }
 
     let nextStagedAudioId = state.stagedAudioId;
     if (response && response.staged_audio_id !== undefined) {
@@ -214,7 +219,15 @@ export function createChatState(initialState = {}, options = {}) {
     };
 
     let updatedContext = state.activeContext;
-    if (response && response.active_presentation_id) {
+    const isPresentationDeleted = actions.some(
+      (act) => act.tool === 'eliminar_presentacion' && act.status === 'success' && act.presentation_id === state.activeContext?.id
+    );
+    const isEventDeleted = actions.some(
+      (act) => act.tool === 'eliminar_evento' && act.status === 'success' && act.event_id === state.activeContext?.id
+    );
+    if (isPresentationDeleted || isEventDeleted) {
+      updatedContext = null;
+    } else if (response && response.active_presentation_id) {
       if (!updatedContext || updatedContext.id !== response.active_presentation_id) {
         // Look for title in creation actions if available
         const createAction = actions.find(
@@ -264,6 +277,7 @@ export function createChatState(initialState = {}, options = {}) {
       draft: isProviderNotice ? state.draft : '',
       attachment: hasConsumedTrack ? null : state.attachment,
       activeContext: updatedContext,
+      conversationId: nextConversationId,
       notice,
       messages: [...state.messages, assistantMessage],
     };

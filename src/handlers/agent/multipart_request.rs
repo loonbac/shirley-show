@@ -9,8 +9,8 @@ use crate::domain::agent_message::HistoryMessage;
 use crate::domain::show_item::MAX_AUDIO_BYTE_SIZE;
 use crate::error::AppError;
 use crate::handlers::agent::json_request::{
-    MAX_EVENT_ID_LENGTH, MAX_MESSAGE_CHAR_LENGTH, MAX_PRESENTATION_ID_LENGTH,
-    MAX_STAGED_AUDIO_ID_LENGTH,
+    MAX_CONVERSATION_ID_LENGTH, MAX_EVENT_ID_LENGTH, MAX_MESSAGE_CHAR_LENGTH,
+    MAX_PRESENTATION_ID_LENGTH, MAX_STAGED_AUDIO_ID_LENGTH,
 };
 use crate::infra::filesystem::detect_audio_format::detect_audio_format;
 use crate::infra::filesystem::local_audio_storage::LocalAudioStorage;
@@ -25,6 +25,7 @@ pub async fn parse_and_validate_multipart_request(
     let mut presentation_id: Option<String> = None;
     let mut event_id: Option<String> = None;
     let mut staged_audio_id: Option<String> = None;
+    let mut conversation_id: Option<String> = None;
     let mut history: Vec<HistoryMessage> = Vec::new();
     let mut staging_guard: Option<StagingFileGuard> = None;
     let mut staged_format = None;
@@ -92,6 +93,22 @@ pub async fn parse_and_validate_multipart_request(
                 }
                 if !trimmed.is_empty() {
                     staged_audio_id = Some(trimmed.to_string());
+                }
+            }
+            "conversation_id" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::bad_request("invalid_request", e.to_string()))?;
+                let trimmed = text.trim();
+                if trimmed.chars().count() > MAX_CONVERSATION_ID_LENGTH {
+                    return Err(AppError::bad_request(
+                        "invalid_request",
+                        "El identificador de conversación no puede exceder 128 caracteres.",
+                    ));
+                }
+                if !trimmed.is_empty() {
+                    conversation_id = Some(trimmed.to_string());
                 }
             }
             "history" => {
@@ -213,5 +230,7 @@ pub async fn parse_and_validate_multipart_request(
         staged_audio_id,
         staged_audio,
         staged_filename,
+        conversation_id,
+        pending_destructive_action: None,
     })
 }

@@ -68,6 +68,7 @@ export async function sendAgentChatMessage(options) {
     presentationId = null,
     eventId = null,
     stagedAudioId = null,
+    conversationId = null,
     attachment = null,
     signal,
   } = options;
@@ -90,6 +91,9 @@ export async function sendAgentChatMessage(options) {
     if (stagedAudioId) {
       formData.append('staged_audio_id', stagedAudioId);
     }
+    if (conversationId) {
+      formData.append('conversation_id', conversationId);
+    }
     formData.append('file', attachment);
 
     try {
@@ -109,6 +113,7 @@ export async function sendAgentChatMessage(options) {
     presentation_id: presentationId || null,
     event_id: eventId || null,
     staged_audio_id: stagedAudioId || null,
+    ...(conversationId ? { conversation_id: conversationId } : {}),
   };
 
   try {

@@ -1,10 +1,17 @@
+use crate::agent::destructive_confirmation::{
+    ConfirmationReply, DestructiveTarget, DestructiveTool, PendingDestructiveAction,
+    PendingDestructiveRegistry,
+};
 use crate::domain::move_direction::MoveDirection;
 use crate::domain::show_item::ShowItemPayload;
 use crate::domain::ticketing::{
     ExpenseCategory, InterestStatus, Money, PaymentMethod, PaymentStatus, TicketType,
 };
+use crate::infra::sqlite::cleanup_repository::SqliteCleanupRepository;
 use crate::ports::ticketing::{CheckInOutcome, SellTicketsInput};
 use crate::state::ticketing_services::TicketingServices;
+use crate::use_cases::delete_item::DeleteItem;
+use crate::use_cases::delete_presentation::DeletePresentation;
 use crate::use_cases::rename_presentation::RenamePresentation;
 use crate::use_cases::reorder_item::ReorderItem;
 use crate::use_cases::ticketing::events::{CreateEventInput, UpdateEventInput};
@@ -201,6 +208,43 @@ struct EditarEventoArgs {
     fecha_hora: String,
     lugar: String,
     tipos_de_entrada: Vec<CrearEventoTipoEntradaArgs>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EliminarPresentacionArgs {
+    presentacion_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EliminarElementoArgs {
+    presentacion_id: String,
+    elemento_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EventoIdArgs {
+    evento_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EliminarEntradaArgs {
+    entrada_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EliminarGastoArgs {
+    gasto_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EliminarInteresadoArgs {
+    interesado_id: String,
 }
 
 #[derive(Deserialize)]
@@ -435,6 +479,9 @@ pub struct AgentToolDispatcher {
     update_show_item: Arc<UpdateShowItem<SqliteShowItemRepository, SqliteShowItemRepository>>,
     ticketing: Option<TicketingServices>,
     public_base_url: Option<String>,
+    delete_presentation: Option<Arc<DeletePresentation<SqlitePresentationRepository>>>,
+    delete_item: Option<Arc<DeleteItem<SqliteShowItemRepository, SqliteCleanupRepository>>>,
+    destructive_registry: Option<Arc<PendingDestructiveRegistry>>,
 }
 
 impl AgentToolDispatcher {
@@ -474,6 +521,9 @@ impl AgentToolDispatcher {
             update_show_item,
             ticketing: None,
             public_base_url: None,
+            delete_presentation: None,
+            delete_item: None,
+            destructive_registry: None,
         }
     }
 
@@ -485,6 +535,25 @@ impl AgentToolDispatcher {
     pub fn with_public_base_url(mut self, url: Option<String>) -> Self {
         self.public_base_url = url;
         self
+    }
+
+    pub fn with_destructive_presentation(
+        mut self,
+        delete_presentation: Arc<DeletePresentation<SqlitePresentationRepository>>,
+        delete_item: Arc<DeleteItem<SqliteShowItemRepository, SqliteCleanupRepository>>,
+    ) -> Self {
+        self.delete_presentation = Some(delete_presentation);
+        self.delete_item = Some(delete_item);
+        self
+    }
+
+    pub fn with_destructive_registry(mut self, registry: Arc<PendingDestructiveRegistry>) -> Self {
+        self.destructive_registry = Some(registry);
+        self
+    }
+
+    pub fn destructive_registry(&self) -> Option<&Arc<PendingDestructiveRegistry>> {
+        self.destructive_registry.as_ref()
     }
 
     pub fn from_state(state: &AppState) -> Self {
@@ -505,6 +574,8 @@ impl AgentToolDispatcher {
         )
         .with_ticketing(state.ticketing.clone())
         .with_public_base_url(std::env::var("SHIRLEY_PUBLIC_BASE_URL").ok())
+        .with_destructive_presentation(state.delete_presentation.clone(), state.delete_item.clone())
+        .with_destructive_registry(state.destructive_registry.clone())
     }
 
     pub async fn dispatch(&self, call: &ToolCall, context: &mut TurnToolContext) -> Value {
@@ -1742,7 +1813,10 @@ impl AgentToolDispatcher {
                             tool: "reordenar_elemento".to_string(),
                             presentation_id: Some(pres_id.to_string()),
                             event_id: None,
-                            summary: format!("Elemento {} movido a la posición {}", item_id, new_pos),
+                            summary: format!(
+                                "Elemento {} movido a la posición {}",
+                                item_id, new_pos
+                            ),
                             status: "success".to_string(),
                             details: Some(res.clone()),
                         });
@@ -1815,7 +1889,11 @@ impl AgentToolDispatcher {
                             tool: "editar_elemento".to_string(),
                             presentation_id: Some(pres_id.to_string()),
                             event_id: None,
-                            summary: format!("Elemento {} actualizado ({})", item.id, item.kind().as_str()),
+                            summary: format!(
+                                "Elemento {} actualizado ({})",
+                                item.id,
+                                item.kind().as_str()
+                            ),
                             status: "success".to_string(),
                             details: Some(res.clone()),
                         });
@@ -2067,13 +2145,15 @@ impl AgentToolDispatcher {
                     Err(e) => return validation_err(format!("Estado de pago inválido: {e}")),
                 };
 
-                match ticketing.convert_interest_to_sale.execute(ConvertInterestInput {
-                    interesado_id: args.interesado_id.trim().to_string(),
-                    tipo_entrada: args.tipo_entrada.trim().to_string(),
-                    cantidad: args.cantidad,
-                    medio_pago,
-                    estado_pago,
-                }) {
+                match ticketing
+                    .convert_interest_to_sale
+                    .execute(ConvertInterestInput {
+                        interesado_id: args.interesado_id.trim().to_string(),
+                        tipo_entrada: args.tipo_entrada.trim().to_string(),
+                        cantidad: args.cantidad,
+                        medio_pago,
+                        estado_pago,
+                    }) {
                     Ok(tickets) => {
                         let items = format_tickets_response(
                             &tickets,
@@ -2090,7 +2170,10 @@ impl AgentToolDispatcher {
                             tool: "confirmar_interesado".to_string(),
                             presentation_id: None,
                             event_id,
-                            summary: format!("{} entrada(s) confirmada(s) para interesado", tickets.len()),
+                            summary: format!(
+                                "{} entrada(s) confirmada(s) para interesado",
+                                tickets.len()
+                            ),
                             status: "success".to_string(),
                             details: Some(res.clone()),
                         });
@@ -2102,12 +2185,436 @@ impl AgentToolDispatcher {
                 }
             }
 
+            "eliminar_presentacion" => {
+                let args: EliminarPresentacionArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let pres_id = args.presentacion_id.trim().to_string();
+                if pres_id.is_empty() {
+                    return validation_err("Identificador de presentación inválido");
+                }
+                let target = DestructiveTarget::Presentation {
+                    id: pres_id.clone(),
+                };
+                self.dispatch_destructive(
+                    call,
+                    signature,
+                    context,
+                    DestructiveTool::DeletePresentation,
+                    target,
+                    |_active_ev| {
+                        match self.get_presentation.execute(&pres_id) {
+                            Ok(p) => Ok(p.title),
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                    |_ctx, label| {
+                        let delete_uc = self.delete_presentation.as_ref().ok_or_else(|| {
+                            json!({ "error": "unconfigured", "message": "delete_presentation no configurado" })
+                        })?;
+                        match delete_uc.execute(&pres_id) {
+                            Ok(_) => {
+                                let action = ToolAction {
+                                    tool: "eliminar_presentacion".to_string(),
+                                    presentation_id: Some(pres_id.clone()),
+                                    event_id: None,
+                                    summary: format!("Presentación “{}” eliminada", label),
+                                    status: "success".to_string(),
+                                    details: Some(json!({ "id": pres_id, "status": "deleted" })),
+                                };
+                                Ok((action, json!({ "id": pres_id, "status": "deleted" })))
+                            }
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                )
+            }
+
+            "eliminar_elemento" => {
+                let args: EliminarElementoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let pres_id = args.presentacion_id.trim().to_string();
+                let item_id = args.elemento_id.trim().to_string();
+                if pres_id.is_empty() || item_id.is_empty() {
+                    return validation_err("Identificadores inválidos");
+                }
+                let target = DestructiveTarget::ShowItem {
+                    presentation_id: pres_id.clone(),
+                    item_id: item_id.clone(),
+                };
+                self.dispatch_destructive(
+                    call,
+                    signature,
+                    context,
+                    DestructiveTool::DeleteItem,
+                    target,
+                    |_active_ev| {
+                        let item = self.item_repo.get(&pres_id, &item_id).map_err(|e| app_error_to_json(&e))?.ok_or_else(|| json!({ "error": "item_not_found", "message": "Elemento no encontrado" }))?;
+                        let label = match &item.payload {
+                            ShowItemPayload::Track(t) => format!("Pista \"{}\"", t.title),
+                            ShowItemPayload::Lyrics(l) => {
+                                let snippet: String = l.body.lines().next().unwrap_or("Letra").chars().take(30).collect();
+                                format!("Letra \"{}\"", snippet)
+                            }
+                            ShowItemPayload::Note(n) => {
+                                let snippet: String = n.body.lines().next().unwrap_or("Nota").chars().take(30).collect();
+                                format!("Nota \"{}\"", snippet)
+                            }
+                        };
+                        Ok(label)
+                    },
+                    |_ctx, label| {
+                        let delete_uc = self.delete_item.as_ref().ok_or_else(|| {
+                            json!({ "error": "unconfigured", "message": "delete_item no configurado" })
+                        })?;
+                        match delete_uc.execute(&pres_id, &item_id) {
+                            Ok(_) => {
+                                let action = ToolAction {
+                                    tool: "eliminar_elemento".to_string(),
+                                    presentation_id: Some(pres_id.clone()),
+                                    event_id: None,
+                                    summary: format!("Elemento “{}” eliminado de la presentación", label),
+                                    status: "success".to_string(),
+                                    details: Some(json!({ "item_id": item_id, "status": "deleted" })),
+                                };
+                                Ok((action, json!({ "item_id": item_id, "status": "deleted" })))
+                            }
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                )
+            }
+
+            "eliminar_evento" => {
+                let args: EventoIdArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let evento_id = args.evento_id.trim().to_string();
+                if evento_id.is_empty() {
+                    return validation_err("Identificador de evento inválido");
+                }
+                let target = DestructiveTarget::Event {
+                    id: evento_id.clone(),
+                };
+                self.dispatch_destructive(
+                    call,
+                    signature,
+                    context,
+                    DestructiveTool::DeleteEvent,
+                    target,
+                    |_active_ev| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        let event = tix.get_event.execute(&evento_id).map_err(|e| app_error_to_json(&e))?;
+                        Ok(event.nombre)
+                    },
+                    |_ctx, label| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        match tix.delete_event.execute(&evento_id) {
+                            Ok(_) => {
+                                let action = ToolAction {
+                                    tool: "eliminar_evento".to_string(),
+                                    presentation_id: None,
+                                    event_id: Some(evento_id.clone()),
+                                    summary: format!("Evento “{}” eliminado correctamente", label),
+                                    status: "success".to_string(),
+                                    details: Some(json!({ "id": evento_id, "status": "deleted" })),
+                                };
+                                Ok((action, json!({ "id": evento_id, "status": "deleted" })))
+                            }
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                )
+            }
+
+            "finalizar_evento" => {
+                let args: EventoIdArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let evento_id = args.evento_id.trim().to_string();
+                if evento_id.is_empty() {
+                    return validation_err("Identificador de evento inválido");
+                }
+                let target = DestructiveTarget::Event {
+                    id: evento_id.clone(),
+                };
+                self.dispatch_destructive(
+                    call,
+                    signature,
+                    context,
+                    DestructiveTool::FinalizeEvent,
+                    target,
+                    |_active_ev| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        let event = tix.get_event.execute(&evento_id).map_err(|e| app_error_to_json(&e))?;
+                        Ok(event.nombre)
+                    },
+                    |_ctx, label| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        match tix.finalize_event.execute(&evento_id) {
+                            Ok(_) => {
+                                let action = ToolAction {
+                                    tool: "finalizar_evento".to_string(),
+                                    presentation_id: None,
+                                    event_id: Some(evento_id.clone()),
+                                    summary: format!("Evento “{}” finalizado correctamente", label),
+                                    status: "success".to_string(),
+                                    details: Some(json!({ "id": evento_id, "estado": "Finalizado" })),
+                                };
+                                Ok((action, json!({ "id": evento_id, "estado": "Finalizado", "nombre": label })))
+                            }
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                )
+            }
+
+            "eliminar_entrada" => {
+                let args: EliminarEntradaArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let entrada_id = args.entrada_id.trim().to_string();
+                if entrada_id.is_empty() {
+                    return validation_err("Identificador de entrada inválido");
+                }
+                let target = DestructiveTarget::Ticket {
+                    id: entrada_id.clone(),
+                };
+                self.dispatch_destructive(
+                    call,
+                    signature,
+                    context,
+                    DestructiveTool::DeleteTicket,
+                    target,
+                    |active_ev| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        let ticket = tix.get_ticket.execute(&entrada_id).map_err(|e| app_error_to_json(&e))?;
+                        if let Some(ev) = active_ev {
+                            if ticket.evento_id != ev {
+                                return Err(json!({ "error": "unauthorized_event_id", "message": "La entrada no pertenece al evento activo" }));
+                            }
+                        }
+                        Ok(format!("Entrada para {} ({})", ticket.nombre_comprador, ticket.tipo_entrada))
+                    },
+                    |_ctx, label| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        match tix.delete_ticket.execute(&entrada_id) {
+                            Ok(_) => {
+                                let action = ToolAction {
+                                    tool: "eliminar_entrada".to_string(),
+                                    presentation_id: None,
+                                    event_id: None,
+                                    summary: format!("{} eliminada correctamente", label),
+                                    status: "success".to_string(),
+                                    details: Some(json!({ "id": entrada_id, "status": "deleted" })),
+                                };
+                                Ok((action, json!({ "id": entrada_id, "status": "deleted" })))
+                            }
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                )
+            }
+
+            "eliminar_gasto" => {
+                let args: EliminarGastoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let gasto_id = args.gasto_id.trim().to_string();
+                if gasto_id.is_empty() {
+                    return validation_err("Identificador de gasto inválido");
+                }
+                let target = DestructiveTarget::Expense {
+                    id: gasto_id.clone(),
+                };
+                self.dispatch_destructive(
+                    call,
+                    signature,
+                    context,
+                    DestructiveTool::DeleteExpense,
+                    target,
+                    |active_ev| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        let expense = tix.get_expense.execute(&gasto_id).map_err(|e| app_error_to_json(&e))?;
+                        if let Some(ev) = active_ev {
+                            if expense.evento_id != ev {
+                                return Err(json!({ "error": "unauthorized_event_id", "message": "El gasto no pertenece al evento activo" }));
+                            }
+                        }
+                        Ok(format!("Gasto \"{}\"", expense.descripcion))
+                    },
+                    |_ctx, label| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        match tix.delete_expense.execute(&gasto_id) {
+                            Ok(_) => {
+                                let action = ToolAction {
+                                    tool: "eliminar_gasto".to_string(),
+                                    presentation_id: None,
+                                    event_id: None,
+                                    summary: format!("{} eliminado correctamente", label),
+                                    status: "success".to_string(),
+                                    details: Some(json!({ "id": gasto_id, "status": "deleted" })),
+                                };
+                                Ok((action, json!({ "id": gasto_id, "status": "deleted" })))
+                            }
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                )
+            }
+
+            "eliminar_interesado" => {
+                let args: EliminarInteresadoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let interesado_id = args.interesado_id.trim().to_string();
+                if interesado_id.is_empty() {
+                    return validation_err("Identificador de interesado inválido");
+                }
+                let target = DestructiveTarget::Interest {
+                    id: interesado_id.clone(),
+                };
+                self.dispatch_destructive(
+                    call,
+                    signature,
+                    context,
+                    DestructiveTool::DeleteInterest,
+                    target,
+                    |active_ev| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        let interest = tix.get_interest.execute(&interesado_id).map_err(|e| app_error_to_json(&e))?;
+                        if let Some(ev) = active_ev {
+                            if interest.evento_id != ev {
+                                return Err(json!({ "error": "unauthorized_event_id", "message": "El interesado no pertenece al evento activo" }));
+                            }
+                        }
+                        Ok(format!("Interesado \"{}\"", interest.nombre))
+                    },
+                    |_ctx, label| {
+                        let tix = self.ticketing.as_ref().ok_or_else(|| json!({ "error": "ticketing_unconfigured", "message": "Ticketing no configurado" }))?;
+                        match tix.delete_interest.execute(&interesado_id) {
+                            Ok(_) => {
+                                let action = ToolAction {
+                                    tool: "eliminar_interesado".to_string(),
+                                    presentation_id: None,
+                                    event_id: None,
+                                    summary: format!("{} eliminado correctamente", label),
+                                    status: "success".to_string(),
+                                    details: Some(json!({ "id": interesado_id, "status": "deleted" })),
+                                };
+                                Ok((action, json!({ "id": interesado_id, "status": "deleted" })))
+                            }
+                            Err(e) => Err(app_error_to_json(&e)),
+                        }
+                    },
+                )
+            }
+
             _ => {
                 json!({
                     "error": "unknown_tool",
                     "message": "Herramienta no permitida"
                 })
             }
+        }
+    }
+    fn dispatch_destructive<FPre, FExec>(
+        &self,
+        call: &ToolCall,
+        signature: String,
+        context: &mut TurnToolContext,
+        tool: DestructiveTool,
+        target: DestructiveTarget,
+        preflight: FPre,
+        execute: FExec,
+    ) -> Value
+    where
+        FPre: FnOnce(Option<&str>) -> Result<String, Value>,
+        FExec: FnOnce(&mut TurnToolContext, &str) -> Result<(ToolAction, Value), Value>,
+    {
+        let is_authorized = if let Some(ref pending) = context.pending_destructive_action {
+            pending.tool == tool
+                && pending.target == target
+                && match (tool.is_finalize(), context.confirmation_reply) {
+                    (false, ConfirmationReply::ExactDelete) => true,
+                    (true, ConfirmationReply::ExactFinalize) => true,
+                    _ => false,
+                }
+        } else {
+            false
+        };
+
+        let active_event = context.active_event_id.clone();
+
+        if is_authorized {
+            context.pending_destructive_action = None;
+            let label = preflight(active_event.as_deref())
+                .unwrap_or_else(|_| target.id_label().to_string());
+            match execute(context, &label) {
+                Ok((action, res)) => {
+                    if tool == DestructiveTool::DeletePresentation {
+                        if context.active_presentation_id.as_deref() == Some(target.id_label()) {
+                            context.set_active_presentation_id(None);
+                        }
+                    } else if tool == DestructiveTool::DeleteEvent {
+                        if context.active_event_id.as_deref() == Some(target.id_label()) {
+                            context.set_active_event_id(None);
+                        }
+                    }
+                    context.record_action(action);
+                    context.executed_call_ids.insert(call.id.clone());
+                    context.executed_signatures.insert(signature, res.clone());
+                    res
+                }
+                Err(err_val) => err_val,
+            }
+        } else if context.confirmation_reply == ConfirmationReply::ExactDelete
+            || context.confirmation_reply == ConfirmationReply::ExactFinalize
+        {
+            json!({
+                "error": "unauthorized_destructive_call",
+                "message": "No existe una autorización pendiente en el servidor para ejecutar esta acción destructiva."
+            })
+        } else {
+            let label = match preflight(active_event.as_deref()) {
+                Ok(l) => l,
+                Err(err_val) => return err_val,
+            };
+
+            let pending = PendingDestructiveAction::new(tool, target.clone(), label.clone());
+            if let Some(ref reg) = context.destructive_registry {
+                reg.arm(context.conversation_id.clone(), pending.clone());
+            } else if let Some(ref reg) = self.destructive_registry {
+                reg.arm(context.conversation_id.clone(), pending.clone());
+            }
+            context.confirmation_requested = Some(pending.clone());
+
+            let res = json!({
+                "confirmation_required": true,
+                "tool": tool.name(),
+                "target_id": target.id_label(),
+                "target_label": label,
+                "consequence": tool.default_consequence(),
+                "required_phrase": tool.required_phrase(),
+                "message": format!(
+                    "¿Estás segura de que deseas {} \"{}\"? Esta acción {}. Para confirmar, por favor escribe exactamente: {}",
+                    if tool.is_finalize() { "finalizar el evento" } else { "eliminar" },
+                    label,
+                    tool.default_consequence(),
+                    tool.required_phrase()
+                )
+            });
+            context.executed_call_ids.insert(call.id.clone());
+            context.executed_signatures.insert(signature, res.clone());
+            res
         }
     }
 }

@@ -664,5 +664,116 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         },
+        // Destructive presentation tools (Slice 2)
+        ToolDefinition {
+            name: "eliminar_presentacion".to_string(),
+            description: "Elimina permanentemente una presentación y todos sus elementos (canciones, letras y notas). Requiere confirmación previa.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "presentacion_id": {
+                        "type": "string",
+                        "description": "Identificador único de la presentación a eliminar."
+                    }
+                },
+                "required": ["presentacion_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "eliminar_elemento".to_string(),
+            description: "Elimina permanentemente un elemento (canción, letra o nota) de una presentación. Requiere confirmación previa.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "presentacion_id": {
+                        "type": "string",
+                        "description": "Identificador único de la presentación."
+                    },
+                    "elemento_id": {
+                        "type": "string",
+                        "description": "Identificador único del elemento a eliminar."
+                    }
+                },
+                "required": ["presentacion_id", "elemento_id"],
+                "additionalProperties": false
+            }),
+        },
+        // Destructive ticketing tools (Slice 2)
+        ToolDefinition {
+            name: "eliminar_evento".to_string(),
+            description: "Elimina permanentemente un evento y todas sus entradas, gastos, interesados y su afiche. Requiere confirmación previa.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento a eliminar."
+                    }
+                },
+                "required": ["evento_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "finalizar_evento".to_string(),
+            description: "Finaliza un evento cerrando la venta de entradas y bloqueando modificaciones operativas. Requiere confirmación previa.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento a finalizar."
+                    }
+                },
+                "required": ["evento_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "eliminar_entrada".to_string(),
+            description: "Anula y elimina definitivamente una entrada emitida. Requiere confirmación previa.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "entrada_id": {
+                        "type": "string",
+                        "description": "Identificador único de la entrada a eliminar."
+                    }
+                },
+                "required": ["entrada_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "eliminar_gasto".to_string(),
+            description: "Elimina permanentemente un registro de gasto de un evento. Requiere confirmación previa.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "gasto_id": {
+                        "type": "string",
+                        "description": "Identificador único del gasto a eliminar."
+                    }
+                },
+                "required": ["gasto_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "eliminar_interesado".to_string(),
+            description: "Elimina definitivamente un interesado/lead registrado en un evento. Requiere confirmación previa.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "interesado_id": {
+                        "type": "string",
+                        "description": "Identificador único del interesado a eliminar."
+                    }
+                },
+                "required": ["interesado_id"],
+                "additionalProperties": false
+            }),
+        },
     ]
 }
