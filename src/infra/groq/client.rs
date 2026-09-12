@@ -9,8 +9,8 @@ use crate::config::GroqConfig;
 use crate::domain::agent_message::{AgentMessage, CompletionResponse};
 use crate::domain::agent_tool::{ToolCall, ToolDefinition};
 use crate::infra::groq::dto::{
-    GroqChatCompletionRequest, GroqChatCompletionResponse, GroqFunctionCall,
-    GroqFunctionDefinition, GroqMessage, GroqTool, GroqToolCall,
+    GroqChatCompletionResponse, GroqFunctionCall, GroqFunctionDefinition, GroqMessage, GroqTool,
+    GroqToolCall,
 };
 use crate::infra::groq::error::ProviderError;
 use crate::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
@@ -18,6 +18,18 @@ use crate::ports::chat_completion_provider::{ChatCompletionProvider, CompletionR
 pub const DEFAULT_GROQ_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_GROQ_RETRIES: u32 = 3;
 pub const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+pub const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 800;
+
+#[derive(Debug, serde::Serialize)]
+struct GroqChatCompletionWireRequest {
+    pub model: String,
+    pub messages: Vec<GroqMessage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<GroqTool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<String>,
+    pub max_completion_tokens: u32,
+}
 
 fn parse_retry_after(response: &reqwest::Response) -> Option<Duration> {
     let header_val = response.headers().get(reqwest::header::RETRY_AFTER)?;
@@ -152,11 +164,12 @@ impl ChatCompletionProvider for GroqClient {
                 None
             };
 
-            let body = GroqChatCompletionRequest {
+            let body = GroqChatCompletionWireRequest {
                 model: request.model,
                 messages: wire_messages,
                 tools: wire_tools,
                 tool_choice,
+                max_completion_tokens: DEFAULT_MAX_COMPLETION_TOKENS,
             };
 
             let mut retries: u32 = 0;

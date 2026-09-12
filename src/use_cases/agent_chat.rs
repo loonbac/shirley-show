@@ -316,7 +316,7 @@ impl AgentChat {
             };
         }
 
-        let mut effective_budget = Duration::from_secs(30).min(self.limits.request_timeout);
+        let mut effective_budget = Duration::from_secs(75).min(self.limits.request_timeout);
         let mut current_deadline = fixed_deadline.unwrap_or_else(|| start_time + effective_budget);
 
         for iter in 0..self.limits.max_iterations {
@@ -663,7 +663,7 @@ fn prune_history(history: Vec<HistoryMessage>) -> (Vec<AgentMessage>, bool) {
             _ => 0,
         };
 
-        if selected_rev.len() >= 20 || char_count + len > 32_000 {
+        if selected_rev.len() >= 8 || char_count + len > 8_000 {
             pruned = true;
             break;
         }

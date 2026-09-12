@@ -157,6 +157,7 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     let body = state.last_body.lock().await.clone().unwrap();
     assert_eq!(body["model"], "openai/gpt-oss-120b");
     assert_eq!(body["tool_choice"], "auto");
+    assert_eq!(body["max_completion_tokens"], 800);
 
     let messages = body["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 4);

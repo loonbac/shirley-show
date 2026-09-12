@@ -2617,3 +2617,212 @@ async fn test_agent_chat_fuzzy_matching_ambiguous_event_returns_clarification_to
     assert!(output.message.contains("Sesión 2"));
     assert!(output.message.contains("¿A cuál"));
 }
+
+#[test]
+fn test_tool_definitions_json_size_diet_under_threshold() {
+    use shirley_show::agent::tool_schemas::get_tool_definitions;
+    let tools = get_tool_definitions();
+    let json_str = serde_json::to_string(&tools).unwrap();
+    // Before token diet: 17,727 bytes.
+    // After token diet: 9,295 bytes (>47% reduction, removing verbiage while preserving names, required, enums).
+    assert!(
+        json_str.len() < 10_000,
+        "Tool definitions JSON size must be under 10000 bytes (was 17727 bytes, currently {} bytes)",
+        json_str.len()
+    );
+}
+
+#[tokio::test]
+async fn test_agent_chat_history_truncation_8_messages_and_system_note() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let provider = Arc::new(StubChatProvider::new(vec![Ok(CompletionResponse {
+        content: Some("Respuesta ok".to_string()),
+        tool_calls: vec![],
+    })]));
+
+    let agent_chat = AgentChat::new(
+        Some(provider.clone()),
+        dispatcher,
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+
+    // 12 history messages (user_0, assistant_0, ... user_5, assistant_5)
+    let mut history = Vec::new();
+    for i in 0..12 {
+        history.push(HistoryMessage {
+            role: if i % 2 == 0 {
+                "user".to_string()
+            } else {
+                "assistant".to_string()
+            },
+            content: format!("Mensaje histórico {i}"),
+        });
+    }
+
+    let input = AgentChatInput {
+        message: "Mensaje actual".to_string(),
+        history,
+        presentation_id: None,
+        event_id: None,
+        staged_audio_id: None,
+        staged_audio: None,
+        staged_image: None,
+        staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+    assert_eq!(output.message, "Respuesta ok");
+
+    let requests = provider.recorded_requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    let msgs = &requests[0].messages;
+
+    // Message 0: System note for pruning
+    // Messages 1..=8: Last 8 messages from history (messages 4..11)
+    // Message 9: Current user message
+    assert_eq!(msgs.len(), 10);
+    match &msgs[0] {
+        AgentMessage::System { content } => {
+            assert!(content.contains("fueron podados"));
+        }
+        other => panic!("Expected system note for pruning, got {:?}", other),
+    }
+    match &msgs[1] {
+        AgentMessage::User { content } => {
+            assert_eq!(content, "Mensaje histórico 4");
+        }
+        other => panic!("Expected Mensaje histórico 4, got {:?}", other),
+    }
+    match &msgs[8] {
+        AgentMessage::Assistant { content, .. } => {
+            assert_eq!(content.as_deref(), Some("Mensaje histórico 11"));
+        }
+        other => panic!("Expected Mensaje histórico 11, got {:?}", other),
+    }
+    match &msgs[9] {
+        AgentMessage::User { content } => {
+            assert_eq!(content, "Mensaje actual");
+        }
+        other => panic!("Expected Mensaje actual, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_agent_chat_history_truncation_8k_character_cap() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let provider = Arc::new(StubChatProvider::new(vec![Ok(CompletionResponse {
+        content: Some("Respuesta".to_string()),
+        tool_calls: vec![],
+    })]));
+
+    let agent_chat = AgentChat::new(
+        Some(provider.clone()),
+        dispatcher,
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+
+    // 3 messages, second one is huge (9,000 chars)
+    let input = AgentChatInput {
+        message: "Hola".to_string(),
+        history: vec![
+            HistoryMessage {
+                role: "user".to_string(),
+                content: "Mensaje 0".to_string(),
+            },
+            HistoryMessage {
+                role: "assistant".to_string(),
+                content: "x".repeat(9_000),
+            },
+            HistoryMessage {
+                role: "user".to_string(),
+                content: "Mensaje reciente".to_string(),
+            },
+        ],
+        presentation_id: None,
+        event_id: None,
+        staged_audio_id: None,
+        staged_audio: None,
+        staged_image: None,
+        staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
+    };
+
+    let _ = agent_chat.execute(input).await;
+    let requests = provider.recorded_requests.lock().await;
+    let msgs = &requests[0].messages;
+
+    // Pruned because 9,000 > 8,000 chars:
+    // msgs[0]: System pruning note
+    // msgs[1]: Mensaje reciente (len 16 < 8,000, but preceding msg pushes over 8,000)
+    // msgs[2]: Current user message "Hola"
+    assert_eq!(msgs.len(), 3);
+    match &msgs[0] {
+        AgentMessage::System { content } => {
+            assert!(content.contains("fueron podados"));
+        }
+        other => panic!("Expected pruning note, got {:?}", other),
+    }
+    match &msgs[1] {
+        AgentMessage::User { content } => {
+            assert_eq!(content, "Mensaje reciente");
+        }
+        other => panic!("Expected Mensaje reciente, got {:?}", other),
+    }
+    match &msgs[2] {
+        AgentMessage::User { content } => {
+            assert_eq!(content, "Hola");
+        }
+        other => panic!("Expected Hola, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_agent_chat_normal_turn_timeout_effective_budget_75s() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let provider = Arc::new(StubChatProvider::new(vec![]));
+
+    let agent_chat = AgentChat::new(
+        Some(provider),
+        dispatcher,
+        AgentLimits::default(), // default request_timeout is 120s, so 75s.min(120s) = 75s
+        "openai/gpt-oss-120b".to_string(),
+    );
+
+    let input = AgentChatInput {
+        message: "Consulta normal".to_string(),
+        history: vec![],
+        presentation_id: None,
+        event_id: None,
+        staged_audio_id: None,
+        staged_audio: None,
+        staged_image: None,
+        staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
+    };
+
+    // Simulate turn started 76 seconds ago (exceeding normal 75s budget)
+    let past_start = tokio::time::Instant::now() - Duration::from_secs(76);
+    let output = agent_chat.execute_dynamic(input, past_start).await;
+
+    assert!(output.notice.is_some());
+    let notice = output.notice.unwrap();
+    assert_eq!(notice.code, "agent_timeout");
+    assert!(notice.retryable);
+    assert!(
+        output.message.contains("(75 s)"),
+        "Timeout cancellation message must report effective budget of 75 s, got: {}",
+        output.message
+    );
+}
