@@ -884,8 +884,19 @@ export function createSellTicketDialog(props) {
     const medio_pago = medioSelect.value;
     const estado_pago = medio_pago === 'Cortesía' ? 'Pagado' : estadoSelect.value;
 
-    if (!nombre_comprador || !tipo_entrada || isNaN(cantidad) || cantidad < 1) {
-      errorEl.textContent = 'Complete todos los campos requeridos y seleccione un tipo de entrada.';
+    if (!nombre_comprador) {
+      errorEl.textContent = 'Ingresa el nombre del comprador.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (!tipo_entrada) {
+      errorEl.textContent = 'Selecciona un tipo de entrada.';
+      errorEl.style.display = 'block';
+      typeSelect.focus();
+      return;
+    }
+    if (isNaN(cantidad) || cantidad < 1) {
+      errorEl.textContent = 'La cantidad de entradas debe ser al menos 1.';
       errorEl.style.display = 'block';
       return;
     }

@@ -336,6 +336,16 @@ console.log('Running Events UI and Integration Tests...');
     });
     const multiSelect = multiTypeDialog.el.querySelector('select');
     assert.equal(multiSelect.value, '', 'Multiple ticket types must NOT be preselected');
+    const multiInputs = multiTypeDialog.el.querySelectorAll('input');
+    multiInputs[0].value = 'Comprador sin teléfono';
+    multiInputs[1].value = '';
+    multiTypeDialog.el.querySelector('form').dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(
+      multiTypeDialog.el.querySelector('.events-form-error').textContent,
+      'Selecciona un tipo de entrada.',
+      'Validation must identify the missing ticket type without blaming the optional phone'
+    );
     multiTypeDialog.destroy();
   }
 

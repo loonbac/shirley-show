@@ -1204,6 +1204,7 @@ async fn test_chat_api_separation_duplicate_call_ignored_single_gpu_execution() 
 
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+    let _body = res.into_body().collect().await.unwrap();
     assert_eq!(
         fake_sep
             .execution_count
@@ -1723,4 +1724,66 @@ async fn test_chat_api_multipart_accepts_and_validates_session_id() {
 
     let res2 = app.oneshot(req2).await.unwrap();
     assert_eq!(res2.status(), StatusCode::BAD_REQUEST);
+}
+
+#[derive(Clone)]
+struct SlowSingleResponseProvider;
+
+impl ChatCompletionProvider for SlowSingleResponseProvider {
+    fn complete(
+        &self,
+        _request: CompletionRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        CompletionResponse,
+                        shirley_show::infra::groq::error::ProviderError,
+                    >,
+                > + Send,
+        >,
+    > {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            Ok(CompletionResponse {
+                content: Some("Trabajo prolongado completado".to_string()),
+                tool_calls: vec![],
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_chat_api_streams_heartbeat_before_long_agent_result() {
+    let (_app, state, _tmp) = setup_test_app();
+    let state = state.with_agent_provider(
+        Some(Arc::new(SlowSingleResponseProvider)),
+        AgentLimits::default(),
+        "test-model".to_string(),
+    );
+    let app = create_router(state);
+    let payload = json!({ "message": "Realiza una tarea prolongada" });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = tokio::time::timeout(Duration::from_millis(100), app.oneshot(req))
+        .await
+        .expect("response headers must arrive before agent completion")
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["x-accel-buffering"], "no");
+
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        body.first(),
+        Some(&b' '),
+        "stream must start with a heartbeat"
+    );
+    let parsed: Value =
+        serde_json::from_slice(&body).expect("leading heartbeat is valid JSON whitespace");
+    assert_eq!(parsed["message"], "Trabajo prolongado completado");
 }

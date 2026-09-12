@@ -1,6 +1,9 @@
-use axum::Json;
+use axum::body::Body;
 use axum::extract::{FromRequest, Multipart, Request, State};
 use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use tokio::io::AsyncWriteExt;
+use tokio_util::io::ReaderStream;
 
 use crate::domain::agent_tool::AgentNotice;
 use crate::error::AppError;
@@ -9,10 +12,7 @@ use crate::handlers::agent::multipart_request::parse_and_validate_multipart_requ
 use crate::state::AppState;
 use crate::use_cases::agent_chat::AgentChatOutput;
 
-pub async fn chat(
-    State(state): State<AppState>,
-    request: Request,
-) -> Result<(StatusCode, Json<AgentChatOutput>), AppError> {
+pub async fn chat(State(state): State<AppState>, request: Request) -> Result<Response, AppError> {
     let start_time = tokio::time::Instant::now();
     let parse_deadline = start_time + std::time::Duration::from_secs(30);
 
@@ -54,22 +54,20 @@ pub async fn chat(
         Ok(Ok(p)) => p,
         Ok(Err(err)) => return Err(err),
         Err(_) => {
-            return Ok((
-                StatusCode::OK,
-                Json(AgentChatOutput {
-                    message: "La solicitud tardó más del límite de tiempo (30 s) y fue cancelada."
-                        .to_string(),
-                    actions_taken: vec![],
-                    active_presentation_id: None,
-                    active_event_id: None,
-                    staged_audio_id: None,
-                    notice: Some(AgentNotice {
-                        code: "agent_timeout".to_string(),
-                        retryable: true,
-                    }),
-                    conversation_id: uuid::Uuid::new_v4().to_string(),
+            return Ok(axum::Json(AgentChatOutput {
+                message: "La solicitud tardó más del límite de tiempo (30 s) y fue cancelada."
+                    .to_string(),
+                actions_taken: vec![],
+                active_presentation_id: None,
+                active_event_id: None,
+                staged_audio_id: None,
+                notice: Some(AgentNotice {
+                    code: "agent_timeout".to_string(),
+                    retryable: true,
                 }),
-            ));
+                conversation_id: uuid::Uuid::new_v4().to_string(),
+            })
+            .into_response());
         }
     };
 
@@ -88,12 +86,51 @@ pub async fn chat(
     input.conversation_id = Some(conversation_id.clone());
     input.pending_destructive_action = pending_action;
 
-    let mut output = crate::infra::groq::client::CURRENT_SESSION_ID
-        .scope(
+    let (reader, mut writer) = tokio::io::duplex(16 * 1024);
+    tokio::spawn(async move {
+        // Cloudflare returns 524 when the origin produces no bytes during a long GPU job.
+        // JSON permits leading whitespace, so periodic spaces safely keep the proxied
+        // response alive without changing the frontend response contract.
+        if writer.write_all(b" ").await.is_err() {
+            return;
+        }
+
+        let execution = crate::infra::groq::client::CURRENT_SESSION_ID.scope(
             session_id,
             state.agent_chat.execute_dynamic(input, start_time),
-        )
-        .await;
-    output.conversation_id = conversation_id;
-    Ok((StatusCode::OK, Json(output)))
+        );
+        tokio::pin!(execution);
+
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        heartbeat.tick().await;
+
+        loop {
+            tokio::select! {
+                mut output = &mut execution => {
+                    output.conversation_id = conversation_id;
+                    if let Ok(json) = serde_json::to_vec(&output) {
+                        let _ = writer.write_all(&json).await;
+                    }
+                    let _ = writer.shutdown().await;
+                    break;
+                }
+                _ = heartbeat.tick() => {
+                    if writer.write_all(b" ").await.is_err() {
+                        break;
+                    }
+                    let _ = writer.flush().await;
+                }
+            }
+        }
+    });
+
+    let stream = ReaderStream::new(reader);
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header("x-accel-buffering", "no")
+        .body(Body::from_stream(stream))
+        .expect("valid agent response"))
 }
