@@ -6,6 +6,7 @@ use crate::infra::sqlite::connect::DbPool;
 
 const MIGRATION_0001: &str = include_str!("../../../migrations/0001_shirley_show_core.sql");
 const MIGRATION_0002: &str = include_str!("../../../migrations/0002_ticketing.sql");
+const MIGRATION_0003: &str = include_str!("../../../migrations/0003_optional_ticket_contact.sql");
 
 pub fn migrate_db(conn: &mut Connection) -> Result<(), AppError> {
     conn.execute_batch(
@@ -16,7 +17,11 @@ pub fn migrate_db(conn: &mut Connection) -> Result<(), AppError> {
     )
     .map_err(|e| AppError::Database(format!("Failed to create schema_migrations table: {e}")))?;
 
-    let migrations: &[(i32, &str)] = &[(1, MIGRATION_0001), (2, MIGRATION_0002)];
+    let migrations: &[(i32, &str)] = &[
+        (1, MIGRATION_0001),
+        (2, MIGRATION_0002),
+        (3, MIGRATION_0003),
+    ];
 
     for (version, sql) in migrations {
         let applied: i32 = conn

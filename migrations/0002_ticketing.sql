@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS entradas (
   interesado_id TEXT NULL
     REFERENCES interesados(id) ON DELETE SET NULL,
   nombre_comprador TEXT NOT NULL CHECK (length(trim(nombre_comprador)) > 0),
-  contacto TEXT NOT NULL CHECK (length(trim(contacto)) > 0),
+  contacto TEXT NOT NULL,
   tipo_entrada TEXT NOT NULL CHECK (length(trim(tipo_entrada)) > 0),
   precio_centimos INTEGER NOT NULL CHECK (precio_centimos >= 0),
   medio_pago TEXT NOT NULL CHECK (medio_pago IN ('Yape', 'Efectivo', 'Cortesía')),
