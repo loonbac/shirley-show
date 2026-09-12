@@ -317,6 +317,45 @@ impl AgentChat {
             };
         }
 
+        // Once an audio has been staged, a brief destination reply is not an
+        // open-ended AI request. Resolve it through the application's own
+        // presentation lookup so phrases such as "a la de setiembre" work
+        // even when the chat was opened outside a presentation page.
+        if has_staged_audio_id
+            && let Some(destination) = staged_audio_destination_query(&user_message)
+        {
+            let call = ToolCall {
+                id: format!("call_staged_audio_{}", uuid::Uuid::new_v4().simple()),
+                name: "add_track_from_staged".to_string(),
+                arguments: serde_json::json!({
+                    "presentation_id": destination,
+                    "title": "Audio temporal",
+                    "staged_audio_id": turn_context.staged_audio_id,
+                })
+                .to_string(),
+            };
+            let _ = self.dispatcher.dispatch(&call, &mut turn_context).await;
+            if turn_context
+                .actions_taken
+                .last()
+                .is_some_and(|action| action.status == "success")
+            {
+                return AgentChatOutput {
+                    message: compose_grounded_message(
+                        &turn_context.actions_taken,
+                        None,
+                        turn_context.staged_audio_id.as_deref(),
+                    ),
+                    actions_taken: turn_context.actions_taken,
+                    active_presentation_id: turn_context.active_presentation_id,
+                    active_event_id: turn_context.active_event_id.clone(),
+                    staged_audio_id: turn_context.staged_audio_id,
+                    notice: None,
+                    conversation_id,
+                };
+            }
+        }
+
         let mut effective_budget = if self.remote_vocal_enabled {
             self.limits.separation_timeout
         } else {
