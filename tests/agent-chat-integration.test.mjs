@@ -593,4 +593,65 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   console.log('✓ 11. Event context travels as event_id (not presentation_id) to agent chat API');
 }
 
+// 12. Browser preserves active_event_id from backend response and sends it on subsequent turns
+{
+  activePresentationContextSignal.set(null);
+
+  const state = createChatState();
+  assert.equal(state.get().activeContext, null, 'Initial activeContext must be null');
+
+  let callCount = 0;
+  let capturedCalls = [];
+
+  const ctrl = createAgentChatController({
+    chatState: state,
+    sendAgentChatMessageFn: async (options) => {
+      callCount += 1;
+      capturedCalls.push(options);
+      if (callCount === 1) {
+        return {
+          message: 'Evento creado exitosamente',
+          actions_taken: [
+            {
+              tool: 'crear_evento',
+              event_id: 'evt-rec-999',
+              details: { nombre: 'Peña Criolla Barranco' },
+            },
+          ],
+          active_presentation_id: null,
+          active_event_id: 'evt-rec-999',
+          notice: null,
+        };
+      }
+      return {
+        message: 'Reporte de entradas',
+        actions_taken: [],
+        active_presentation_id: null,
+        active_event_id: 'evt-rec-999',
+        notice: null,
+      };
+    },
+  });
+
+  // Turn 1: User asks to create an event without pre-existing context
+  await ctrl.sendAndOpen('Crear peña criolla');
+
+  const contextAfterTurn1 = state.get().activeContext;
+  assert.ok(contextAfterTurn1, 'activeContext must be populated after receiving active_event_id');
+  assert.equal(contextAfterTurn1.id, 'evt-rec-999');
+  assert.equal(contextAfterTurn1.type, 'event');
+  assert.equal(contextAfterTurn1.title, 'Peña Criolla Barranco');
+
+  // Turn 2: Follow-up question must automatically carry the preserved eventId
+  await ctrl.sendAndOpen('¿Cuántas entradas hay disponibles?');
+
+  assert.equal(capturedCalls.length, 2, 'Two calls should have been made');
+  const turn2Options = capturedCalls[1];
+  assert.equal(turn2Options.eventId, 'evt-rec-999', 'Turn 2 must send preserved eventId');
+  assert.equal(turn2Options.presentationId, null, 'Turn 2 presentationId must remain null');
+
+  ctrl.destroy();
+  console.log('✓ 12. active_event_id preserved in chatState and sent on subsequent turns');
+}
+
 console.log('All Agent Chat Route and Composition integration tests passed!');

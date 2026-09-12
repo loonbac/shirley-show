@@ -247,3 +247,112 @@ fn test_delete_event_returns_cleanup_pending_outcome() {
     assert!(!result.cleanup_pending);
     assert!(!posters_path.join(&poster_file).exists());
 }
+
+struct FailingDeletePosterStorage {
+    inner: Arc<LocalPosterStorage>,
+}
+
+impl PosterStorage for FailingDeletePosterStorage {
+    fn store_poster(&self, evento_id: &str, data: &[u8]) -> Result<String, AppError> {
+        self.inner.store_poster(evento_id, data)
+    }
+
+    fn get_poster(&self, filename: &str) -> Result<Option<(Vec<u8>, ImageFormat)>, AppError> {
+        self.inner.get_poster(filename)
+    }
+
+    fn delete_poster(&self, _filename: &str) -> Result<bool, AppError> {
+        Err(AppError::Internal(
+            "Simulated disk error deleting poster".to_string(),
+        ))
+    }
+}
+
+#[test]
+fn test_delete_event_returns_cleanup_pending_true_when_file_deletion_fails() {
+    let temp_dir = tempdir().unwrap();
+    let posters_path = temp_dir.path().join("posters");
+    let inner_storage = Arc::new(LocalPosterStorage::new(posters_path.clone()));
+
+    let db_path = temp_dir.path().join("test.sqlite3");
+    let pool = init_pool(db_path.to_str().unwrap()).unwrap();
+    migrate_pool(&pool).unwrap();
+    let repo = Arc::new(SqliteTicketingRepository::new(pool));
+
+    let create_event = CreateEvent::new(repo.clone());
+    let replace_poster = ReplaceEventPoster::new(repo.clone(), inner_storage.clone());
+
+    let event = create_event
+        .execute(CreateEventInput {
+            nombre: "Evento Failing Delete".to_string(),
+            fecha_hora: "2026-12-01T20:00:00Z".to_string(),
+            lugar: "Barranco".to_string(),
+            tipos_de_entrada: vec![
+                TicketType::new("General", Money::from_cents(2000), 10).unwrap(),
+            ],
+        })
+        .unwrap();
+
+    let poster_file = replace_poster.execute(&event.id, SAMPLE_WEBP).unwrap();
+    assert!(posters_path.join(&poster_file).exists());
+
+    // When storage delete fails, delete_event MUST succeed in deleting DB record but flag cleanup_pending = true
+    let failing_storage = Arc::new(FailingDeletePosterStorage {
+        inner: inner_storage.clone(),
+    });
+    let delete_event = DeleteEvent::new(repo.clone(), failing_storage);
+
+    let result = delete_event.execute(&event.id).unwrap();
+    assert!(result.deleted, "Event record should be deleted");
+    assert!(
+        result.cleanup_pending,
+        "cleanup_pending MUST be true when file deletion fails"
+    );
+    // File remains on disk because delete failed
+    assert!(posters_path.join(&poster_file).exists());
+}
+
+#[test]
+fn test_replace_poster_compensation_on_old_poster_deletion_failure() {
+    let temp_dir = tempdir().unwrap();
+    let posters_path = temp_dir.path().join("posters");
+    let inner_storage = Arc::new(LocalPosterStorage::new(posters_path.clone()));
+
+    let db_path = temp_dir.path().join("test.sqlite3");
+    let pool = init_pool(db_path.to_str().unwrap()).unwrap();
+    migrate_pool(&pool).unwrap();
+    let repo = Arc::new(SqliteTicketingRepository::new(pool));
+
+    let create_event = CreateEvent::new(repo.clone());
+    let replace_poster = ReplaceEventPoster::new(repo.clone(), inner_storage.clone());
+
+    let event = create_event
+        .execute(CreateEventInput {
+            nombre: "Evento Replace Compensate".to_string(),
+            fecha_hora: "2026-12-01T20:00:00Z".to_string(),
+            lugar: "Barranco".to_string(),
+            tipos_de_entrada: vec![
+                TicketType::new("General", Money::from_cents(2000), 10).unwrap(),
+            ],
+        })
+        .unwrap();
+
+    let old_poster = replace_poster.execute(&event.id, SAMPLE_JPEG).unwrap();
+    assert!(posters_path.join(&old_poster).exists());
+
+    // With failing storage on delete, replacing old poster should fail and revert to old_poster
+    let failing_storage = Arc::new(FailingDeletePosterStorage {
+        inner: inner_storage.clone(),
+    });
+    let failing_replacer = ReplaceEventPoster::new(repo.clone(), failing_storage);
+
+    let replace_res = failing_replacer.execute(&event.id, SAMPLE_WEBP);
+    assert!(
+        replace_res.is_err(),
+        "Replacing poster when old poster deletion fails must return error"
+    );
+
+    // Verify DB still points to old_poster
+    let reloaded_event = repo.get_event(&event.id).unwrap().unwrap();
+    assert_eq!(reloaded_event.imagen, Some(old_poster));
+}

@@ -1,16 +1,20 @@
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::header::CACHE_CONTROL;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
+use super::error::ticketing_error_response;
 use crate::domain::ticketing::ticket::{PaymentMethod, PaymentStatus};
+use crate::error::{ErrorBody, ErrorResponse};
 use crate::handlers::ticketing::TicketingError;
 use crate::handlers::ticketing::dto::{
     CheckInRequest, ListTicketsResponse, SellTicketsRequest, SellTicketsResponse, TicketDto,
     TicketResponse, UpdateTicketContactRequest,
 };
-use crate::ports::ticketing::{CheckInOutcome, SellTicketsInput};
+use crate::ports::ticketing::SellTicketsInput;
 use crate::state::AppState;
 use crate::use_cases::ticketing::tickets::PublicTicketDto;
 
@@ -44,10 +48,33 @@ pub async fn list(
 pub async fn sell(
     State(state): State<AppState>,
     Path(evento_id): Path<String>,
-    Json(payload): Json<SellTicketsRequest>,
-) -> Result<(StatusCode, Json<SellTicketsResponse>), TicketingError> {
-    let medio_pago = PaymentMethod::parse(&payload.medio_pago)?;
-    let estado_pago = PaymentStatus::parse(&payload.estado_pago)?;
+    payload: Result<Json<SellTicketsRequest>, JsonRejection>,
+) -> Response {
+    let Json(payload) = match payload {
+        Ok(p) => p,
+        Err(rejection) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: ErrorBody {
+                        code: "invalid_request".to_string(),
+                        message: rejection.body_text(),
+                        field: None,
+                    },
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let medio_pago = match PaymentMethod::parse(&payload.medio_pago) {
+        Ok(m) => m,
+        Err(err) => return ticketing_error_response(err),
+    };
+    let estado_pago = match PaymentStatus::parse(&payload.estado_pago) {
+        Ok(s) => s,
+        Err(err) => return ticketing_error_response(err),
+    };
 
     let input = SellTicketsInput {
         evento_id,
@@ -60,13 +87,16 @@ pub async fn sell(
         estado_pago,
     };
 
-    let tickets = state.ticketing.sell_tickets.execute(input)?;
+    let tickets = match state.ticketing.sell_tickets.execute(input) {
+        Ok(t) => t,
+        Err(err) => return ticketing_error_response(err),
+    };
     let entradas = tickets
         .iter()
         .map(|t| TicketDto::from_domain(t, true))
         .collect();
 
-    Ok((StatusCode::CREATED, Json(SellTicketsResponse { entradas })))
+    (StatusCode::CREATED, Json(SellTicketsResponse { entradas })).into_response()
 }
 
 pub async fn get(
@@ -82,17 +112,38 @@ pub async fn get(
 pub async fn update_contact(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(payload): Json<UpdateTicketContactRequest>,
-) -> Result<Json<TicketResponse>, TicketingError> {
-    let ticket = state.ticketing.update_ticket_contact.execute(
+    payload: Result<Json<UpdateTicketContactRequest>, JsonRejection>,
+) -> Response {
+    let Json(payload) = match payload {
+        Ok(p) => p,
+        Err(rejection) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: ErrorBody {
+                        code: "invalid_request".to_string(),
+                        message: rejection.body_text(),
+                        field: None,
+                    },
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let ticket = match state.ticketing.update_ticket_contact.execute(
         &id,
         &payload.nombre_comprador,
         &payload.contacto,
-    )?;
+    ) {
+        Ok(t) => t,
+        Err(err) => return ticketing_error_response(err),
+    };
 
-    Ok(Json(TicketResponse {
+    Json(TicketResponse {
         entrada: TicketDto::from_domain(&ticket, false),
-    }))
+    })
+    .into_response()
 }
 
 pub async fn delete(
@@ -115,14 +166,35 @@ pub async fn confirm_payment(
 
 pub async fn check_in(
     State(state): State<AppState>,
-    Json(payload): Json<CheckInRequest>,
-) -> Result<Json<CheckInOutcome>, TicketingError> {
-    let outcome = state
+    payload: Result<Json<CheckInRequest>, JsonRejection>,
+) -> Response {
+    let Json(payload) = match payload {
+        Ok(p) => p,
+        Err(rejection) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: ErrorBody {
+                        code: "invalid_request".to_string(),
+                        message: rejection.body_text(),
+                        field: None,
+                    },
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let outcome = match state
         .ticketing
         .check_in_ticket
-        .execute(&payload.evento_id, &payload.codigo)?;
+        .execute(&payload.evento_id, &payload.codigo)
+    {
+        Ok(o) => o,
+        Err(err) => return ticketing_error_response(err),
+    };
 
-    Ok(Json(outcome))
+    Json(outcome).into_response()
 }
 
 pub async fn get_public_ticket(

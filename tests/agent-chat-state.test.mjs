@@ -694,4 +694,34 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
   console.log('✓ 17. GPU status probe integration (offline -> label espera; online -> genérico; local -> genérico)');
 }
 
+// 18. resolveTurn updates activeContext from active_event_id with fallback title
+{
+  const state = createChatState();
+  const turn1 = state.beginTurn({ message: 'Resumen del evento' });
+  state.resolveTurn({
+    generationId: turn1.generationId,
+    response: {
+      message: 'Aquí está el resumen',
+      actions_taken: [
+        {
+          tool: 'resumen_evento',
+          event_id: 'evt-444',
+          details: { id: 'evt-444', balance: 500 },
+        },
+      ],
+      active_presentation_id: null,
+      active_event_id: 'evt-444',
+      notice: null,
+    },
+  });
+
+  const ctx = state.get().activeContext;
+  assert.ok(ctx, 'activeContext must be present');
+  assert.equal(ctx.id, 'evt-444');
+  assert.equal(ctx.type, 'event');
+  assert.equal(ctx.title, 'Evento', 'Fallback title should be Evento when no nombre/title in details');
+
+  console.log('✓ 18. resolveTurn updates activeContext from active_event_id with fallback title');
+}
+
 console.log('All Agent Chat State and API Client unit tests passed!');

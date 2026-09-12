@@ -185,51 +185,57 @@ impl EventRepository for SqliteTicketingRepository {
     }
 
     fn update_event(&self, event: &Event) -> Result<(), AppError> {
-        let conn = self.pool.get().map_err(|e| {
+        let mut conn = self.pool.get().map_err(|e| {
             AppError::Database(format!("Failed to get connection for update_event: {e}"))
         })?;
 
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(db_err)?;
+
         // Invariant C4: verify sold ticket types and ensure capacity is not lowered below emitted count
-        let mut stmt = conn
-            .prepare("SELECT tipo_entrada, COUNT(*) FROM entradas WHERE evento_id = ?1 GROUP BY tipo_entrada;")
-            .map_err(db_err)?;
+        {
+            let mut stmt = tx
+                .prepare("SELECT tipo_entrada, COUNT(*) FROM entradas WHERE evento_id = ?1 GROUP BY tipo_entrada;")
+                .map_err(db_err)?;
 
-        let emitted_counts: Vec<(String, u32)> = stmt
-            .query_map(rusqlite::params![event.id], |row| {
-                let name: String = row.get(0)?;
-                let count: u32 = row.get(1)?;
-                Ok((name, count))
-            })
-            .map_err(db_err)?
-            .collect::<Result<_, _>>()
-            .map_err(db_err)?;
+            let emitted_counts: Vec<(String, u32)> = stmt
+                .query_map(rusqlite::params![event.id], |row| {
+                    let name: String = row.get(0)?;
+                    let count: u32 = row.get(1)?;
+                    Ok((name, count))
+                })
+                .map_err(db_err)?
+                .collect::<Result<_, _>>()
+                .map_err(db_err)?;
 
-        for (sold_tipo, count) in emitted_counts {
-            if count > 0 {
-                let matching_new_type = event
-                    .tipos_de_entrada
-                    .iter()
-                    .find(|t| t.nombre.eq_ignore_ascii_case(&sold_tipo));
+            for (sold_tipo, count) in emitted_counts {
+                if count > 0 {
+                    let matching_new_type = event
+                        .tipos_de_entrada
+                        .iter()
+                        .find(|t| t.nombre == sold_tipo);
 
-                match matching_new_type {
-                    None => {
-                        return Err(AppError::bad_request(
-                            "cannot_remove_sold_ticket_type",
-                            format!(
-                                "No se puede eliminar o renombrar el tipo de entrada '{}' porque ya tiene {} entrada(s) emitida(s)",
-                                sold_tipo, count
-                            ),
-                        ));
-                    }
-                    Some(new_type) => {
-                        if new_type.capacidad < count {
+                    match matching_new_type {
+                        None => {
                             return Err(AppError::bad_request(
-                                "capacity_below_emitted",
+                                "cannot_remove_sold_ticket_type",
                                 format!(
-                                    "La capacidad del tipo de entrada '{}' ({}) no puede ser menor a las entradas ya emitidas ({})",
-                                    sold_tipo, new_type.capacidad, count
+                                    "No se puede eliminar o renombrar el tipo de entrada '{}' porque ya tiene {} entrada(s) emitida(s)",
+                                    sold_tipo, count
                                 ),
                             ));
+                        }
+                        Some(new_type) => {
+                            if new_type.capacidad < count {
+                                return Err(AppError::bad_request(
+                                    "capacity_below_emitted",
+                                    format!(
+                                        "La capacidad del tipo de entrada '{}' ({}) no puede ser menor a las entradas ya emitidas ({})",
+                                        sold_tipo, new_type.capacidad, count
+                                    ),
+                                ));
+                            }
                         }
                     }
                 }
@@ -240,7 +246,7 @@ impl EventRepository for SqliteTicketingRepository {
             AppError::Internal(format!("Failed to serialize tipos_de_entrada: {e}"))
         })?;
 
-        let rows = conn
+        let rows = tx
             .execute(
                 "UPDATE eventos
                  SET nombre = ?2, fecha_hora = ?3, lugar = ?4, tipos_de_entrada = ?5, finalizado = ?6, imagen = ?7, fecha_actualizacion = ?8
@@ -264,6 +270,8 @@ impl EventRepository for SqliteTicketingRepository {
                 "Evento no encontrado",
             ));
         }
+
+        tx.commit().map_err(db_err)?;
 
         Ok(())
     }

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tempfile::NamedTempFile;
 
 use shirley_show::domain::ticketing::ticket::{PaymentMethod, PaymentStatus};
@@ -269,11 +270,73 @@ fn test_list_tickets_is_bounded_by_default_limit() {
     let pool = init_pool(temp_file.path().to_str().unwrap()).unwrap();
     migrate_pool(&pool).unwrap();
 
-    let repo = SqliteTicketingRepository::new(pool);
-    let list = repo
+    let repo = SqliteTicketingRepository::new(pool.clone());
+
+    // 1. Empty list for non-existent event
+    let list_empty = repo
         .list_tickets("evt-non-existent", None, None, None)
         .unwrap();
-    assert!(list.is_empty());
+    assert!(list_empty.is_empty());
+
+    // 2. Create event with capacity for 1000 tickets
+    let event = Event::new(
+        "evt-limit-500".to_string(),
+        "Concierto Masivo".to_string(),
+        "2026-12-31T22:00:00Z".to_string(),
+        "Estadio Nacional".to_string(),
+        vec![TicketType::new("General", Money::from_soles(50.0).unwrap(), 1000).unwrap()],
+        false,
+        None,
+        "2026-12-01T00:00:00Z".to_string(),
+        "2026-12-01T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    repo.create_event(&event).unwrap();
+
+    // 3. Insert 520 tickets directly into DB
+    {
+        let mut conn = pool.get().unwrap();
+        let tx = conn.transaction().unwrap();
+        for i in 0..520 {
+            tx.execute(
+                "INSERT INTO entradas (id, evento_id, interesado_id, nombre_comprador, contacto, tipo_entrada, precio_centimos, medio_pago, estado_pago, codigo_qr, scan_token, estado_checkin, hora_ingreso, fecha_creacion, fecha_actualizacion)
+                 VALUES (?1, ?2, NULL, ?3, '987000000', 'General', 5000, 'Yape', 'Pagado', ?4, ?5, 'No ingresó', NULL, '2026-12-01T00:00:00Z', '2026-12-01T00:00:00Z');",
+                rusqlite::params![
+                    format!("tix-lim-{i}"),
+                    "evt-limit-500",
+                    format!("Comprador {i}"),
+                    format!("{:032x}", i + 1),
+                    format!("st_{:064x}", i + 1),
+                ],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    // 4. Verify DB holds 520 rows
+    {
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM entradas WHERE evento_id = 'evt-limit-500';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 520, "Database must physically store all 520 rows");
+    }
+
+    // 5. Query repo list_tickets without explicit limit: MUST return exactly 500 rows
+    let bounded_list = repo
+        .list_tickets("evt-limit-500", None, None, None)
+        .unwrap();
+    assert_eq!(
+        bounded_list.len(),
+        DEFAULT_TICKETS_LIMIT,
+        "list_tickets must truncate results at DEFAULT_TICKETS_LIMIT (500)"
+    );
+    assert_eq!(bounded_list.len(), 500);
 }
 
 #[test]
@@ -344,6 +407,32 @@ fn test_update_event_preserves_sold_types_and_capacity() {
     let err_val = err_remove.unwrap_err();
     assert_eq!(err_val.code(), "cannot_remove_sold_ticket_type");
 
+    // 3b. Attempt to rename "General" to lowercase "general" -> MUST FAIL (exact match required, renaming sold types is prohibited)
+    let bad_update_rename_casing = Event::new(
+        "evt-c4".to_string(),
+        "Concierto Invariante".to_string(),
+        "2026-10-15T21:00:00Z".to_string(),
+        "Teatro".to_string(),
+        vec![
+            TicketType::new("general", Money::from_soles(30.0).unwrap(), 50).unwrap(),
+            TicketType::new("VIP", Money::from_soles(60.0).unwrap(), 20).unwrap(),
+        ],
+        false,
+        None,
+        "2026-10-01T00:00:00Z".to_string(),
+        "2026-10-02T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    let err_case = repo.update_event(&bad_update_rename_casing);
+    assert!(
+        err_case.is_err(),
+        "Renaming sold ticket type with different casing must fail"
+    );
+    assert_eq!(
+        err_case.unwrap_err().code(),
+        "cannot_remove_sold_ticket_type"
+    );
+
     // 4. Attempt to update event reducing General capacity below emitted (cap 3 < 5) -> MUST FAIL
     let bad_update_cap = Event::new(
         "evt-c4".to_string(),
@@ -382,4 +471,86 @@ fn test_update_event_preserves_sold_types_and_capacity() {
     )
     .unwrap();
     assert!(repo.update_event(&good_update).is_ok());
+}
+
+#[test]
+fn test_update_event_concurrency_with_sales_in_immediate_tx() {
+    let temp_file = NamedTempFile::new().expect("temp file");
+    let pool = init_pool(temp_file.path().to_str().unwrap()).unwrap();
+    migrate_pool(&pool).unwrap();
+
+    let repo = Arc::new(SqliteTicketingRepository::new(pool.clone()));
+
+    // Create event with General capacity 10
+    let event = Event::new(
+        "evt-conc".to_string(),
+        "Concierto Concurrente".to_string(),
+        "2026-11-20T21:00:00Z".to_string(),
+        "Auditorio".to_string(),
+        vec![TicketType::new("General", Money::from_soles(25.0).unwrap(), 10).unwrap()],
+        false,
+        None,
+        "2026-11-01T00:00:00Z".to_string(),
+        "2026-11-01T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    repo.create_event(&event).unwrap();
+
+    let repo1 = repo.clone();
+    let repo2 = repo.clone();
+
+    // Thread 1: Sells 6 tickets
+    let h1 = std::thread::spawn(move || {
+        let creds: Vec<_> = (0..6)
+            .map(|i| GeneratedCredentials {
+                id: format!("tix-conc-{i}"),
+                scan_token: ScanToken::new(format!("st_{:064x}", i + 100)).unwrap(),
+                qr_secret: QrSecret::new(format!("{:032x}", i + 100)).unwrap(),
+            })
+            .collect();
+
+        repo1.issue_sale(
+            &SellTicketsInput {
+                evento_id: "evt-conc".to_string(),
+                interesado_id: None,
+                nombre_comprador: "Comprador H1".to_string(),
+                contacto: "987111222".to_string(),
+                tipo_entrada: "General".to_string(),
+                cantidad: 6,
+                medio_pago: PaymentMethod::Yape,
+                estado_pago: PaymentStatus::Pagado,
+            },
+            creds,
+        )
+    });
+
+    // Thread 2: Attempts to lower capacity to 4 (which is invalid if sale committed)
+    let h2 = std::thread::spawn(move || {
+        let lowered_event = Event::new(
+            "evt-conc".to_string(),
+            "Concierto Concurrente".to_string(),
+            "2026-11-20T21:00:00Z".to_string(),
+            "Auditorio".to_string(),
+            vec![TicketType::new("General", Money::from_soles(25.0).unwrap(), 4).unwrap()],
+            false,
+            None,
+            "2026-11-01T00:00:00Z".to_string(),
+            "2026-11-02T00:00:00Z".to_string(),
+        )
+        .unwrap();
+
+        repo2.update_event(&lowered_event)
+    });
+
+    let res1 = h1.join().unwrap();
+    let res2 = h2.join().unwrap();
+
+    // Verify invariants:
+    // If sale succeeded (6 tickets emitted), update to capacity 4 MUST have failed!
+    if res1.is_ok() {
+        assert!(
+            res2.is_err(),
+            "Capacity lowering to 4 must fail when 6 tickets were sold"
+        );
+    }
 }

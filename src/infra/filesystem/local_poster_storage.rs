@@ -168,8 +168,9 @@ impl PosterStorage for LocalPosterStorage {
             let _ = fs::remove_file(&trash_target);
             Ok(true)
         } else {
-            let removed = fs::remove_file(&path).is_ok();
-            Ok(removed)
+            fs::remove_file(&path)
+                .map(|_| true)
+                .map_err(|e| AppError::Internal(format!("Error eliminando afiche {filename}: {e}")))
         }
     }
 }

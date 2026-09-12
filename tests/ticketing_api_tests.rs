@@ -379,6 +379,48 @@ async fn test_tickets_and_checkin_api_endpoints() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
+    // 1b. POST /api/eventos/{id}/entradas with negative quantity (-2) -> MUST return 400 Bad Request
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/entradas"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre_comprador": "Juan Perez",
+                "contacto": "987000111",
+                "tipo_entrada": "General",
+                "cantidad": -2,
+                "medio_pago": "Yape",
+                "estado_pago": "Pagado"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let err_json = body_to_json(res.into_body()).await;
+    assert_eq!(err_json["error"]["code"], "invalid_request");
+
+    // 1c. POST /api/eventos/{id}/entradas with wrong types -> MUST return 400 Bad Request
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/entradas"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre_comprador": "Juan Perez",
+                "contacto": "987000111",
+                "tipo_entrada": "General",
+                "cantidad": "diez",
+                "medio_pago": "Yape",
+                "estado_pago": "Pagado"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
     // 2. POST /api/eventos/{id}/entradas -> sell 2 General paid tickets
     let req = Request::builder()
         .method("POST")
@@ -434,6 +476,23 @@ async fn test_tickets_and_checkin_api_endpoints() {
     assert_eq!(res.status(), StatusCode::OK);
     let ticket_json = body_to_json(res.into_body()).await;
     assert_eq!(ticket_json["entrada"]["id"], ticket1_id);
+
+    // 4b. PATCH /api/entradas/{id} with malformed JSON body -> MUST return 400 Bad Request
+    let req = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/entradas/{ticket1_id}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre_comprador": [1, 2, 3]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let err_json = body_to_json(res.into_body()).await;
+    assert_eq!(err_json["error"]["code"], "invalid_request");
 
     // 5. PATCH /api/entradas/{id} -> update contact
     let req = Request::builder()
@@ -520,6 +579,24 @@ async fn test_tickets_and_checkin_api_endpoints() {
     let pub_paid_json = body_to_json(res.into_body()).await;
     assert_eq!(pub_paid_json["estado_pago"], "Pagado");
     assert!(pub_paid_json["qr_svg"].as_str().unwrap().contains("<svg"));
+
+    // 9b. POST /api/entradas/checkin with invalid/malformed JSON body -> MUST return 400 Bad Request
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/entradas/checkin")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "evento_id": 12345,
+                "codigo": false
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let err_json = body_to_json(res.into_body()).await;
+    assert_eq!(err_json["error"]["code"], "invalid_request");
 
     // 10. POST /api/entradas/checkin with unknown code -> Invalida
     let req = Request::builder()
@@ -700,6 +777,48 @@ async fn test_interests_and_posters_admin_endpoints() {
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
+
+    // 7b. Upload poster with forbidden image/jpg MIME -> MUST return 415 Unsupported Media Type
+    let boundary_jpg = "----WebKitFormBoundaryJpg123";
+    let sample_jpeg: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+    let body_jpg =
+        build_poster_multipart_body(boundary_jpg, "poster.jpg", sample_jpeg, "image/jpg");
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/imagen"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary_jpg}"),
+        )
+        .body(Body::from(body_jpg))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "image/jpg must be rejected (only image/jpeg is allowed)"
+    );
+
+    // 7c. Upload poster with discordant MIME (PNG bytes declared as image/jpeg) -> MUST return 415
+    let boundary_mismatch = "----WebKitFormBoundaryMis123";
+    let sample_png: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let body_mismatch =
+        build_poster_multipart_body(boundary_mismatch, "poster.png", sample_png, "image/jpeg");
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/imagen"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary_mismatch}"),
+        )
+        .body(Body::from(body_mismatch))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "Discordant MIME must return 415"
+    );
 
     // 8. Upload poster via multipart POST /api/eventos/{id}/imagen -> 200 OK
     let boundary = "----WebKitFormBoundaryXyZ123";

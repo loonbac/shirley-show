@@ -226,6 +226,24 @@ export function createChatState(initialState = {}, options = {}) {
           title,
         };
       }
+    } else if (response && response.active_event_id) {
+      if (!updatedContext || updatedContext.id !== response.active_event_id || updatedContext.type !== 'event') {
+        const eventAction = actions.find(
+          (act) =>
+            (act.tool === 'crear_evento' || act.event_id === response.active_event_id) &&
+            act.details &&
+            (act.details.nombre || act.details.title)
+        );
+        const title =
+          (eventAction && eventAction.details && (eventAction.details.nombre || eventAction.details.title)) ||
+          (updatedContext && updatedContext.id === response.active_event_id && updatedContext.title) ||
+          'Evento';
+        updatedContext = {
+          id: response.active_event_id,
+          title,
+          type: 'event',
+        };
+      }
     }
 
     const notice = (response && response.notice) || null;

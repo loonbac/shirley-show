@@ -222,7 +222,7 @@ pub async fn upload_poster(
     };
 
     let content_type_matches = match detected_format {
-        ImageFormat::Jpeg => content_type == "image/jpeg" || content_type == "image/jpg",
+        ImageFormat::Jpeg => content_type == "image/jpeg",
         ImageFormat::Png => content_type == "image/png",
         ImageFormat::Webp => content_type == "image/webp",
     };
