@@ -130,8 +130,8 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     let tools = get_tool_definitions();
     assert_eq!(
         tools.len(),
-        31,
-        "Must expose exactly 31 tools in Slice 2 (13 presentations + 18 ticketing)"
+        32,
+        "Must expose exactly 32 tools in Slice 3 (13 presentations + 19 ticketing)"
     );
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -150,6 +150,17 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     // Destructive presentation tools (Slice 2)
     assert!(names.contains(&"eliminar_presentacion"));
     assert!(names.contains(&"eliminar_elemento"));
+    // Slice 3 poster tool
+    assert!(names.contains(&"subir_afiche"));
+
+    // Assert architectural exclusions:
+    assert!(!names.contains(&"reproducir_audio"));
+    assert!(!names.contains(&"play"));
+    assert!(!names.contains(&"pause"));
+    assert!(!names.contains(&"stage_mode"));
+    assert!(!names.contains(&"modo_escenario"));
+    assert!(!names.contains(&"camera_scan"));
+    assert!(!names.contains(&"escanear_camara"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -252,6 +263,14 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
                 assert_eq!(props["presentacion_id"]["type"], "string");
                 assert_eq!(props["elemento_id"]["type"], "string");
             }
+            "subir_afiche" => {
+                let required = params["required"].as_array().unwrap();
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("evento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props.len(), 1);
+                assert_eq!(props["evento_id"]["type"], "string");
+            }
             _ => {} // Ticketing tools are validated in ticketing_ressy_tests
         }
     }
@@ -281,6 +300,20 @@ async fn test_dispatcher_rejects_unknown_or_destructive_tools() {
     let result2 = dispatcher.dispatch(&unknown_call, &mut context).await;
     assert_eq!(result2["error"], "unknown_tool");
     assert!(context.actions_taken.is_empty());
+
+    // Assert architectural non-goals rejected as unknown_tool:
+    for excluded_tool in &["reproducir_audio", "modo_escenario", "escanear_camara"] {
+        let call = ToolCall {
+            id: format!("call_{excluded_tool}"),
+            name: excluded_tool.to_string(),
+            arguments: json!({}).to_string(),
+        };
+        let res = dispatcher.dispatch(&call, &mut context).await;
+        assert_eq!(
+            res["error"], "unknown_tool",
+            "Excluded tool '{excluded_tool}' must be rejected with unknown_tool"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1270,4 +1303,59 @@ async fn test_dispatcher_safe_presentation_tools_domain_errors() {
     let res = dispatcher.dispatch(&edit_incompat, &mut context).await;
     assert!(res.get("error").is_some());
     assert_eq!(res["error"], "incompatible_field");
+}
+
+#[test]
+fn test_system_prompt_token_budget_strictly_below_2500_tokens_with_32_tools() {
+    use shirley_show::agent::destructive_confirmation::{
+        DestructiveTarget, DestructiveTool, PendingDestructiveAction,
+    };
+    use shirley_show::agent::system_prompt::{SHIRLEY_SYSTEM_PROMPT, build_context_system_prompt};
+    use shirley_show::agent::tool_schemas::get_tool_definitions;
+
+    let pending = PendingDestructiveAction::new(
+        DestructiveTool::DeleteEvent,
+        DestructiveTarget::Event {
+            id: "evt-test-999".to_string(),
+        },
+        "Festival Criollo de Gala 2026".to_string(),
+    );
+
+    let context = build_context_system_prompt(
+        Some("pres-active-1234567890"),
+        Some("evt-active-1234567890"),
+        true,
+        Some("pista_musical_en_vivo_mezcla_final.mp3"),
+        Some("staged-audio-uuid-9876543210"),
+        true,
+        Some(&pending),
+    );
+
+    let full_prompt = format!("{}\n\n{}", SHIRLEY_SYSTEM_PROMPT, context);
+
+    // Also include JSON schema representation of all tools
+    let tools = get_tool_definitions();
+    let tools_json = serde_json::to_string(&tools).unwrap();
+
+    let total_text = format!("{}\n\n{}", full_prompt, tools_json);
+    let char_count = total_text.chars().count();
+    let word_count = total_text.split_whitespace().count();
+
+    // Check system prompt text alone stays strictly below 2,500 tokens:
+    let prompt_char_count = full_prompt.chars().count();
+    let prompt_word_count = full_prompt.split_whitespace().count();
+    let prompt_estimated_tokens = (prompt_char_count as f64 / 3.2)
+        .ceil()
+        .max((prompt_word_count as f64 * 1.35).ceil()) as usize;
+
+    println!(
+        "Prompt audit: chars={}, words={}, estimated_tokens={}; Full with 32 tools: chars={}, words={}",
+        prompt_char_count, prompt_word_count, prompt_estimated_tokens, char_count, word_count
+    );
+
+    assert!(
+        prompt_estimated_tokens < 2500,
+        "Rendered system prompt exceeds 2500 tokens budget: estimated {} tokens",
+        prompt_estimated_tokens
+    );
 }

@@ -1,7 +1,7 @@
 import { createElement } from '../../utils/dom/create-element.js';
 import { createIcon } from '../atoms/icon.js';
 import { createAgentAttachmentChip } from '../molecules/agent-attachment-chip.js';
-import { validateAudioAttachment } from '../../data/agent-chat-api.js';
+import { validateAgentAttachment } from '../../data/agent-chat-api.js';
 
 /**
  * Organism managing the input composer: auto-growing textarea, audio file picker,
@@ -40,17 +40,17 @@ export function createAgentChatComposer(props) {
 
   let inlineWarning = null;
 
-  // Hidden audio file input
+  // Hidden audio and image file input
   const fileInputEl = createElement('input', {
     type: 'file',
-    accept: '.mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-m4a,audio/mp4',
+    accept: '.mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/x-m4a,audio/mp4,image/*,.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp',
     class: 'agent-chat-file-input',
     style: { display: 'none' },
     onChange: (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
 
-      const validation = validateAudioAttachment(file);
+      const validation = validateAgentAttachment(file);
       if (!validation.valid) {
         setInlineWarning(validation.error.message);
         fileInputEl.value = '';
@@ -150,8 +150,8 @@ export function createAgentChatComposer(props) {
     {
       type: 'button',
       class: 'agent-composer-btn agent-composer-btn--attach',
-      'aria-label': 'Adjuntar archivo de audio (.mp3, .wav, .m4a)',
-      title: 'Adjuntar archivo de audio',
+      'aria-label': 'Adjuntar archivo de audio o imagen',
+      title: 'Adjuntar archivo de audio o imagen',
       disabled: pending,
       onClick: () => {
         if (pending) return;

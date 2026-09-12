@@ -116,6 +116,7 @@ pub fn parse_and_validate_json_request(body_bytes: &[u8]) -> Result<AgentChatInp
         event_id,
         staged_audio_id,
         staged_audio: None,
+        staged_image: None,
         staged_filename: None,
         conversation_id,
         pending_destructive_action: None,

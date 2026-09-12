@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use crate::domain::ticketing::Event;
 use crate::error::AppError;
-use crate::ports::ticketing::{EventRepository, ImageFormat, PosterStorage};
-
-const MAX_POSTER_SIZE_BYTES: usize = 10 * 1024 * 1024;
+use crate::ports::ticketing::{EventRepository, ImageFormat, MAX_POSTER_SIZE_BYTES, PosterStorage};
 
 pub struct ReplaceEventPoster<E: EventRepository, P: PosterStorage> {
     event_repo: Arc<E>,

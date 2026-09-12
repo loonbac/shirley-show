@@ -9,7 +9,9 @@ use crate::agent::destructive_confirmation::{
 use crate::agent::system_prompt::{SHIRLEY_SYSTEM_PROMPT, build_context_system_prompt};
 use crate::agent::tool_dispatcher::AgentToolDispatcher;
 use crate::agent::tool_schemas::get_tool_definitions;
-use crate::agent::turn_context::{CommittedTurnState, StagedAudioHandle, TurnToolContext};
+use crate::agent::turn_context::{
+    CommittedTurnState, StagedAudioHandle, StagedImageHandle, TurnToolContext,
+};
 use crate::domain::agent_message::{AgentMessage, HistoryMessage};
 use crate::domain::agent_tool::ToolCall;
 use crate::domain::agent_tool::{AgentNotice, ToolAction};
@@ -39,6 +41,7 @@ pub struct AgentChatInput {
     pub event_id: Option<String>,
     pub staged_audio_id: Option<String>,
     pub staged_audio: Option<StagedAudioHandle>,
+    pub staged_image: Option<StagedImageHandle>,
     pub staged_filename: Option<String>,
     pub conversation_id: Option<String>,
     pub pending_destructive_action: Option<PendingDestructiveAction>,
@@ -159,6 +162,7 @@ impl AgentChat {
         };
 
         let has_staged_audio = input.staged_audio.is_some();
+        let has_staged_image = input.staged_image.is_some();
         let staged_filename = input.staged_filename.clone();
         let initial_presentation_id = input.presentation_id.clone();
         let initial_event_id = input.event_id.clone();
@@ -171,6 +175,7 @@ impl AgentChat {
             has_staged_audio,
             staged_filename.as_deref(),
             input.staged_audio_id.as_deref(),
+            has_staged_image,
             pending_destructive_action.as_ref(),
         );
         let full_system_prompt = format!("{}\n\n{}", SHIRLEY_SYSTEM_PROMPT, context_prompt);
@@ -205,6 +210,7 @@ impl AgentChat {
             Some(tracker),
         );
         turn_context.set_conversation_id(conversation_id.clone());
+        turn_context.set_staged_image(input.staged_image);
         turn_context.set_pending_destructive_action(pending_destructive_action.clone());
         turn_context.set_confirmation_reply(confirmation_reply);
         turn_context.set_destructive_registry(self.dispatcher.destructive_registry().cloned());

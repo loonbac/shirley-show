@@ -4,6 +4,8 @@ use crate::domain::ticketing::ticket::{PaymentMethod, PaymentStatus, Ticket};
 use crate::domain::ticketing::{Event, EventSummary, Expense, Interest, QrSecret, ScanToken};
 use crate::error::AppError;
 
+pub const MAX_POSTER_SIZE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB (10,485,760 bytes)
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImageFormat {
     Jpeg,

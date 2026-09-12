@@ -58,10 +58,34 @@ fn setup_test_app() -> (axum::Router, AppState, TempDir) {
     let pool = init_pool(db_path.to_str().unwrap()).unwrap();
     migrate_pool(&pool).unwrap();
 
+    let config = Config {
+        bind_addr: "127.0.0.1:3000".parse().unwrap(),
+        data_dir: temp_dir.path().join("data"),
+        frontend_dir: temp_dir.path().join("frontend"),
+        groq: Default::default(),
+        yt_dlp_bin: None,
+        agent_timeout_secs: 120,
+        separation_timeout_secs: 600,
+        remote_separation_timeout_secs: 1500,
+        joshua_pc: None,
+    };
+    std::fs::create_dir_all(&config.data_dir).unwrap();
+    std::fs::create_dir_all(&config.frontend_dir).unwrap();
+
     let storage = Arc::new(LocalAudioStorage::new(audio_dir));
-    let mut state = AppState::new_with_items(pool, storage);
-    state.frontend_dir = temp_dir.path().join("frontend");
-    std::fs::create_dir_all(&state.frontend_dir).unwrap();
+    let staged_audio_registry =
+        Arc::new(shirley_show::state::staged_audio_registry::StagedAudioRegistry::new());
+    let youtube_downloader = Arc::new(shirley_show::infra::youtube::ProcessYoutubeDownloader::new(
+        shirley_show::infra::youtube::ProcessYoutubeDownloaderConfig::default(),
+    ));
+
+    let state = AppState::new_with_all_components_and_config(
+        pool,
+        storage,
+        staged_audio_registry,
+        youtube_downloader,
+        &config,
+    );
 
     let app = create_router(state.clone());
     (app, state, temp_dir)
@@ -1275,4 +1299,323 @@ async fn test_chat_api_separation_timeout_preserves_prior_actions_and_releases_g
     assert_eq!(actions[0]["tool"], "add_note");
     // GPU permit must be available (released)
     assert_eq!(state.gpu_semaphore.available_permits(), 1);
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_image_magic_byte_classification_jpeg_png_webp() {
+    let (_app, state, _tmp) = setup_test_app();
+    let provider = Arc::new(MockProvider {
+        response: CompletionResponse {
+            content: Some("Imagen recibida.".to_string()),
+            tool_calls: vec![],
+        },
+    });
+    let state = state.with_agent_provider(
+        Some(provider),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+
+    // 1. JPEG
+    let app1 = create_router(state.clone());
+    let boundary = "----WebKitFormBoundaryJpegTest";
+    let jpeg_bytes = [
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+    ];
+    let body_bytes = build_multipart(
+        boundary,
+        &[("message", "Usa este afiche")],
+        &[("file", "afiche.jpg", "image/jpeg", &jpeg_bytes)],
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+    let res = app1.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "JPEG must be accepted");
+
+    // 2. PNG
+    let app2 = create_router(state.clone());
+    let boundary = "----WebKitFormBoundaryPngTest";
+    let png_bytes = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+    ];
+    let body_bytes = build_multipart(
+        boundary,
+        &[("message", "Afiche PNG")],
+        &[("file", "afiche.png", "image/png", &png_bytes)],
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+    let res = app2.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "PNG must be accepted");
+
+    // 3. WebP
+    let app3 = create_router(state.clone());
+    let boundary = "----WebKitFormBoundaryWebpTest";
+    let mut webp_bytes = Vec::new();
+    webp_bytes.extend_from_slice(b"RIFF");
+    webp_bytes.extend_from_slice(&[0x14, 0x00, 0x00, 0x00]); // 20 bytes payload length
+    webp_bytes.extend_from_slice(b"WEBP");
+    webp_bytes.extend_from_slice(b"VP8 ");
+    webp_bytes.extend_from_slice(&[0x08, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04]);
+    let body_bytes = build_multipart(
+        boundary,
+        &[("message", "Afiche WebP")],
+        &[("file", "afiche.webp", "image/webp", &webp_bytes)],
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+    let res = app3.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "WebP must be accepted");
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_spoofed_extension_mime_rejected_400() {
+    let (app, _, _tmp) = setup_test_app();
+
+    let boundary = "----WebKitFormBoundarySpoofTest";
+    // Declared as PNG with .png and image/png, but content is arbitrary ASCII
+    let fake_bytes = b"THIS IS NOT A VALID PNG FILE AT ALL. 1234567890";
+    let body_bytes = build_multipart(
+        boundary,
+        &[("message", "Afiche spoofed")],
+        &[("file", "malicious.png", "image/png", fake_bytes)],
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "Spoofed image content must be rejected with 400"
+    );
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_image_exceeding_10_mib_rejected_400() {
+    let (app, _, _tmp) = setup_test_app();
+
+    let boundary = "----WebKitFormBoundaryLargeImg";
+    // Valid JPEG header but 10 MiB + 1 byte
+    let max_bytes = 10 * 1024 * 1024;
+    let mut large_img = vec![0u8; max_bytes + 1];
+    large_img[0..3].copy_from_slice(&[0xFF, 0xD8, 0xFF]);
+
+    let body_bytes = build_multipart(
+        boundary,
+        &[("message", "Afiche gigante")],
+        &[("file", "gigante.jpg", "image/jpeg", &large_img)],
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "Image exceeding 10 MiB must be rejected with 400"
+    );
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_unsupported_file_rejected_400() {
+    let (app, _, _tmp) = setup_test_app();
+
+    let boundary = "----WebKitFormBoundaryDocPdf";
+    let pdf_bytes = b"%PDF-1.4 dummy pdf content";
+    let body_bytes = build_multipart(
+        boundary,
+        &[("message", "Documento no permitido")],
+        &[("file", "doc.pdf", "application/pdf", pdf_bytes)],
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "Unsupported file must be rejected with 400"
+    );
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_image_upload_subir_afiche_e2e_persistence_and_cleanup() {
+    use shirley_show::ports::ticketing::{EventRepository, PosterStorage};
+    use shirley_show::use_cases::ticketing::CreateEventInput;
+
+    let (_app, state, _tmp) = setup_test_app();
+
+    // 1. Create active event
+    let event = state
+        .ticketing
+        .create_event
+        .execute(CreateEventInput {
+            nombre: "Concierto Gran Afiche".to_string(),
+            fecha_hora: "2026-11-20T21:00:00Z".to_string(),
+            lugar: "Teatro Municipal".to_string(),
+            tipos_de_entrada: vec![shirley_show::domain::ticketing::TicketType {
+                nombre: "VIP".to_string(),
+                precio: shirley_show::domain::ticketing::Money::from_soles(50.0).unwrap(),
+                capacidad: 200,
+            }],
+        })
+        .unwrap();
+
+    // 2. Setup mock provider to invoke subir_afiche
+    let provider = Arc::new(MockProvider {
+        response: CompletionResponse {
+            content: Some("Afiche subido con éxito.".to_string()),
+            tool_calls: vec![ToolCall {
+                id: "call_subir_e2e".to_string(),
+                name: "subir_afiche".to_string(),
+                arguments: json!({ "evento_id": event.id }).to_string(),
+            }],
+        },
+    });
+
+    let state = state.with_agent_provider(
+        Some(provider),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state.clone());
+
+    let boundary = "----WebKitFormBoundaryE2EPoster";
+    let jpeg_bytes = [
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00,
+        0x48, 0x00, 0x48, 0x00, 0x00,
+    ];
+
+    let body_bytes = build_multipart(
+        boundary,
+        &[
+            ("event_id", &event.id),
+            ("message", "Coloca esta imagen como afiche"),
+        ],
+        &[("file", "afiche_e2e.jpg", "image/jpeg", &jpeg_bytes)],
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let actions = json["actions_taken"].as_array().unwrap();
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0]["tool"], "subir_afiche");
+    assert_eq!(actions[0]["status"], "success");
+    assert_eq!(actions[0]["event_id"], event.id);
+
+    // Verify disk storage persistence: event now points to poster and poster storage holds the bytes
+    let updated_event = state
+        .ticketing
+        .repo
+        .get_event(&event.id)
+        .unwrap()
+        .expect("Event must exist");
+    assert!(updated_event.imagen.is_some(), "Event must have poster set");
+    let filename = updated_event.imagen.unwrap();
+    let stored = state
+        .ticketing
+        .poster_storage
+        .get_poster(&filename)
+        .unwrap();
+    assert!(stored.is_some(), "Poster file must exist in poster storage");
+    let (data, format) = stored.unwrap();
+    assert_eq!(format, shirley_show::ports::ticketing::ImageFormat::Jpeg);
+    assert_eq!(data, jpeg_bytes);
+
+    // 3. Turn-scoped cleanup of unconsumed images:
+    // Request with image, but provider issues no tool calls.
+    let text_provider = Arc::new(MockProvider {
+        response: CompletionResponse {
+            content: Some("Solo charlando, no usé la imagen.".to_string()),
+            tool_calls: vec![],
+        },
+    });
+    let state_unconsumed = state.with_agent_provider(
+        Some(text_provider),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app2 = create_router(state_unconsumed.clone());
+
+    let boundary2 = "----WebKitFormBoundaryUnconsumed";
+    let body_bytes2 = build_multipart(
+        boundary2,
+        &[("message", "Hola")],
+        &[(
+            "file",
+            "unused.png",
+            "image/png",
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+        )],
+    );
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={}", boundary2),
+        )
+        .body(Body::from(body_bytes2))
+        .unwrap();
+    let res2 = app2.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::OK);
 }

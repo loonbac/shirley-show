@@ -56,6 +56,7 @@ pub fn build_context_system_prompt(
     has_staged_audio: bool,
     staged_filename: Option<&str>,
     staged_audio_id: Option<&str>,
+    has_staged_image: bool,
     pending_confirmation: Option<&PendingDestructiveAction>,
 ) -> String {
     let mut parts = Vec::new();
@@ -105,6 +106,10 @@ pub fn build_context_system_prompt(
             "Audio preparado disponible: Hay un audio listo en staging con ID \"{}\" para separar voces o agregarse a una presentación mediante `add_track_from_staged`.",
             id
         ));
+    }
+
+    if has_staged_image {
+        parts.push("Imagen adjunta disponible: Hay una imagen lista para asignarse como afiche del evento mediante `subir_afiche`.".to_string());
     }
 
     if let Some(pending) = pending_confirmation {

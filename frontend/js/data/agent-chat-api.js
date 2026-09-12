@@ -1,33 +1,85 @@
 import { requestJson, ApiError } from './request-json.js';
 
 export const MAX_AUDIO_BYTES = 100 * 1024 * 1024; // 104,857,600 bytes (100 MiB)
+export const MAX_POSTER_BYTES = 10 * 1024 * 1024; // 10,485,760 bytes (10 MiB)
 export const ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.m4a'];
+export const ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 /**
- * Validates an audio attachment against size and extension constraints.
+ * Validates an attachment against audio or image constraints.
+ * 
+ * @param {{ name: string, size: number, type?: string }} file
+ * @returns {{ valid: true, kind: 'audio' | 'image' | null } | { valid: false, error: { code: string, message: string } }}
+ */
+export function validateAgentAttachment(file) {
+  if (!file) {
+    return { valid: true, kind: null };
+  }
+
+  const name = (file.name || '').toLowerCase();
+  const type = (file.type || '').toLowerCase();
+
+  const isImage =
+    ALLOWED_IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext)) ||
+    type.startsWith('image/') ||
+    type === 'image/jpeg' ||
+    type === 'image/png' ||
+    type === 'image/webp';
+
+  const isAudio =
+    ALLOWED_AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext)) ||
+    type.startsWith('audio/') ||
+    type === 'audio/mpeg' ||
+    type === 'audio/wav' ||
+    type === 'audio/x-m4a';
+
+  if (isImage) {
+    if (file.size > MAX_POSTER_BYTES) {
+      return {
+        valid: false,
+        error: {
+          code: 'file_too_large',
+          message: 'El archivo de imagen supera el límite máximo de 10 MiB.',
+        },
+      };
+    }
+    return { valid: true, kind: 'image' };
+  }
+
+  if (isAudio) {
+    if (file.size > MAX_AUDIO_BYTES) {
+      return {
+        valid: false,
+        error: {
+          code: 'file_too_large',
+          message: 'El archivo de audio supera el límite máximo de 100 MiB.',
+        },
+      };
+    }
+    return { valid: true, kind: 'audio' };
+  }
+
+  return {
+    valid: false,
+    error: {
+      code: 'unsupported_format',
+      message: 'Formato no soportado. Se admiten archivos de audio (.mp3, .wav, .m4a) o imágenes (.jpg, .jpeg, .png, .webp).',
+    },
+  };
+}
+
+/**
+ * Validates an audio attachment against size and extension constraints (backward-compatible wrapper).
  * 
  * @param {{ name: string, size: number }} file
  * @returns {{ valid: true } | { valid: false, error: { code: string, message: string } }}
  */
 export function validateAudioAttachment(file) {
-  if (!file) {
-    return { valid: true };
+  const res = validateAgentAttachment(file);
+  if (!res.valid) {
+    return res;
   }
-
-  if (file.size > MAX_AUDIO_BYTES) {
-    return {
-      valid: false,
-      error: {
-        code: 'file_too_large',
-        message: 'El archivo de audio supera el límite máximo de 100 MiB.',
-      },
-    };
-  }
-
-  const name = (file.name || '').toLowerCase();
-  const hasValidExt = ALLOWED_AUDIO_EXTENSIONS.some((ext) => name.endsWith(ext));
-
-  if (!hasValidExt) {
+  if (res.kind === 'image') {
     return {
       valid: false,
       error: {
@@ -36,7 +88,6 @@ export function validateAudioAttachment(file) {
       },
     };
   }
-
   return { valid: true };
 }
 
@@ -74,7 +125,7 @@ export async function sendAgentChatMessage(options) {
   } = options;
 
   if (attachment) {
-    const validation = validateAudioAttachment(attachment);
+    const validation = validateAgentAttachment(attachment);
     if (!validation.valid) {
       throw new ApiError(400, validation.error.code, validation.error.message, 'file');
     }

@@ -149,8 +149,19 @@ export function createChatState(initialState = {}, options = {}) {
     );
 
     let turnPendingLabel = pendingLabel;
+    const attachmentName = (attachment && attachment.name || '').toLowerCase();
+    const attachmentType = (attachment && attachment.type || '').toLowerCase();
+    const isImageAttachment =
+      attachmentName.endsWith('.jpg') ||
+      attachmentName.endsWith('.jpeg') ||
+      attachmentName.endsWith('.png') ||
+      attachmentName.endsWith('.webp') ||
+      attachmentType.startsWith('image/');
+
     if (!turnPendingLabel) {
-      if (gpuStatus && isVocalIntent) {
+      if (isImageAttachment) {
+        turnPendingLabel = 'Ressy está subiendo el afiche…';
+      } else if (gpuStatus && isVocalIntent) {
         turnPendingLabel = resolveVocalPendingLabel(gpuStatus);
       } else if (isPriorRemoteWaiting) {
         turnPendingLabel = 'esperando la PC de Joshua…';
@@ -197,6 +208,8 @@ export function createChatState(initialState = {}, options = {}) {
 
     const actions = (response && response.actions_taken) || [];
     const hasConsumedTrack = actions.some((act) => act.tool === 'add_track_from_staged' && act.status === 'success');
+    const hasConsumedPoster = actions.some((act) => act.tool === 'subir_afiche' && act.status === 'success');
+    const hasConsumedAttachment = hasConsumedTrack || hasConsumedPoster;
     let nextConversationId = state.conversationId;
     if (response && response.conversation_id) {
       nextConversationId = response.conversation_id;
@@ -275,7 +288,7 @@ export function createChatState(initialState = {}, options = {}) {
       vocalSeparationPending: false,
       stagedAudioId: nextStagedAudioId,
       draft: isProviderNotice ? state.draft : '',
-      attachment: hasConsumedTrack ? null : state.attachment,
+      attachment: hasConsumedAttachment ? null : state.attachment,
       activeContext: updatedContext,
       conversationId: nextConversationId,
       notice,

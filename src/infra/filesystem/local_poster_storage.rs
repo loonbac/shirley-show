@@ -3,10 +3,8 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::error::AppError;
-pub use crate::ports::ticketing::ImageFormat;
 use crate::ports::ticketing::PosterStorage;
-
-const MAX_POSTER_SIZE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+pub use crate::ports::ticketing::{ImageFormat, MAX_POSTER_SIZE_BYTES};
 
 pub struct LocalPosterStorage {
     posters_dir: PathBuf,

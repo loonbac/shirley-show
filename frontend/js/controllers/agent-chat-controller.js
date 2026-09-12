@@ -223,7 +223,8 @@ export function createAgentChatController(deps) {
           act.tool === 'confirmar_interesado' ||
           act.tool === 'eliminar_entrada' ||
           act.tool === 'eliminar_gasto' ||
-          act.tool === 'eliminar_interesado'
+          act.tool === 'eliminar_interesado' ||
+          act.tool === 'subir_afiche'
         ) {
           const targetEventId = act.event_id || response.active_event_id;
           if (targetEventId) {

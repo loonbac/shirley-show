@@ -7,12 +7,23 @@ use crate::agent::destructive_confirmation::{
 use crate::domain::agent_tool::ToolAction;
 use crate::domain::audio_format::AudioFormat;
 use crate::infra::filesystem::StagingFileGuard;
+pub use crate::ports::ticketing::{ImageFormat, MAX_POSTER_SIZE_BYTES};
 
 pub enum StagedAudioHandle {
     Available {
         guard: StagingFileGuard,
         format: AudioFormat,
         byte_size: i64,
+    },
+    Consumed,
+    Failed,
+}
+
+pub enum StagedImageHandle {
+    Available {
+        data: Vec<u8>,
+        format: ImageFormat,
+        byte_size: usize,
     },
     Consumed,
     Failed,
@@ -37,6 +48,7 @@ pub struct TurnToolContext {
     pub executed_signatures: HashMap<String, serde_json::Value>,
     pub staged_audio: Option<StagedAudioHandle>,
     pub staged_audio_id: Option<String>,
+    pub staged_image: Option<StagedImageHandle>,
     pub actions_taken: Vec<ToolAction>,
     pub active_presentation_id: Option<String>,
     pub active_event_id: Option<String>,
@@ -151,6 +163,7 @@ impl TurnToolContext {
             executed_signatures: HashMap::new(),
             staged_audio,
             staged_audio_id,
+            staged_image: None,
             actions_taken: Vec::new(),
             active_presentation_id,
             active_event_id,
@@ -224,6 +237,10 @@ impl TurnToolContext {
 
     pub fn set_confirmation_reply(&mut self, reply: ConfirmationReply) {
         self.confirmation_reply = reply;
+    }
+
+    pub fn set_staged_image(&mut self, image: Option<StagedImageHandle>) {
+        self.staged_image = image;
     }
 
     pub fn set_destructive_registry(&mut self, reg: Option<Arc<PendingDestructiveRegistry>>) {

@@ -4,10 +4,11 @@ use tempfile::TempDir;
 
 use shirley_show::agent::tool_dispatcher::AgentToolDispatcher;
 use shirley_show::agent::tool_schemas::get_tool_definitions;
-use shirley_show::agent::turn_context::TurnToolContext;
+use shirley_show::agent::turn_context::{StagedImageHandle, TurnToolContext};
 use shirley_show::domain::agent_tool::ToolCall;
 use shirley_show::infra::filesystem::LocalAudioStorage;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
+use shirley_show::ports::ticketing::{EventRepository, ImageFormat};
 use shirley_show::state::AppState;
 
 fn setup_test_state() -> (AppState, TempDir) {
@@ -30,8 +31,8 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
     let tools = get_tool_definitions();
     assert_eq!(
         tools.len(),
-        31,
-        "get_tool_definitions() must expose exactly 31 tools in Slice 2 (13 presentations + 18 ticketing)"
+        32,
+        "get_tool_definitions() must expose exactly 32 tools in Slice 3 (13 presentations + 19 ticketing)"
     );
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -69,6 +70,18 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
     assert!(names.contains(&"eliminar_entrada"));
     assert!(names.contains(&"eliminar_gasto"));
     assert!(names.contains(&"eliminar_interesado"));
+
+    // 1 poster ticketing tool (Slice 3)
+    assert!(names.contains(&"subir_afiche"));
+
+    // Assert architectural exclusions:
+    assert!(!names.contains(&"reproducir_audio"));
+    assert!(!names.contains(&"play"));
+    assert!(!names.contains(&"pause"));
+    assert!(!names.contains(&"stage_mode"));
+    assert!(!names.contains(&"modo_escenario"));
+    assert!(!names.contains(&"camera_scan"));
+    assert!(!names.contains(&"escanear_camara"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -337,6 +350,16 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
                 assert!(required.contains(&json!("interesado_id")));
                 let props = params["properties"].as_object().unwrap();
                 assert_eq!(props["interesado_id"]["type"], "string");
+            }
+            "subir_afiche" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("subir_afiche required");
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("evento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props.len(), 1);
+                assert_eq!(props["evento_id"]["type"], "string");
             }
             _ => {}
         }
@@ -1338,4 +1361,178 @@ async fn test_dispatcher_safe_ticketing_tools_domain_errors() {
     };
     let res = dispatcher.dispatch(&conf_int_missing, &mut context).await;
     assert_eq!(res["error"], "interest_not_found");
+}
+
+#[tokio::test]
+async fn test_dispatcher_subir_afiche_successful_replacement() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+
+    let create_call = ToolCall {
+        id: "call_ev_afiche".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Show con Afiche",
+            "fecha_hora": "2026-11-20T21:00",
+            "lugar": "Centro Cultural",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 30.0, "capacidad": 100 }]
+        })
+        .to_string(),
+    };
+    let mut setup_context = TurnToolContext::default();
+    let create_res = dispatcher.dispatch(&create_call, &mut setup_context).await;
+    let event_id = create_res["id"].as_str().unwrap().to_string();
+
+    let mut context =
+        TurnToolContext::with_event_context(None, Some(event_id.clone()), None, None, None);
+    let valid_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+    context.set_staged_image(Some(StagedImageHandle::Available {
+        data: valid_jpeg.clone(),
+        format: ImageFormat::Jpeg,
+        byte_size: valid_jpeg.len(),
+    }));
+
+    let afiche_call = ToolCall {
+        id: "call_subir_1".to_string(),
+        name: "subir_afiche".to_string(),
+        arguments: json!({ "evento_id": event_id }).to_string(),
+    };
+
+    let result = dispatcher.dispatch(&afiche_call, &mut context).await;
+    assert!(result.get("error").is_none(), "Must succeed: {:?}", result);
+    assert_eq!(result["evento_id"], event_id);
+    assert!(result["filename"].is_string());
+    assert_eq!(result["format"], "jpg");
+    assert_eq!(result["byte_size"], valid_jpeg.len());
+
+    // Check handle consumed
+    match context.staged_image {
+        Some(StagedImageHandle::Consumed) => {}
+        _ => panic!("staged_image must be in Consumed state"),
+    }
+
+    // Check action recorded
+    let action = context
+        .actions_taken
+        .iter()
+        .find(|a| a.tool == "subir_afiche")
+        .expect("ToolAction for subir_afiche must be recorded");
+    assert_eq!(action.status, "success");
+    assert_eq!(action.event_id.as_deref(), Some(event_id.as_str()));
+
+    // Check event updated in repository
+    let event = state
+        .ticketing
+        .repo
+        .get_event(&event_id)
+        .unwrap()
+        .expect("Event must exist");
+    assert!(event.imagen.is_some());
+}
+
+#[tokio::test]
+async fn test_dispatcher_subir_afiche_missing_image_returns_no_image_staged() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let create_call = ToolCall {
+        id: "call_ev_no_img".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Show Sin Afiche",
+            "fecha_hora": "2026-11-20T21:00",
+            "lugar": "Centro Cultural",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 30.0, "capacidad": 100 }]
+        })
+        .to_string(),
+    };
+    let mut setup_context = TurnToolContext::default();
+    let create_res = dispatcher.dispatch(&create_call, &mut setup_context).await;
+    let event_id = create_res["id"].as_str().unwrap().to_string();
+
+    let mut context =
+        TurnToolContext::with_event_context(None, Some(event_id.clone()), None, None, None);
+    // context.staged_image is None
+
+    let afiche_call = ToolCall {
+        id: "call_subir_missing".to_string(),
+        name: "subir_afiche".to_string(),
+        arguments: json!({ "evento_id": event_id }).to_string(),
+    };
+
+    let result = dispatcher.dispatch(&afiche_call, &mut context).await;
+    assert_eq!(result["error"], "no_image_staged");
+}
+
+#[tokio::test]
+async fn test_dispatcher_subir_afiche_nonexistent_event_returns_evento_not_found() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let mut context = TurnToolContext::default();
+    let valid_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+    context.set_staged_image(Some(StagedImageHandle::Available {
+        data: valid_jpeg.clone(),
+        format: ImageFormat::Jpeg,
+        byte_size: valid_jpeg.len(),
+    }));
+
+    let afiche_call = ToolCall {
+        id: "call_subir_ghost".to_string(),
+        name: "subir_afiche".to_string(),
+        arguments: json!({ "evento_id": "evento-ghost-999" }).to_string(),
+    };
+
+    let result = dispatcher.dispatch(&afiche_call, &mut context).await;
+    assert_eq!(result["error"], "evento_not_found");
+}
+
+#[tokio::test]
+async fn test_dispatcher_subir_afiche_duplicate_call_rejected_image_already_consumed() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+
+    let create_call = ToolCall {
+        id: "call_ev_dup_afiche".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Show Duplicado",
+            "fecha_hora": "2026-11-20T21:00",
+            "lugar": "Centro Cultural",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 30.0, "capacidad": 100 }]
+        })
+        .to_string(),
+    };
+    let mut setup_context = TurnToolContext::default();
+    let create_res = dispatcher.dispatch(&create_call, &mut setup_context).await;
+    let event_id = create_res["id"].as_str().unwrap().to_string();
+
+    let mut context =
+        TurnToolContext::with_event_context(None, Some(event_id.clone()), None, None, None);
+    let valid_jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+    context.set_staged_image(Some(StagedImageHandle::Available {
+        data: valid_jpeg.clone(),
+        format: ImageFormat::Jpeg,
+        byte_size: valid_jpeg.len(),
+    }));
+
+    let call1 = ToolCall {
+        id: "call_subir_dup_1".to_string(),
+        name: "subir_afiche".to_string(),
+        arguments: json!({ "evento_id": event_id }).to_string(),
+    };
+    let res1 = dispatcher.dispatch(&call1, &mut context).await;
+    assert!(res1.get("error").is_none());
+
+    let call2 = ToolCall {
+        id: "call_subir_dup_2".to_string(),
+        name: "subir_afiche".to_string(),
+        arguments: json!({ "evento_id": event_id }).to_string(),
+    };
+    let res2 = dispatcher.dispatch(&call2, &mut context).await;
+    assert!(
+        res2["error"] == "image_already_consumed" || res2["warning"] == "duplicate_call_ignored",
+        "Second call must be rejected as duplicate/consumed: {:?}",
+        res2
+    );
 }

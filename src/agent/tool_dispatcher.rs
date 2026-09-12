@@ -25,7 +25,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::agent::tool_signature::canonical_tool_signature;
-use crate::agent::turn_context::{StagedAudioHandle, TurnToolContext};
+use crate::agent::turn_context::{StagedAudioHandle, StagedImageHandle, TurnToolContext};
 use crate::domain::agent_tool::{ToolAction, ToolCall};
 use crate::domain::audio_format::AudioFormat;
 use crate::domain::show_item_kind::ShowItemKind;
@@ -2516,6 +2516,107 @@ impl AgentToolDispatcher {
                         }
                     },
                 )
+            }
+
+            "subir_afiche" => {
+                let Some(ticketing) = self.ticketing.as_ref() else {
+                    return json!({
+                        "error": "service_unavailable",
+                        "message": "El servicio de ticketing no está disponible"
+                    });
+                };
+
+                let args: EventoIdArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => {
+                        return json!({
+                            "error": "validation_error",
+                            "message": "Parámetros de herramienta inválidos"
+                        });
+                    }
+                };
+
+                let evento_id = args.evento_id.trim();
+                if evento_id.is_empty() {
+                    return json!({
+                        "error": "validation_error",
+                        "message": "El identificador de evento no puede estar vacío"
+                    });
+                }
+
+                let (data, format, byte_size) = match context.staged_image.take() {
+                    None => {
+                        return json!({
+                            "error": "no_image_staged",
+                            "message": "No se encontró ninguna imagen adjunta. Por favor sube la imagen del afiche junto con tu mensaje."
+                        });
+                    }
+                    Some(StagedImageHandle::Consumed) => {
+                        context.staged_image = Some(StagedImageHandle::Consumed);
+                        return json!({
+                            "error": "image_already_consumed",
+                            "message": "La imagen adjunta ya fue asignada en este turno"
+                        });
+                    }
+                    Some(StagedImageHandle::Failed) => {
+                        context.staged_image = Some(StagedImageHandle::Failed);
+                        return json!({
+                            "error": "no_image_staged",
+                            "message": "No se encontró ninguna imagen válida en este turno."
+                        });
+                    }
+                    Some(StagedImageHandle::Available {
+                        data,
+                        format,
+                        byte_size,
+                    }) => (data, format, byte_size),
+                };
+
+                match ticketing.replace_poster.execute(evento_id, &data) {
+                    Ok(filename) => {
+                        context.staged_image = Some(StagedImageHandle::Consumed);
+                        context.known_event_ids.insert(evento_id.to_string());
+                        let res = json!({
+                            "evento_id": evento_id,
+                            "filename": filename,
+                            "format": format.extension(),
+                            "byte_size": byte_size,
+                        });
+                        context.record_action(ToolAction {
+                            tool: "subir_afiche".to_string(),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                            summary: format!("Afiche actualizado para el evento «{}»", evento_id),
+                            presentation_id: None,
+                            event_id: Some(evento_id.to_string()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => {
+                        context.staged_image = Some(StagedImageHandle::Failed);
+                        context.record_action(ToolAction {
+                            tool: "subir_afiche".to_string(),
+                            status: "error".to_string(),
+                            details: Some(json!({ "error": e.code() })),
+                            summary: format!(
+                                "Error al subir afiche para el evento «{}»",
+                                evento_id
+                            ),
+                            presentation_id: None,
+                            event_id: Some(evento_id.to_string()),
+                        });
+                        if e.code() == "event_not_found" || e.code() == "not_found" {
+                            json!({
+                                "error": "evento_not_found",
+                                "message": "No se encontró el evento especificado"
+                            })
+                        } else {
+                            app_error_to_json(&e)
+                        }
+                    }
+                }
             }
 
             _ => {

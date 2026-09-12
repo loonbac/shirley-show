@@ -18,7 +18,7 @@ const bytesFormatModulePath = resolve(process.cwd(), 'frontend/js/utils/format/b
 const { formatBytes } = await import(pathToFileURL(bytesFormatModulePath).href);
 
 const agentApiModulePath = resolve(process.cwd(), 'frontend/js/data/agent-chat-api.js');
-const { sendAgentChatMessage, validateAudioAttachment, getGpuStatus, resolveVocalPendingLabel } = await import(pathToFileURL(agentApiModulePath).href);
+const { sendAgentChatMessage, validateAudioAttachment, validateAgentAttachment, getGpuStatus, resolveVocalPendingLabel } = await import(pathToFileURL(agentApiModulePath).href);
 
 const ytUrlModulePath = resolve(process.cwd(), 'frontend/js/utils/validation/contains-youtube-url.js');
 const { containsYouTubeUrl } = await import(pathToFileURL(ytUrlModulePath).href);
@@ -797,6 +797,64 @@ console.log('Running Agent Chat State and API Client Unit Tests...');
 
   assert.equal(eventState.get().activeContext, null, "activeContext must be cleared when event is deleted");
   console.log("✓ 20. Active context cleared when active presentation or event is deleted verified");
+}
+
+// 21. validateAgentAttachment for audio and images
+{
+  assert.equal(typeof validateAgentAttachment, 'function', 'validateAgentAttachment must be exported');
+
+  // Valid audio (<= 100 MiB)
+  const validAudio = validateAgentAttachment({ name: 'audio.mp3', size: 50 * 1024 * 1024 });
+  assert.equal(validAudio.valid, true);
+  assert.equal(validAudio.kind, 'audio');
+
+  // Valid images (<= 10 MiB)
+  for (const ext of ['.jpg', '.jpeg', '.png', '.webp']) {
+    const validImg = validateAgentAttachment({ name: `poster${ext}`, size: 5 * 1024 * 1024 });
+    assert.equal(validImg.valid, true, `Image with ext ${ext} must be valid`);
+    assert.equal(validImg.kind, 'image');
+  }
+
+  // Oversized image (> 10 MiB = 10,485,760 bytes)
+  const oversizedImg = validateAgentAttachment({ name: 'big_poster.png', size: 10485761 });
+  assert.equal(oversizedImg.valid, false);
+  assert.equal(oversizedImg.error.code, 'file_too_large');
+
+  // Oversized audio (> 100 MiB)
+  const oversizedAudio = validateAgentAttachment({ name: 'big_audio.wav', size: 104857601 });
+  assert.equal(oversizedAudio.valid, false);
+  assert.equal(oversizedAudio.error.code, 'file_too_large');
+
+  // Unsupported file
+  const invalidExt = validateAgentAttachment({ name: 'document.pdf', size: 1024 });
+  assert.equal(invalidExt.valid, false);
+  assert.equal(invalidExt.error.code, 'unsupported_format');
+
+  console.log("✓ 21. validateAgentAttachment validated for audio (<=100MB) and images (<=10MB)");
+}
+
+// 22. Image upload typing label and subir_afiche attachment clearance
+{
+  const state = createChatState();
+  const posterFile = { name: 'afiche.png', size: 2 * 1024 * 1024 };
+  state.setAttachment(posterFile);
+
+  const turn = state.beginTurn({ message: 'Usa esta imagen como afiche', attachment: posterFile });
+  assert.equal(state.get().pendingLabel, 'Ressy está subiendo el afiche…', 'Image in flight must set poster pending label');
+
+  state.resolveTurn({
+    generationId: turn.generationId,
+    response: {
+      message: 'Afiche actualizado exitosamente.',
+      actions_taken: [
+        { tool: 'subir_afiche', status: 'success', event_id: 'evt-1' },
+      ],
+      active_event_id: 'evt-1',
+    },
+  });
+
+  assert.equal(state.get().attachment, null, 'Attachment must be cleared after successful subir_afiche');
+  console.log("✓ 22. Image upload typing label and subir_afiche attachment clearance verified");
 }
 
 console.log('All Agent Chat State and API Client unit tests passed!');

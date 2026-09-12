@@ -775,5 +775,21 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         },
+        // Poster upload tool (Slice 3)
+        ToolDefinition {
+            name: "subir_afiche".to_string(),
+            description: "Asigna o reemplaza el afiche publicitario de un evento usando la imagen adjunta en el turno actual.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento al que se le asignará el afiche."
+                    }
+                },
+                "required": ["evento_id"],
+                "additionalProperties": false
+            }),
+        },
     ]
 }

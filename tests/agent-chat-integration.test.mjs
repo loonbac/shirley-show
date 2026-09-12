@@ -705,4 +705,38 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   console.log('✓ 13. Safe tool execution triggers reactive view refresh for presentations, items, events, expenses, and leads');
 }
 
+// 14. subir_afiche execution triggers reactive view refresh for event
+{
+  const dataRefreshPath = resolve(process.cwd(), 'frontend/js/data/agent-refresh.js');
+  const { onAgentRefresh } = await import(pathToFileURL(dataRefreshPath).href);
+
+  const capturedEvents = [];
+  const unsubscribe = onAgentRefresh((event) => {
+    capturedEvents.push(event);
+  });
+
+  const state = createChatState();
+  const ctrl = createAgentChatController({
+    chatState: state,
+    sendAgentChatMessageFn: async () => ({
+      message: 'Afiche actualizado',
+      actions_taken: [
+        { tool: 'subir_afiche', event_id: 'evt-poster-42', status: 'success' },
+      ],
+      active_event_id: 'evt-poster-42',
+      notice: null,
+    }),
+  });
+
+  await ctrl.sendAndOpen('Ponle este afiche');
+
+  const evtEvents = capturedEvents.filter((e) => e.scope === 'event');
+  assert.ok(evtEvents.length > 0, 'subir_afiche must emit event refresh');
+  assert.equal(evtEvents[0].eventId, 'evt-poster-42', 'eventId must match target event');
+
+  unsubscribe();
+  ctrl.destroy();
+  console.log('✓ 14. subir_afiche execution triggers reactive view refresh for event');
+}
+
 console.log('All Agent Chat Route and Composition integration tests passed!');
