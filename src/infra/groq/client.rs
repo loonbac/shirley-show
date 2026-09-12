@@ -19,6 +19,12 @@ pub const DEFAULT_GROQ_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_GROQ_RETRIES: u32 = 3;
 pub const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 pub const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 800;
+pub const USER_AGENT_SHIRLEY: &str = "shirley-show/1.0";
+pub const HEADER_OPENCODE_SESSION: &str = "x-opencode-session";
+
+tokio::task_local! {
+    pub static CURRENT_SESSION_ID: String;
+}
 
 #[derive(Debug, serde::Serialize)]
 struct GroqChatCompletionWireRequest {
@@ -77,6 +83,7 @@ impl GroqClient {
         config.normalize();
         let client = Client::builder()
             .timeout(timeout)
+            .user_agent(USER_AGENT_SHIRLEY)
             .build()
             .map_err(|e| ProviderError::Rejected(format!("Failed to build HTTP client: {e}")))?;
 
@@ -99,6 +106,15 @@ impl ChatCompletionProvider for GroqClient {
 
         Box::pin(async move {
             let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+            let session_id = CURRENT_SESSION_ID
+                .try_with(|id| id.clone())
+                .unwrap_or_else(|_| {
+                    // Generar un ID de sesión efímero cuando no se recibe en el contexto del turno.
+                    // Documentación: Generar una sesión efímera por request es menos óptimo para
+                    // la reutilización de caché de prefijos (prefix caching) en OpenCode Go / vLLM.
+                    uuid::Uuid::new_v4().to_string()
+                });
 
             let mut wire_messages = Vec::with_capacity(request.messages.len() + 1);
             wire_messages.push(GroqMessage::System {
@@ -174,7 +190,11 @@ impl ChatCompletionProvider for GroqClient {
 
             let mut retries: u32 = 0;
             loop {
-                let mut req_builder = client.post(&endpoint).json(&body);
+                let mut req_builder = client
+                    .post(&endpoint)
+                    .header(reqwest::header::USER_AGENT, USER_AGENT_SHIRLEY)
+                    .header(HEADER_OPENCODE_SESSION, &session_id)
+                    .json(&body);
                 if let Some(ref key) = api_key {
                     req_builder = req_builder.bearer_auth(key);
                 }

@@ -120,9 +120,12 @@ export async function sendAgentChatMessage(options) {
     eventId = null,
     stagedAudioId = null,
     conversationId = null,
+    sessionId = null,
     attachment = null,
     signal,
   } = options;
+
+  const activeSessionId = sessionId || options.session_id || null;
 
   if (attachment) {
     const validation = validateAgentAttachment(attachment);
@@ -145,6 +148,9 @@ export async function sendAgentChatMessage(options) {
     if (conversationId) {
       formData.append('conversation_id', conversationId);
     }
+    if (activeSessionId) {
+      formData.append('session_id', activeSessionId);
+    }
     formData.append('file', attachment);
 
     try {
@@ -165,6 +171,7 @@ export async function sendAgentChatMessage(options) {
     event_id: eventId || null,
     staged_audio_id: stagedAudioId || null,
     ...(conversationId ? { conversation_id: conversationId } : {}),
+    ...(activeSessionId ? { session_id: activeSessionId } : {}),
   };
 
   try {

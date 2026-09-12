@@ -44,6 +44,16 @@ export function createAgentChatController(deps) {
     sendAgentChatMessageFn = sendAgentChatMessage,
   } = deps;
 
+  const sessionId =
+    (chatState && typeof chatState.get === 'function' && chatState.get().sessionId) ||
+    (typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `session-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`);
+
+  if (chatState && typeof chatState.setSessionId === 'function' && !chatState.get().sessionId) {
+    chatState.setSessionId(sessionId);
+  }
+
   // Initialize with current route context if present
   const initialRouteContext = activePresentationContextSignal.get();
   if (initialRouteContext) {
@@ -170,6 +180,7 @@ export function createAgentChatController(deps) {
         eventId,
         stagedAudioId,
         conversationId: priorState.conversationId || null,
+        sessionId,
         attachment,
         signal: turn.abortController.signal,
       });
@@ -318,6 +329,7 @@ export function createAgentChatController(deps) {
     panelEl: panel.el,
     floatingTriggerEl: floatingTrigger.el,
     floatingTrigger,
+    sessionId,
     destroy,
   };
 

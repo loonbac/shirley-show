@@ -50,8 +50,8 @@ pub async fn chat(
     })
     .await;
 
-    let mut input = match parse_result {
-        Ok(Ok(input)) => input,
+    let parsed_request = match parse_result {
+        Ok(Ok(p)) => p,
         Ok(Err(err)) => return Err(err),
         Err(_) => {
             return Ok((
@@ -73,6 +73,13 @@ pub async fn chat(
         }
     };
 
+    let mut input = parsed_request.input;
+    // Si falta session_id en la solicitud, se genera un UUID efímero por request
+    // (documentado como menos óptimo para la reutilización de caché en OpenCode Go / vLLM prefix cache).
+    let session_id = parsed_request
+        .session_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     let conversation_id = input
         .conversation_id
         .clone()
@@ -81,7 +88,12 @@ pub async fn chat(
     input.conversation_id = Some(conversation_id.clone());
     input.pending_destructive_action = pending_action;
 
-    let mut output = state.agent_chat.execute_dynamic(input, start_time).await;
+    let mut output = crate::infra::groq::client::CURRENT_SESSION_ID
+        .scope(
+            session_id,
+            state.agent_chat.execute_dynamic(input, start_time),
+        )
+        .await;
     output.conversation_id = conversation_id;
     Ok((StatusCode::OK, Json(output)))
 }

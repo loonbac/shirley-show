@@ -27,6 +27,7 @@ export function createChatState(initialState = {}, options = {}) {
     messages: [],
     activeContext: null,
     conversationId: null,
+    sessionId: initialState.sessionId || null,
     notice: null,
     ...initialState,
   };
@@ -93,6 +94,11 @@ export function createChatState(initialState = {}, options = {}) {
 
   function setStagedAudioId(id) {
     state = { ...state, stagedAudioId: typeof id === 'string' ? id : null };
+    notify();
+  }
+
+  function setSessionId(id) {
+    state = { ...state, sessionId: typeof id === 'string' ? id : null };
     notify();
   }
 
@@ -345,6 +351,7 @@ export function createChatState(initialState = {}, options = {}) {
     clearAttachment,
     setStagedAudioId,
     clearStagedAudioId,
+    setSessionId,
     setRouteContext,
     setPendingLabel,
     beginTurn,

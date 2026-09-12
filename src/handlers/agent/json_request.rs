@@ -9,6 +9,7 @@ pub const MAX_PRESENTATION_ID_LENGTH: usize = 128;
 pub const MAX_EVENT_ID_LENGTH: usize = 128;
 pub const MAX_STAGED_AUDIO_ID_LENGTH: usize = 128;
 pub const MAX_CONVERSATION_ID_LENGTH: usize = 128;
+pub const MAX_SESSION_ID_LENGTH: usize = 128;
 
 #[derive(Debug, Deserialize)]
 pub struct AgentChatJsonPayload {
@@ -17,11 +18,19 @@ pub struct AgentChatJsonPayload {
     pub event_id: Option<String>,
     pub staged_audio_id: Option<String>,
     pub conversation_id: Option<String>,
+    pub session_id: Option<String>,
     #[serde(default)]
     pub history: Vec<HistoryMessage>,
 }
 
-pub fn parse_and_validate_json_request(body_bytes: &[u8]) -> Result<AgentChatInput, AppError> {
+pub struct ParsedAgentChatRequest {
+    pub input: AgentChatInput,
+    pub session_id: Option<String>,
+}
+
+pub fn parse_and_validate_json_request(
+    body_bytes: &[u8],
+) -> Result<ParsedAgentChatRequest, AppError> {
     let payload: AgentChatJsonPayload = serde_json::from_slice(body_bytes)
         .map_err(|e| AppError::bad_request("invalid_request", format!("JSON inválido: {e}")))?;
 
@@ -109,16 +118,36 @@ pub fn parse_and_validate_json_request(body_bytes: &[u8]) -> Result<AgentChatInp
         None
     };
 
-    Ok(AgentChatInput {
-        message: trimmed.to_string(),
-        history: payload.history,
-        presentation_id,
-        event_id,
-        staged_audio_id,
-        staged_audio: None,
-        staged_image: None,
-        staged_filename: None,
-        conversation_id,
-        pending_destructive_action: None,
+    let session_id = if let Some(id) = payload.session_id {
+        let trimmed_id = id.trim().to_string();
+        if trimmed_id.chars().count() > MAX_SESSION_ID_LENGTH {
+            return Err(AppError::bad_request(
+                "invalid_request",
+                "El identificador de sesión no puede exceder 128 caracteres.",
+            ));
+        }
+        if trimmed_id.is_empty() {
+            None
+        } else {
+            Some(trimmed_id)
+        }
+    } else {
+        None
+    };
+
+    Ok(ParsedAgentChatRequest {
+        input: AgentChatInput {
+            message: trimmed.to_string(),
+            history: payload.history,
+            presentation_id,
+            event_id,
+            staged_audio_id,
+            staged_audio: None,
+            staged_image: None,
+            staged_filename: None,
+            conversation_id,
+            pending_destructive_action: None,
+        },
+        session_id,
     })
 }

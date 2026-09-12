@@ -12,12 +12,19 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-use shirley_show::config::GroqConfig;
+use shirley_show::config::{
+    DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, DEFAULT_OPENCODE_BASE_URL, DEFAULT_OPENCODE_MODEL,
+    GroqConfig, LlmProviderKind,
+};
 use shirley_show::domain::agent_message::AgentMessage;
 use shirley_show::domain::agent_tool::{ToolCall, ToolDefinition};
-use shirley_show::infra::groq::client::GroqClient;
+use shirley_show::infra::groq::client::{
+    CURRENT_SESSION_ID, GroqClient, HEADER_OPENCODE_SESSION, USER_AGENT_SHIRLEY,
+};
 use shirley_show::infra::groq::error::ProviderError;
 use shirley_show::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
+
+static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Clone, Default)]
 struct MockServerState {
@@ -106,6 +113,7 @@ async fn test_groq_client_request_serialization_and_auth_header() {
         api_key: Some("gsk_test_secret_key_12345".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
 
     let client = GroqClient::new(config).expect("client creation");
@@ -153,6 +161,11 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     let auth = headers.get("authorization").unwrap().to_str().unwrap();
     assert_eq!(auth, "Bearer gsk_test_secret_key_12345");
 
+    let ua = headers.get("user-agent").unwrap().to_str().unwrap();
+    assert_eq!(ua, USER_AGENT_SHIRLEY);
+
+    assert!(headers.get(HEADER_OPENCODE_SESSION).is_some());
+
     // Check payload received by mock server
     let body = state.last_body.lock().await.clone().unwrap();
     assert_eq!(body["model"], "openai/gpt-oss-120b");
@@ -190,6 +203,91 @@ async fn test_groq_client_request_serialization_and_auth_header() {
 }
 
 #[tokio::test]
+async fn test_opencode_provider_request_headers_and_session_forwarding() {
+    let (addr, state) = start_mock_server().await;
+
+    let config = GroqConfig {
+        api_key: Some("opencode_live_token_777".to_string()),
+        base_url: format!("http://{}", addr),
+        model: "deepseek-v4-flash".to_string(),
+        provider: LlmProviderKind::OpenCode,
+    };
+
+    let client = GroqClient::new(config).expect("client creation");
+
+    let request = CompletionRequest {
+        model: "deepseek-v4-flash".to_string(),
+        system_prompt: "Eres Ressy en OpenCode Go.".to_string(),
+        messages: vec![AgentMessage::User {
+            content: "Hola desde OpenCode".to_string(),
+        }],
+        tools: vec![],
+    };
+
+    let stable_session = "session-conversation-uuid-999".to_string();
+
+    let response = CURRENT_SESSION_ID
+        .scope(stable_session.clone(), client.complete(request))
+        .await
+        .expect("successful completion");
+    assert_eq!(response.content.as_deref(), Some("¡Hola! Soy Ressy."));
+
+    let headers = state.last_headers.lock().await.clone().unwrap();
+    assert_eq!(
+        headers.get("authorization").unwrap().to_str().unwrap(),
+        "Bearer opencode_live_token_777"
+    );
+    assert_eq!(
+        headers.get("user-agent").unwrap().to_str().unwrap(),
+        "shirley-show/1.0"
+    );
+    assert_eq!(
+        headers
+            .get(HEADER_OPENCODE_SESSION)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "session-conversation-uuid-999"
+    );
+
+    let body = state.last_body.lock().await.clone().unwrap();
+    assert_eq!(body["model"], "deepseek-v4-flash");
+    assert_eq!(body["max_completion_tokens"], 800);
+}
+
+#[tokio::test]
+async fn test_ephemeral_session_generated_when_context_missing() {
+    let (addr, state) = start_mock_server().await;
+
+    let config = GroqConfig {
+        api_key: Some("any_key".to_string()),
+        base_url: format!("http://{}", addr),
+        model: "deepseek-v4-flash".to_string(),
+        provider: LlmProviderKind::OpenCode,
+    };
+
+    let client = GroqClient::new(config).unwrap();
+    let request = CompletionRequest {
+        model: "deepseek-v4-flash".to_string(),
+        system_prompt: "sys".to_string(),
+        messages: vec![AgentMessage::User {
+            content: "ping".to_string(),
+        }],
+        tools: vec![],
+    };
+
+    // Complete without setting CURRENT_SESSION_ID
+    let _ = client.complete(request).await.unwrap();
+
+    let headers = state.last_headers.lock().await.clone().unwrap();
+    let session_header = headers.get(HEADER_OPENCODE_SESSION);
+    assert!(session_header.is_some());
+    let session_str = session_header.unwrap().to_str().unwrap();
+    // Must be a non-empty generated UUID v4
+    assert!(uuid::Uuid::parse_str(session_str).is_ok());
+}
+
+#[tokio::test]
 async fn test_groq_client_tool_call_response_parsing() {
     let (addr, state) = start_mock_server().await;
 
@@ -221,6 +319,7 @@ async fn test_groq_client_tool_call_response_parsing() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
 
     let client = GroqClient::new(config).unwrap();
@@ -253,6 +352,7 @@ async fn test_groq_client_base_url_normalization() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}///", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
 
     let client = GroqClient::new(config).unwrap();
@@ -280,6 +380,7 @@ async fn test_groq_client_http_error_mappings() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     let client = GroqClient::new(config).unwrap();
 
@@ -330,6 +431,7 @@ async fn test_groq_client_malformed_response() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     let client = GroqClient::new(config).unwrap();
 
@@ -382,6 +484,7 @@ async fn test_groq_client_timeout_mapping() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
 
     // Build client with tiny timeout for test
@@ -403,11 +506,12 @@ async fn test_groq_client_timeout_mapping() {
 
 #[test]
 fn test_groq_config_validation_and_trimming() {
-    // Normalization of base_url and trimming of api_key
+    // Normalization of base_url and trimming of api_key for Groq
     let mut config = GroqConfig {
         api_key: Some("   gsk_xyz123   ".to_string()),
         base_url: "https://api.groq.com/openai/v1/".to_string(),
         model: "  openai/gpt-oss-120b  ".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     config.normalize();
 
@@ -420,9 +524,39 @@ fn test_groq_config_validation_and_trimming() {
         api_key: Some("   \t  \n".to_string()),
         base_url: "https://api.groq.com/openai/v1".to_string(),
         model: "model".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     config2.normalize();
     assert_eq!(config2.api_key, None);
+}
+
+#[test]
+fn test_opencode_config_validation_and_trimming() {
+    // Normalization of base_url and trimming of api_key for OpenCode Go
+    let mut config = GroqConfig {
+        api_key: Some("   opencode_secret_key_1   ".to_string()),
+        base_url: "https://opencode.ai/zen/go/v1///".to_string(),
+        model: "  deepseek-v4-flash  ".to_string(),
+        provider: LlmProviderKind::OpenCode,
+    };
+    config.normalize();
+
+    assert_eq!(config.api_key.as_deref(), Some("opencode_secret_key_1"));
+    assert_eq!(config.base_url, "https://opencode.ai/zen/go/v1");
+    assert_eq!(config.model, "deepseek-v4-flash");
+    assert_eq!(config.provider_name(), "OpenCode Go");
+    assert!(config.is_opencode());
+
+    // Empty base_url defaults to OpenCode base url
+    let mut config_empty = GroqConfig {
+        api_key: None,
+        base_url: "   ".to_string(),
+        model: "".to_string(),
+        provider: LlmProviderKind::OpenCode,
+    };
+    config_empty.normalize();
+    assert_eq!(config_empty.base_url, DEFAULT_OPENCODE_BASE_URL);
+    assert_eq!(config_empty.model, DEFAULT_OPENCODE_MODEL);
 }
 
 #[tokio::test]
@@ -447,6 +581,7 @@ async fn test_groq_client_retries_twice_on_429_then_succeeds() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     let client = GroqClient::new(config).unwrap();
 
@@ -490,6 +625,7 @@ async fn test_groq_client_retries_twice_on_5xx_then_succeeds() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     let client = GroqClient::new(config).unwrap();
 
@@ -519,6 +655,7 @@ async fn test_groq_client_no_retry_on_400_or_401() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     let client = GroqClient::new(config).unwrap();
 
@@ -559,6 +696,7 @@ async fn test_groq_client_max_retries_exceeded_on_429() {
         api_key: Some("test_key".to_string()),
         base_url: format!("http://{}", addr),
         model: "openai/gpt-oss-120b".to_string(),
+        provider: LlmProviderKind::Groq,
     };
     let client = GroqClient::new(config).unwrap();
 
@@ -575,4 +713,123 @@ async fn test_groq_client_max_retries_exceeded_on_429() {
     assert!(matches!(err, ProviderError::RateLimited));
     // 1 initial attempt + 3 retries = 4 total requests
     assert_eq!(*state.request_count.lock().await, 4);
+}
+
+#[test]
+fn test_provider_selection_env_hierarchy_opencode_first() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    unsafe {
+        std::env::set_var("OPENCODE_API_KEY", "opencode_token_alpha");
+        std::env::set_var("GROQ_API_KEY", "groq_token_beta");
+        std::env::remove_var("OPENCODE_MODEL");
+        std::env::remove_var("OPENCODE_BASE_URL");
+        std::env::remove_var("GROQ_MODEL");
+        std::env::remove_var("GROQ_BASE_URL");
+
+        let config = GroqConfig::from_env();
+        assert_eq!(config.provider, LlmProviderKind::OpenCode);
+        assert_eq!(config.api_key.as_deref(), Some("opencode_token_alpha"));
+        assert_eq!(config.model, DEFAULT_OPENCODE_MODEL);
+        assert_eq!(config.base_url, DEFAULT_OPENCODE_BASE_URL);
+
+        // Clean up
+        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("GROQ_API_KEY");
+    }
+}
+
+#[test]
+fn test_provider_selection_fallback_to_groq_when_opencode_missing() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    unsafe {
+        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::set_var("GROQ_API_KEY", "groq_token_delta");
+        std::env::remove_var("OPENCODE_MODEL");
+        std::env::remove_var("OPENCODE_BASE_URL");
+        std::env::remove_var("GROQ_MODEL");
+        std::env::remove_var("GROQ_BASE_URL");
+
+        let config = GroqConfig::from_env();
+        assert_eq!(config.provider, LlmProviderKind::Groq);
+        assert_eq!(config.api_key.as_deref(), Some("groq_token_delta"));
+        assert_eq!(config.model, DEFAULT_GROQ_MODEL);
+        assert_eq!(config.base_url, DEFAULT_GROQ_BASE_URL);
+
+        // Clean up
+        std::env::remove_var("GROQ_API_KEY");
+    }
+}
+
+#[test]
+fn test_provider_selection_whitespace_opencode_key_falls_back_to_groq() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    unsafe {
+        std::env::set_var("OPENCODE_API_KEY", "   \t  \n ");
+        std::env::set_var("GROQ_API_KEY", "groq_token_fallback");
+
+        let config = GroqConfig::from_env();
+        assert_eq!(config.provider, LlmProviderKind::Groq);
+        assert_eq!(config.api_key.as_deref(), Some("groq_token_fallback"));
+
+        // Clean up
+        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("GROQ_API_KEY");
+    }
+}
+
+#[test]
+fn test_provider_selection_unconfigured_when_no_keys() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    unsafe {
+        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("GROQ_API_KEY");
+        std::env::remove_var("OPENCODE_MODEL");
+        std::env::remove_var("OPENCODE_BASE_URL");
+
+        let config = GroqConfig::from_env();
+        assert_eq!(config.api_key, None);
+        assert_eq!(config.provider, LlmProviderKind::OpenCode);
+        assert_eq!(config.model, DEFAULT_OPENCODE_MODEL);
+        assert_eq!(config.base_url, DEFAULT_OPENCODE_BASE_URL);
+    }
+}
+
+#[test]
+fn test_provider_selection_custom_model_and_base_url() {
+    let _guard = ENV_MUTEX.lock().unwrap();
+
+    unsafe {
+        std::env::set_var("OPENCODE_API_KEY", "opencode_custom_key");
+        std::env::set_var("OPENCODE_MODEL", "deepseek-custom-exp");
+        std::env::set_var("OPENCODE_BASE_URL", "https://custom.opencode.ai/zen/v1/");
+
+        let config = GroqConfig::from_env();
+        assert_eq!(config.provider, LlmProviderKind::OpenCode);
+        assert_eq!(config.api_key.as_deref(), Some("opencode_custom_key"));
+        assert_eq!(config.model, "deepseek-custom-exp");
+        assert_eq!(config.base_url, "https://custom.opencode.ai/zen/v1");
+
+        // Clean up
+        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("OPENCODE_MODEL");
+        std::env::remove_var("OPENCODE_BASE_URL");
+    }
+}
+
+#[test]
+fn test_groq_config_debug_redacts_api_key() {
+    let config = GroqConfig {
+        api_key: Some("super_secret_raw_key_never_leak".to_string()),
+        base_url: "https://opencode.ai/zen/go/v1".to_string(),
+        model: "deepseek-v4-flash".to_string(),
+        provider: LlmProviderKind::OpenCode,
+    };
+
+    let debug_output = format!("{:?}", config);
+    assert!(debug_output.contains("[REDACTED]"));
+    assert!(!debug_output.contains("super_secret_raw_key_never_leak"));
 }

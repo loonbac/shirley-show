@@ -10,7 +10,8 @@ use crate::domain::show_item::MAX_AUDIO_BYTE_SIZE;
 use crate::error::AppError;
 use crate::handlers::agent::json_request::{
     MAX_CONVERSATION_ID_LENGTH, MAX_EVENT_ID_LENGTH, MAX_MESSAGE_CHAR_LENGTH,
-    MAX_PRESENTATION_ID_LENGTH, MAX_STAGED_AUDIO_ID_LENGTH,
+    MAX_PRESENTATION_ID_LENGTH, MAX_SESSION_ID_LENGTH, MAX_STAGED_AUDIO_ID_LENGTH,
+    ParsedAgentChatRequest,
 };
 use crate::infra::filesystem::detect_audio_format::{
     detect_audio_format, detect_audio_format_from_bytes,
@@ -23,12 +24,13 @@ use crate::use_cases::agent_chat::AgentChatInput;
 pub async fn parse_and_validate_multipart_request(
     mut multipart: Multipart,
     storage: Arc<LocalAudioStorage>,
-) -> Result<AgentChatInput, AppError> {
+) -> Result<ParsedAgentChatRequest, AppError> {
     let mut message: Option<String> = None;
     let mut presentation_id: Option<String> = None;
     let mut event_id: Option<String> = None;
     let mut staged_audio_id: Option<String> = None;
     let mut conversation_id: Option<String> = None;
+    let mut session_id: Option<String> = None;
     let mut history: Vec<HistoryMessage> = Vec::new();
     let mut staging_guard: Option<StagingFileGuard> = None;
     let mut staged_format = None;
@@ -114,6 +116,22 @@ pub async fn parse_and_validate_multipart_request(
                 }
                 if !trimmed.is_empty() {
                     conversation_id = Some(trimmed.to_string());
+                }
+            }
+            "session_id" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::bad_request("invalid_request", e.to_string()))?;
+                let trimmed = text.trim();
+                if trimmed.chars().count() > MAX_SESSION_ID_LENGTH {
+                    return Err(AppError::bad_request(
+                        "invalid_request",
+                        "El identificador de sesión no puede exceder 128 caracteres.",
+                    ));
+                }
+                if !trimmed.is_empty() {
+                    session_id = Some(trimmed.to_string());
                 }
             }
             "history" => {
@@ -349,16 +367,19 @@ pub async fn parse_and_validate_multipart_request(
         byte_size: total_bytes,
     });
 
-    Ok(AgentChatInput {
-        message: final_message,
-        history,
-        presentation_id,
-        event_id,
-        staged_audio_id,
-        staged_audio,
-        staged_image,
-        staged_filename,
-        conversation_id,
-        pending_destructive_action: None,
+    Ok(ParsedAgentChatRequest {
+        input: AgentChatInput {
+            message: final_message,
+            history,
+            presentation_id,
+            event_id,
+            staged_audio_id,
+            staged_audio,
+            staged_image,
+            staged_filename,
+            conversation_id,
+            pending_destructive_action: None,
+        },
+        session_id,
     })
 }

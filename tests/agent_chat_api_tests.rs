@@ -152,6 +152,12 @@ async fn test_chat_api_unconfigured_key_returns_200_with_notice() {
     assert_eq!(json["actions_taken"], json!([]));
     assert_eq!(json["notice"]["code"], "agent_unconfigured");
     assert!(json["message"].as_str().unwrap().contains("GROQ_API_KEY"));
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("OPENCODE_API_KEY")
+    );
 }
 
 #[tokio::test]
@@ -1618,4 +1624,103 @@ async fn test_chat_api_multipart_image_upload_subir_afiche_e2e_persistence_and_c
         .unwrap();
     let res2 = app2.oneshot(req2).await.unwrap();
     assert_eq!(res2.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_chat_api_json_accepts_and_validates_session_id() {
+    let (app, _state, _tmp) = setup_app_with_provider(CompletionResponse {
+        content: Some("Sesión recibida correctamente.".to_string()),
+        tool_calls: vec![],
+    });
+
+    // Valid session_id accepted
+    let payload = json!({
+        "message": "Hola Ressy con session_id",
+        "session_id": "test-stable-session-uuid-12345",
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["message"], "Sesión recibida correctamente.");
+
+    // Oversized session_id (> 128 characters) rejected with 400 Bad Request
+    let oversized_session_id = "s".repeat(129);
+    let invalid_payload = json!({
+        "message": "Hola con session_id gigante",
+        "session_id": oversized_session_id,
+    });
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&invalid_payload).unwrap()))
+        .unwrap();
+
+    let res2 = app.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::BAD_REQUEST);
+    let body2 = res2.into_body().collect().await.unwrap().to_bytes();
+    let json2: Value = serde_json::from_slice(&body2).unwrap();
+    assert_eq!(json2["error"]["code"], "invalid_request");
+}
+
+#[tokio::test]
+async fn test_chat_api_multipart_accepts_and_validates_session_id() {
+    let (app, _state, _tmp) = setup_app_with_provider(CompletionResponse {
+        content: Some("Multipart con session_id recibido.".to_string()),
+        tool_calls: vec![],
+    });
+
+    let boundary = "----WebKitFormBoundarySessionIdTest";
+    let body_bytes = build_multipart(
+        boundary,
+        &[
+            ("message", "¿Cómo estás?"),
+            ("session_id", "multipart-session-uuid-999"),
+        ],
+        &[],
+    );
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Oversized session_id in multipart rejected 400
+    let oversized_session_id = "s".repeat(129);
+    let invalid_bytes = build_multipart(
+        boundary,
+        &[("message", "Hola"), ("session_id", &oversized_session_id)],
+        &[],
+    );
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(invalid_bytes))
+        .unwrap();
+
+    let res2 = app.oneshot(req2).await.unwrap();
+    assert_eq!(res2.status(), StatusCode::BAD_REQUEST);
 }

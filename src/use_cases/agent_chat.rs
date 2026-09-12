@@ -147,7 +147,7 @@ impl AgentChat {
             Some(p) => p.clone(),
             None => {
                 return AgentChatOutput {
-                    message: "Para hablar conmigo y gestionar tus shows con IA, necesitas configurar la variable de entorno GROQ_API_KEY en el servidor. Todas las funciones manuales siguen operando con normalidad.".to_string(),
+                    message: "Para hablar conmigo y gestionar tus shows con IA, necesitas configurar la variable de entorno OPENCODE_API_KEY (o GROQ_API_KEY) en el servidor. Todas las funciones manuales siguen operando con normalidad.".to_string(),
                     actions_taken: vec![],
                     active_presentation_id: input.presentation_id,
                     active_event_id: input.event_id,
