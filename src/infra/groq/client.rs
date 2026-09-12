@@ -253,6 +253,10 @@ impl ChatCompletionProvider for GroqClient {
                         let mut tool_calls = Vec::new();
                         for tc in choice.message.tool_calls {
                             if tc.id.is_empty() || tc.function.name.is_empty() {
+                                eprintln!(
+                                    "OpenCode invalid tool call: id={:?}, name={:?}, arguments={:?}",
+                                    tc.id, tc.function.name, tc.function.arguments
+                                );
                                 return Err(ProviderError::MalformedResponse(
                                     "Invalid tool call attributes".to_string(),
                                 ));
@@ -271,6 +275,7 @@ impl ChatCompletionProvider for GroqClient {
                             .filter(|c| !c.is_empty());
 
                         if content.is_none() && tool_calls.is_empty() {
+                            eprintln!("OpenCode response contained neither text nor tool calls");
                             return Err(ProviderError::MalformedResponse(
                                 "Response contains neither content nor tool calls".to_string(),
                             ));
