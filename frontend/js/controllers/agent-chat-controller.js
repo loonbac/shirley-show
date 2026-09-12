@@ -1,7 +1,9 @@
 import { createAgentChatPanel } from '../components/organisms/agent-chat-panel.js';
+import { createAgentFloatingTrigger } from '../components/molecules/agent-chat-trigger.js';
 import { sendAgentChatMessage, getGpuStatus } from '../data/agent-chat-api.js';
 import { emitAgentRefresh } from '../core/state/agent-refresh.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
+import { stageModeSignal } from '../core/state/stage-mode-state.js';
 import { containsYouTubeUrl } from '../utils/validation/contains-youtube-url.js';
 import { isVocalSeparationIntent } from '../utils/validation/is-vocal-separation-intent.js';
 import { isStagedAudioUnrelated } from '../utils/validation/is-staged-audio-unrelated.js';
@@ -31,6 +33,7 @@ export function getActiveAgentChatController() {
  *   sendAndOpen: (message: string) => Promise<void> | void,
  *   subscribe: (listener: (state: any) => void) => () => void,
  *   panelEl: HTMLElement,
+ *   floatingTriggerEl: HTMLElement,
  *   destroy: () => void,
  * }}
  */
@@ -93,7 +96,29 @@ export function createAgentChatController(deps) {
       attachment: newState.attachment,
       notice: newState.notice,
     });
+    floatingTrigger.update({
+      isOpen: newState.isOpen,
+    });
   });
+
+  // Global floating bubble trigger mounted alongside panel
+  const floatingTrigger = createAgentFloatingTrigger({
+    isOpen: chatState.get().isOpen,
+    isHidden: stageModeSignal ? stageModeSignal.get() : false,
+    onClick: () => {
+      toggle();
+    },
+  });
+
+  // Stage Mode listener: hide floating trigger during live stage performance
+  const unsubscribeStageMode = stageModeSignal
+    ? stageModeSignal.subscribe((isStage) => {
+        floatingTrigger.update({ isHidden: isStage });
+        if (isStage && chatState.get().isOpen) {
+          chatState.close();
+        }
+      })
+    : () => {};
 
   async function handleSend(userMessage) {
     const priorState = chatState.get();
@@ -276,8 +301,12 @@ export function createAgentChatController(deps) {
     }
     unsubscribeContext();
     unsubscribeState();
+    unsubscribeStageMode();
     chatState.cancelTurn();
     panel.destroy();
+    if (typeof floatingTrigger.destroy === 'function') {
+      floatingTrigger.destroy();
+    }
   }
 
   const controller = {
@@ -287,6 +316,8 @@ export function createAgentChatController(deps) {
     sendAndOpen,
     subscribe: (listener) => chatState.subscribe(listener),
     panelEl: panel.el,
+    floatingTriggerEl: floatingTrigger.el,
+    floatingTrigger,
     destroy,
   };
 

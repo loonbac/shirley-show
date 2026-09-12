@@ -304,6 +304,38 @@ fn app_error_to_json(e: &crate::error::AppError) -> Value {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FuzzyResolveResult {
+    Found(String),
+    Ambiguous(Vec<String>),
+    NotFound,
+}
+
+fn normalize_for_fuzzy(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'ä' | 'â' => 'a',
+            'é' | 'è' | 'ë' | 'ê' => 'e',
+            'í' | 'ì' | 'ï' | 'î' => 'i',
+            'ó' | 'ò' | 'ö' | 'ô' => 'o',
+            'ú' | 'ù' | 'ü' | 'û' => 'u',
+            other => other,
+        })
+        .collect()
+}
+
+fn matches_fuzzy_substring(name: &str, query: &str) -> bool {
+    let name_lower = name.to_lowercase();
+    let query_lower = query.to_lowercase();
+    if name_lower.contains(&query_lower) {
+        return true;
+    }
+    let name_norm = normalize_for_fuzzy(name);
+    let query_norm = normalize_for_fuzzy(query);
+    name_norm.contains(&query_norm)
+}
+
 fn is_authorized_event(context: &TurnToolContext, evento_id: &str) -> bool {
     let trimmed = evento_id.trim();
     if trimmed.is_empty() {
@@ -334,6 +366,30 @@ fn validation_err(msg: impl Into<String>) -> Value {
     json!({
         "error": "validation_error",
         "message": msg.into()
+    })
+}
+
+fn ambiguous_event_err(query: &str, candidates: &[String]) -> Value {
+    json!({
+        "error": "ambiguous_event_id",
+        "message": format!(
+            "Múltiples eventos coinciden con «{}»: {}. Por favor aclara a cuál te refieres.",
+            query,
+            candidates.join(", ")
+        ),
+        "candidatos": candidates
+    })
+}
+
+fn ambiguous_presentation_err(query: &str, candidates: &[String]) -> Value {
+    json!({
+        "error": "ambiguous_presentation_id",
+        "message": format!(
+            "Múltiples presentaciones coinciden con «{}»: {}. Por favor aclara a cuál te refieres.",
+            query,
+            candidates.join(", ")
+        ),
+        "candidatos": candidates
     })
 }
 
@@ -598,6 +654,92 @@ impl AgentToolDispatcher {
         .with_destructive_registry(state.destructive_registry.clone())
     }
 
+    pub fn resolve_event_id(
+        &self,
+        query: &str,
+        context: &mut TurnToolContext,
+    ) -> FuzzyResolveResult {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return FuzzyResolveResult::NotFound;
+        }
+
+        if is_authorized_event(context, trimmed) {
+            return FuzzyResolveResult::Found(trimmed.to_string());
+        }
+
+        let Some(ref ticketing) = self.ticketing else {
+            return FuzzyResolveResult::NotFound;
+        };
+
+        let Ok(events) = ticketing.list_events.execute() else {
+            return FuzzyResolveResult::NotFound;
+        };
+
+        // 1. Direct ID match in DB
+        if let Some(ev) = events.iter().find(|e| e.id == trimmed) {
+            context.known_event_ids.insert(ev.id.clone());
+            return FuzzyResolveResult::Found(ev.id.clone());
+        }
+
+        // 2. Fuzzy substring match in event name
+        let matched: Vec<_> = events
+            .into_iter()
+            .filter(|e| matches_fuzzy_substring(&e.nombre, trimmed))
+            .collect();
+
+        if matched.len() == 1 {
+            let found_id = matched[0].id.clone();
+            context.known_event_ids.insert(found_id.clone());
+            FuzzyResolveResult::Found(found_id)
+        } else if matched.len() > 1 {
+            FuzzyResolveResult::Ambiguous(matched.into_iter().map(|e| e.nombre).collect())
+        } else {
+            FuzzyResolveResult::NotFound
+        }
+    }
+
+    pub fn resolve_presentation_id(
+        &self,
+        query: &str,
+        context: &mut TurnToolContext,
+    ) -> FuzzyResolveResult {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return FuzzyResolveResult::NotFound;
+        }
+
+        if is_authorized_presentation(context, trimmed) {
+            return FuzzyResolveResult::Found(trimmed.to_string());
+        }
+
+        let Ok(summaries) = self.list_presentations.execute() else {
+            return FuzzyResolveResult::NotFound;
+        };
+
+        // 1. Direct ID match in DB
+        if let Some(s) = summaries.iter().find(|s| s.id == trimmed) {
+            context.known_presentation_ids.insert(s.id.clone());
+            return FuzzyResolveResult::Found(s.id.clone());
+        }
+
+        // 2. Fuzzy substring match in presentation title
+        let matched: Vec<_> = summaries
+            .into_iter()
+            .filter(|s| matches_fuzzy_substring(&s.title, trimmed))
+            .collect();
+
+        if matched.len() == 1 {
+            let found_id = matched[0].id.clone();
+            context.known_presentation_ids.insert(found_id.clone());
+            FuzzyResolveResult::Found(found_id)
+        } else if matched.len() > 1 {
+            FuzzyResolveResult::Ambiguous(matched.into_iter().map(|s| s.title).collect())
+        } else {
+            FuzzyResolveResult::NotFound
+        }
+    }
+
     pub async fn dispatch(&self, call: &ToolCall, context: &mut TurnToolContext) -> Value {
         let is_read_tool = matches!(
             call.name.as_str(),
@@ -722,17 +864,21 @@ impl AgentToolDispatcher {
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
-                let pres_id = args.presentation_id.trim();
-                if !is_authorized_presentation(context, pres_id) {
-                    return unauthorized_presentation_err();
-                }
+                let pres_id_raw = args.presentation_id.trim();
+                let pres_id = match self.resolve_presentation_id(pres_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(pres_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_presentation_err(),
+                };
 
-                match self.get_presentation.execute(pres_id) {
+                match self.get_presentation.execute(&pres_id) {
                     Ok(pres) => {
                         context.set_confirmed_destination_id(Some(pres.id.clone()));
                         let items = self
                             .item_repo
-                            .list_by_presentation(pres_id)
+                            .list_by_presentation(&pres_id)
                             .unwrap_or_default();
                         for item in &items {
                             if item.kind() == ShowItemKind::Track {
@@ -772,17 +918,21 @@ impl AgentToolDispatcher {
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
-                let pres_id = args.presentation_id.trim();
-                if !is_authorized_presentation(context, pres_id) {
-                    return unauthorized_presentation_err();
-                }
+                let pres_id_raw = args.presentation_id.trim();
+                let pres_id = match self.resolve_presentation_id(pres_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(pres_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_presentation_err(),
+                };
 
                 let trimmed_text = args.text.trim();
                 if trimmed_text.is_empty() {
                     return validation_err("El texto no puede estar vacío");
                 }
 
-                match self.add_lyrics.execute(pres_id, trimmed_text) {
+                match self.add_lyrics.execute(&pres_id, trimmed_text) {
                     Ok(item) => {
                         let res = json!({
                             "item_id": item.id,
@@ -794,7 +944,7 @@ impl AgentToolDispatcher {
                         context.record_action(ToolAction {
                             event_id: None,
                             tool: "add_lyrics".to_string(),
-                            presentation_id: Some(pres_id.to_string()),
+                            presentation_id: Some(pres_id.clone()),
                             summary: "Letra añadida a la presentación".to_string(),
                             status: "success".to_string(),
                             details: Some(res.clone()),
@@ -816,17 +966,21 @@ impl AgentToolDispatcher {
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
-                let pres_id = args.presentation_id.trim();
-                if !is_authorized_presentation(context, pres_id) {
-                    return unauthorized_presentation_err();
-                }
+                let pres_id_raw = args.presentation_id.trim();
+                let pres_id = match self.resolve_presentation_id(pres_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(pres_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_presentation_err(),
+                };
 
                 let trimmed_text = args.text.trim();
                 if trimmed_text.is_empty() {
                     return validation_err("El texto no puede estar vacío");
                 }
 
-                match self.add_note.execute(pres_id, trimmed_text) {
+                match self.add_note.execute(&pres_id, trimmed_text) {
                     Ok(item) => {
                         let res = json!({
                             "item_id": item.id,
@@ -838,7 +992,7 @@ impl AgentToolDispatcher {
                         context.record_action(ToolAction {
                             event_id: None,
                             tool: "add_note".to_string(),
-                            presentation_id: Some(pres_id.to_string()),
+                            presentation_id: Some(pres_id.clone()),
                             summary: "Nota añadida a la presentación".to_string(),
                             status: "success".to_string(),
                             details: Some(res.clone()),
@@ -860,10 +1014,14 @@ impl AgentToolDispatcher {
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
-                let pres_id = args.presentation_id.trim();
-                if !is_authorized_presentation(context, pres_id) {
-                    return unauthorized_presentation_err();
-                }
+                let pres_id_raw = args.presentation_id.trim();
+                let pres_id = match self.resolve_presentation_id(pres_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(pres_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_presentation_err(),
+                };
 
                 let trimmed_title = args.title.trim();
                 if trimmed_title.is_empty() {
@@ -892,7 +1050,7 @@ impl AgentToolDispatcher {
                     match self.staged_audio_registry.reserve(staged_id) {
                         Ok(lease) => {
                             match self.upload_track.execute(
-                                pres_id,
+                                &pres_id,
                                 trimmed_title,
                                 &lease.stage_id,
                                 AudioFormat::Mp3,
@@ -915,7 +1073,7 @@ impl AgentToolDispatcher {
                                     context.record_action(ToolAction {
                                         event_id: None,
                                         tool: "add_track_from_staged".to_string(),
-                                        presentation_id: Some(pres_id.to_string()),
+                                        presentation_id: Some(pres_id.clone()),
                                         summary: format!(
                                             "Pista “{}” añadida a la presentación",
                                             trimmed_title
@@ -988,7 +1146,7 @@ impl AgentToolDispatcher {
                         }) => {
                             let stage_id = guard.stage_id().to_string();
                             match self.upload_track.execute(
-                                pres_id,
+                                &pres_id,
                                 trimmed_title,
                                 &stage_id,
                                 format,
@@ -1009,7 +1167,7 @@ impl AgentToolDispatcher {
                                     context.record_action(ToolAction {
                                         event_id: None,
                                         tool: "add_track_from_staged".to_string(),
-                                        presentation_id: Some(pres_id.to_string()),
+                                        presentation_id: Some(pres_id.clone()),
                                         summary: format!(
                                             "Pista “{}” añadida a la presentación",
                                             trimmed_title
@@ -1350,13 +1508,19 @@ impl AgentToolDispatcher {
                     }
                 };
 
-                let evento_id = args.evento_id.trim();
-                if !is_authorized_event(context, evento_id) {
-                    return json!({
-                        "error": "unauthorized_event_id",
-                        "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
-                    });
-                }
+                let evento_id_raw = args.evento_id.trim();
+                let evento_id = match self.resolve_event_id(evento_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(evento_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => {
+                        return json!({
+                            "error": "unauthorized_event_id",
+                            "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
+                        });
+                    }
+                };
 
                 let medio_pago = match PaymentMethod::parse(&args.medio_pago) {
                     Ok(m) => m,
@@ -1494,13 +1658,19 @@ impl AgentToolDispatcher {
                     }
                 };
 
-                let evento_id = args.evento_id.trim();
-                if !is_authorized_event(context, evento_id) {
-                    return json!({
-                        "error": "unauthorized_event_id",
-                        "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
-                    });
-                }
+                let evento_id_raw = args.evento_id.trim();
+                let evento_id = match self.resolve_event_id(evento_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(evento_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => {
+                        return json!({
+                            "error": "unauthorized_event_id",
+                            "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
+                        });
+                    }
+                };
 
                 let categoria = match ExpenseCategory::parse(&args.categoria) {
                     Ok(c) => c,
@@ -1582,15 +1752,21 @@ impl AgentToolDispatcher {
                     }
                 };
 
-                let evento_id = args.evento_id.trim();
-                if !is_authorized_event(context, evento_id) {
-                    return json!({
-                        "error": "unauthorized_event_id",
-                        "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
-                    });
-                }
+                let evento_id_raw = args.evento_id.trim();
+                let evento_id = match self.resolve_event_id(evento_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(evento_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => {
+                        return json!({
+                            "error": "unauthorized_event_id",
+                            "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
+                        });
+                    }
+                };
 
-                match ticketing.get_summary.execute(evento_id) {
+                match ticketing.get_summary.execute(&evento_id) {
                     Ok(summary) => {
                         let res = json!({
                             "evento_id": evento_id,
@@ -1633,13 +1809,19 @@ impl AgentToolDispatcher {
                     }
                 };
 
-                let evento_id = args.evento_id.trim();
-                if !is_authorized_event(context, evento_id) {
-                    return json!({
-                        "error": "unauthorized_event_id",
-                        "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
-                    });
-                }
+                let evento_id_raw = args.evento_id.trim();
+                let evento_id = match self.resolve_event_id(evento_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(evento_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => {
+                        return json!({
+                            "error": "unauthorized_event_id",
+                            "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
+                        });
+                    }
+                };
 
                 let input = CreateInterestInput {
                     evento_id: evento_id.to_string(),
@@ -1701,17 +1883,23 @@ impl AgentToolDispatcher {
                     }
                 };
 
-                let evento_id = args.evento_id.trim();
-                if !is_authorized_event(context, evento_id) {
-                    return json!({
-                        "error": "unauthorized_event_id",
-                        "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
-                    });
-                }
+                let evento_id_raw = args.evento_id.trim();
+                let evento_id = match self.resolve_event_id(evento_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(evento_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => {
+                        return json!({
+                            "error": "unauthorized_event_id",
+                            "message": "Identificador de evento no autorizado o desconocido en el contexto actual. Lista los eventos primero."
+                        });
+                    }
+                };
 
                 match ticketing
                     .check_in_ticket
-                    .execute(evento_id, args.codigo.trim())
+                    .execute(&evento_id, args.codigo.trim())
                 {
                     Ok(outcome) => {
                         let res = serde_json::to_value(&outcome).unwrap_or_default();
@@ -1757,15 +1945,19 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let pres_id = args.presentacion_id.trim();
-                if !is_authorized_presentation(context, pres_id) {
-                    return unauthorized_presentation_err();
-                }
+                let pres_id_raw = args.presentacion_id.trim();
+                let pres_id = match self.resolve_presentation_id(pres_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(pres_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_presentation_err(),
+                };
                 let trimmed_title = args.nuevo_nombre.trim();
                 if trimmed_title.is_empty() {
                     return validation_err("El nombre no puede estar vacío");
                 }
-                match self.rename_presentation.execute(pres_id, trimmed_title) {
+                match self.rename_presentation.execute(&pres_id, trimmed_title) {
                     Ok(pres) => {
                         let res = json!({
                             "id": pres.id,
@@ -1787,7 +1979,7 @@ impl AgentToolDispatcher {
                     Err(e) => {
                         context.record_action(ToolAction {
                             tool: "renombrar_presentacion".to_string(),
-                            presentation_id: Some(pres_id.to_string()),
+                            presentation_id: Some(pres_id.clone()),
                             event_id: None,
                             summary: format!("Error al renombrar la presentación «{}»", pres_id),
                             status: "error".to_string(),
@@ -1803,10 +1995,14 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let pres_id = args.presentacion_id.trim();
-                if !is_authorized_presentation(context, pres_id) {
-                    return unauthorized_presentation_err();
-                }
+                let pres_id_raw = args.presentacion_id.trim();
+                let pres_id = match self.resolve_presentation_id(pres_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(pres_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_presentation_err(),
+                };
                 let item_id = args.elemento_id.trim();
                 if item_id.is_empty() {
                     return validation_err("El identificador del elemento no puede estar vacío");
@@ -1825,14 +2021,14 @@ impl AgentToolDispatcher {
                     }
                     let target_idx = target_pos - 1;
                     self.reorder_item
-                        .execute_target_position(pres_id, item_id, target_idx)
+                        .execute_target_position(&pres_id, item_id, target_idx)
                 } else if let Some(ref dir_str) = args.direccion {
                     let dir = match dir_str.trim().to_lowercase().as_str() {
                         "arriba" => MoveDirection::Up,
                         "abajo" => MoveDirection::Down,
                         _ => return validation_err("La dirección debe ser 'arriba' o 'abajo'"),
                     };
-                    self.reorder_item.execute(pres_id, item_id, dir)
+                    self.reorder_item.execute(&pres_id, item_id, dir)
                 } else {
                     unreachable!()
                 };
@@ -1851,7 +2047,7 @@ impl AgentToolDispatcher {
                         });
                         context.record_action(ToolAction {
                             tool: "reordenar_elemento".to_string(),
-                            presentation_id: Some(pres_id.to_string()),
+                            presentation_id: Some(pres_id.clone()),
                             event_id: None,
                             summary: format!(
                                 "Elemento {} movido a la posición {}",
@@ -1867,7 +2063,7 @@ impl AgentToolDispatcher {
                     Err(e) => {
                         context.record_action(ToolAction {
                                 tool: "reordenar_elemento".to_string(),
-                                presentation_id: Some(pres_id.to_string()),
+                                presentation_id: Some(pres_id.clone()),
                                 event_id: None,
                                 summary: format!("Error al reordenar el elemento «{}»", item_id),
                                 status: "error".to_string(),
@@ -1883,10 +2079,14 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let pres_id = args.presentacion_id.trim();
-                if !is_authorized_presentation(context, pres_id) {
-                    return unauthorized_presentation_err();
-                }
+                let pres_id_raw = args.presentacion_id.trim();
+                let pres_id = match self.resolve_presentation_id(pres_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(pres_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_presentation_err(),
+                };
                 let item_id = args.elemento_id.trim();
                 if item_id.is_empty() {
                     return validation_err("El identificador del elemento no puede estar vacío");
@@ -1916,7 +2116,7 @@ impl AgentToolDispatcher {
                 };
 
                 let (exec_title, exec_body) = if title_opt.is_some() && body_opt.is_some() {
-                    match self.item_repo.get(pres_id, item_id) {
+                    match self.item_repo.get(&pres_id, item_id) {
                         Ok(Some(item)) => match item.kind() {
                             ShowItemKind::Track => (title_opt, None),
                             ShowItemKind::Lyrics | ShowItemKind::Note => (None, body_opt),
@@ -1929,7 +2129,7 @@ impl AgentToolDispatcher {
 
                 match self
                     .update_show_item
-                    .execute(pres_id, item_id, exec_title, exec_body)
+                    .execute(&pres_id, item_id, exec_title, exec_body)
                 {
                     Ok(item) => {
                         let kind = item.kind().as_str().to_string();
@@ -1945,7 +2145,7 @@ impl AgentToolDispatcher {
                         });
                         context.record_action(ToolAction {
                             tool: "editar_elemento".to_string(),
-                            presentation_id: Some(pres_id.to_string()),
+                            presentation_id: Some(pres_id.clone()),
                             event_id: None,
                             summary: format!(
                                 "Elemento {} actualizado ({})",
@@ -1962,7 +2162,7 @@ impl AgentToolDispatcher {
                     Err(e) => {
                         context.record_action(ToolAction {
                                 tool: "editar_elemento".to_string(),
-                                presentation_id: Some(pres_id.to_string()),
+                                presentation_id: Some(pres_id.clone()),
                                 event_id: None,
                                 summary: format!("Error al editar el elemento «{}»", item_id),
                                 status: "error".to_string(),
@@ -1981,10 +2181,14 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let evento_id = args.evento_id.trim();
-                if !is_authorized_event(context, evento_id) {
-                    return unauthorized_event_err();
-                }
+                let evento_id_raw = args.evento_id.trim();
+                let evento_id = match self.resolve_event_id(evento_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(evento_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_event_err(),
+                };
                 if args.nombre.trim().is_empty() {
                     return validation_err("El nombre del evento no puede estar vacío");
                 }
@@ -2055,11 +2259,15 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let evento_id = args.evento_id.trim();
-                if !is_authorized_event(context, evento_id) {
-                    return unauthorized_event_err();
-                }
-                match ticketing.reopen_event.execute(evento_id) {
+                let evento_id_raw = args.evento_id.trim();
+                let evento_id = match self.resolve_event_id(evento_id_raw, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(evento_id_raw, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => return unauthorized_event_err(),
+                };
+                match ticketing.reopen_event.execute(&evento_id) {
                     Ok(()) => {
                         let res = json!({
                             "id": evento_id,
@@ -2336,10 +2544,17 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let pres_id = args.presentacion_id.trim().to_string();
-                if pres_id.is_empty() {
+                let raw_pres = args.presentacion_id.trim();
+                if raw_pres.is_empty() {
                     return validation_err("Identificador de presentación inválido");
                 }
+                let pres_id = match self.resolve_presentation_id(raw_pres, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(raw_pres, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => raw_pres.to_string(),
+                };
                 let target = DestructiveTarget::Presentation {
                     id: pres_id.clone(),
                 };
@@ -2382,11 +2597,18 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let pres_id = args.presentacion_id.trim().to_string();
+                let raw_pres = args.presentacion_id.trim();
                 let item_id = args.elemento_id.trim().to_string();
-                if pres_id.is_empty() || item_id.is_empty() {
+                if raw_pres.is_empty() || item_id.is_empty() {
                     return validation_err("Identificadores inválidos");
                 }
+                let pres_id = match self.resolve_presentation_id(raw_pres, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_presentation_err(raw_pres, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => raw_pres.to_string(),
+                };
                 let target = DestructiveTarget::ShowItem {
                     presentation_id: pres_id.clone(),
                     item_id: item_id.clone(),
@@ -2439,10 +2661,17 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let evento_id = args.evento_id.trim().to_string();
-                if evento_id.is_empty() {
+                let raw_ev = args.evento_id.trim();
+                if raw_ev.is_empty() {
                     return validation_err("Identificador de evento inválido");
                 }
+                let evento_id = match self.resolve_event_id(raw_ev, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(raw_ev, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => raw_ev.to_string(),
+                };
                 let target = DestructiveTarget::Event {
                     id: evento_id.clone(),
                 };
@@ -2482,10 +2711,17 @@ impl AgentToolDispatcher {
                     Ok(a) => a,
                     Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
-                let evento_id = args.evento_id.trim().to_string();
-                if evento_id.is_empty() {
+                let raw_ev = args.evento_id.trim();
+                if raw_ev.is_empty() {
                     return validation_err("Identificador de evento inválido");
                 }
+                let evento_id = match self.resolve_event_id(raw_ev, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(raw_ev, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => raw_ev.to_string(),
+                };
                 let target = DestructiveTarget::Event {
                     id: evento_id.clone(),
                 };
@@ -2682,13 +2918,20 @@ impl AgentToolDispatcher {
                     }
                 };
 
-                let evento_id = args.evento_id.trim();
-                if evento_id.is_empty() {
+                let raw_ev = args.evento_id.trim();
+                if raw_ev.is_empty() {
                     return json!({
                         "error": "validation_error",
                         "message": "El identificador de evento no puede estar vacío"
                     });
                 }
+                let evento_id = match self.resolve_event_id(raw_ev, context) {
+                    FuzzyResolveResult::Found(id) => id,
+                    FuzzyResolveResult::Ambiguous(cands) => {
+                        return ambiguous_event_err(raw_ev, &cands);
+                    }
+                    FuzzyResolveResult::NotFound => raw_ev.to_string(),
+                };
 
                 let (data, format, byte_size) = match context.staged_image.take() {
                     None => {
@@ -2718,7 +2961,7 @@ impl AgentToolDispatcher {
                     }) => (data, format, byte_size),
                 };
 
-                match ticketing.replace_poster.execute(evento_id, &data) {
+                match ticketing.replace_poster.execute(&evento_id, &data) {
                     Ok(filename) => {
                         context.staged_image = Some(StagedImageHandle::Consumed);
                         context.known_event_ids.insert(evento_id.to_string());

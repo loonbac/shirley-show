@@ -1656,3 +1656,182 @@ async fn test_dispatcher_subir_afiche_duplicate_call_rejected_image_already_cons
         res2
     );
 }
+
+#[tokio::test]
+async fn test_dispatcher_fuzzy_matching_sesion_2_resolves_to_exact_event() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+    let mut setup_context = TurnToolContext::default();
+
+    // 1. Create target event "Shirley Show y sus Amigos - Sesión 2"
+    let create_call = ToolCall {
+        id: "call_create_s2".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Shirley Show y sus Amigos - Sesión 2",
+            "fecha_hora": "2026-08-15T20:00",
+            "lugar": "Teatro Canout",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": 50.0, "capacidad": 100 }
+            ]
+        })
+        .to_string(),
+    };
+    let create_res = dispatcher.dispatch(&create_call, &mut setup_context).await;
+    let expected_event_id = create_res["id"].as_str().unwrap().to_string();
+
+    // 2. Fresh context with NO known events or active event
+    let mut fresh_context = TurnToolContext::default();
+    assert!(!fresh_context.known_event_ids.contains(&expected_event_id));
+    assert_eq!(fresh_context.active_event_id, None);
+
+    // Call vender_entradas with substring "sesión 2"
+    let sell_call = ToolCall {
+        id: "call_sell_fuzzy_1".to_string(),
+        name: "vender_entradas".to_string(),
+        arguments: json!({
+            "evento_id": "sesión 2",
+            "nombre_comprador": "María Quispe",
+            "contacto": "987654321",
+            "tipo_entrada": "General",
+            "cantidad": 1,
+            "medio_pago": "Yape",
+            "estado_pago": "Pagado"
+        })
+        .to_string(),
+    };
+
+    let sell_res = dispatcher.dispatch(&sell_call, &mut fresh_context).await;
+    assert!(
+        sell_res.get("entradas").is_some(),
+        "Expected successful sale, got: {sell_res}"
+    );
+    assert_eq!(sell_res["total_entradas"], 1);
+    assert!(fresh_context.known_event_ids.contains(&expected_event_id));
+
+    // 3. Substring without tilde "sesion 2" on resumen_evento with fresh context
+    let mut fresh_context_2 = TurnToolContext::default();
+    let summary_call = ToolCall {
+        id: "call_sum_fuzzy_2".to_string(),
+        name: "resumen_evento".to_string(),
+        arguments: json!({ "evento_id": "sesion 2" }).to_string(),
+    };
+    let sum_res = dispatcher
+        .dispatch(&summary_call, &mut fresh_context_2)
+        .await;
+    assert_eq!(sum_res["evento_id"], expected_event_id);
+    assert_eq!(sum_res["entradas_emitidas"], 1);
+    assert_eq!(sum_res["cobrado"], 50.0);
+}
+
+#[tokio::test]
+async fn test_dispatcher_fuzzy_matching_ambiguous_event_returns_clarification_error() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+    let mut setup_context = TurnToolContext::default();
+
+    // 1. Create two events with shared substring
+    let create_1 = ToolCall {
+        id: "call_create_ambig_1".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Shirley Show y sus Amigos - Sesión 1",
+            "fecha_hora": "2026-08-14T20:00",
+            "lugar": "Teatro Canout",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 50.0, "capacidad": 100 }]
+        })
+        .to_string(),
+    };
+    dispatcher.dispatch(&create_1, &mut setup_context).await;
+
+    let create_2 = ToolCall {
+        id: "call_create_ambig_2".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Shirley Show y sus Amigos - Sesión 2",
+            "fecha_hora": "2026-08-15T20:00",
+            "lugar": "Teatro Canout",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 50.0, "capacidad": 100 }]
+        })
+        .to_string(),
+    };
+    dispatcher.dispatch(&create_2, &mut setup_context).await;
+
+    // 2. Fresh context calls resumen_evento with ambiguous substring "sesión"
+    let mut fresh_context = TurnToolContext::default();
+    let ambig_call = ToolCall {
+        id: "call_sum_ambig".to_string(),
+        name: "resumen_evento".to_string(),
+        arguments: json!({ "evento_id": "sesión" }).to_string(),
+    };
+
+    let res = dispatcher.dispatch(&ambig_call, &mut fresh_context).await;
+    assert_eq!(res["error"], "ambiguous_event_id");
+    assert!(
+        res["message"]
+            .as_str()
+            .unwrap()
+            .contains("Múltiples eventos")
+    );
+    let candidatos = res["candidatos"].as_array().expect("candidatos array");
+    assert_eq!(candidatos.len(), 2);
+    assert!(
+        candidatos
+            .iter()
+            .any(|c| c.as_str().unwrap().contains("Sesión 1"))
+    );
+    assert!(
+        candidatos
+            .iter()
+            .any(|c| c.as_str().unwrap().contains("Sesión 2"))
+    );
+}
+
+#[tokio::test]
+async fn test_dispatcher_fuzzy_matching_presentation_by_substring_and_ambiguity() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+
+    // 1. Create single presentation "Show Acústico - Sesión 2"
+    let pres = state
+        .create_presentation
+        .execute("Show Acústico - Sesión 2")
+        .unwrap();
+
+    let mut context = TurnToolContext::default();
+
+    // Query with "sesión 2" must resolve to the presentation
+    let get_call = ToolCall {
+        id: "call_get_pres_fuzzy".to_string(),
+        name: "get_presentation".to_string(),
+        arguments: json!({ "presentation_id": "sesión 2" }).to_string(),
+    };
+    let get_res = dispatcher.dispatch(&get_call, &mut context).await;
+    assert_eq!(get_res["id"], pres.id);
+    assert_eq!(get_res["title"], "Show Acústico - Sesión 2");
+    assert!(context.known_presentation_ids.contains(&pres.id));
+
+    // 2. Create another presentation "Show Acústico - Sesión 1"
+    let _pres1 = state
+        .create_presentation
+        .execute("Show Acústico - Sesión 1")
+        .unwrap();
+
+    // Query with "acústico" is now ambiguous (matches both)
+    let mut context_ambig = TurnToolContext::default();
+    let ambig_call = ToolCall {
+        id: "call_get_pres_ambig".to_string(),
+        name: "get_presentation".to_string(),
+        arguments: json!({ "presentation_id": "acústico" }).to_string(),
+    };
+    let ambig_res = dispatcher.dispatch(&ambig_call, &mut context_ambig).await;
+    assert_eq!(ambig_res["error"], "ambiguous_presentation_id");
+    assert!(
+        ambig_res["message"]
+            .as_str()
+            .unwrap()
+            .contains("Múltiples presentaciones")
+    );
+    let candidatos = ambig_res["candidatos"].as_array().unwrap();
+    assert_eq!(candidatos.len(), 2);
+}

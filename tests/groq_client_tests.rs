@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,6 +26,8 @@ struct MockServerState {
     response_status: Arc<Mutex<StatusCode>>,
     response_body: Arc<Mutex<Value>>,
     delay: Arc<Mutex<Option<Duration>>>,
+    request_count: Arc<Mutex<usize>>,
+    responses_queue: Arc<Mutex<VecDeque<(StatusCode, Value, Option<String>)>>>,
 }
 
 async fn mock_chat_handler(
@@ -35,13 +38,27 @@ async fn mock_chat_handler(
     *state.last_headers.lock().await = Some(headers);
     *state.last_body.lock().await = Some(body);
 
+    let mut count = state.request_count.lock().await;
+    *count += 1;
+    drop(count);
+
     if let Some(d) = *state.delay.lock().await {
         tokio::time::sleep(d).await;
     }
 
+    let mut queue = state.responses_queue.lock().await;
+    if let Some((status, resp, retry_after)) = queue.pop_front() {
+        let mut resp_headers = HeaderMap::new();
+        if let Some(ra) = retry_after {
+            resp_headers.insert(axum::http::header::RETRY_AFTER, ra.parse().unwrap());
+        }
+        return (status, resp_headers, Json(resp));
+    }
+    drop(queue);
+
     let status = *state.response_status.lock().await;
     let resp = state.response_body.lock().await.clone();
-    (status, Json(resp))
+    (status, HeaderMap::new(), Json(resp))
 }
 
 async fn start_mock_server() -> (SocketAddr, MockServerState) {
@@ -63,6 +80,8 @@ async fn start_mock_server() -> (SocketAddr, MockServerState) {
             ]
         }))),
         delay: Arc::new(Mutex::new(None)),
+        request_count: Arc::new(Mutex::new(0)),
+        responses_queue: Arc::new(Mutex::new(VecDeque::new())),
     };
 
     let app = Router::new()
@@ -403,4 +422,156 @@ fn test_groq_config_validation_and_trimming() {
     };
     config2.normalize();
     assert_eq!(config2.api_key, None);
+}
+
+#[tokio::test]
+async fn test_groq_client_retries_twice_on_429_then_succeeds() {
+    let (addr, state) = start_mock_server().await;
+
+    // Queue 2 rate limits (429), then 200 OK
+    *state.responses_queue.lock().await = VecDeque::from(vec![
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            json!({ "error": { "message": "Rate limit exceeded" } }),
+            Some("0.01".to_string()),
+        ),
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            json!({ "error": { "message": "Rate limit exceeded" } }),
+            None,
+        ),
+    ]);
+
+    let config = GroqConfig {
+        api_key: Some("test_key".to_string()),
+        base_url: format!("http://{}", addr),
+        model: "openai/gpt-oss-120b".to_string(),
+    };
+    let client = GroqClient::new(config).unwrap();
+
+    let request = CompletionRequest {
+        model: "openai/gpt-oss-120b".to_string(),
+        system_prompt: "sys".to_string(),
+        messages: vec![AgentMessage::User {
+            content: "hola".to_string(),
+        }],
+        tools: vec![],
+    };
+
+    let response = client
+        .complete(request)
+        .await
+        .expect("successful completion after 2 retries");
+    assert_eq!(response.content.as_deref(), Some("¡Hola! Soy Ressy."));
+    // Exactly 3 requests: initial attempt + 2 retries
+    assert_eq!(*state.request_count.lock().await, 3);
+}
+
+#[tokio::test]
+async fn test_groq_client_retries_twice_on_5xx_then_succeeds() {
+    let (addr, state) = start_mock_server().await;
+
+    // Queue 2 server errors (503 and 500), then default 200 OK
+    *state.responses_queue.lock().await = VecDeque::from(vec![
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({ "error": { "message": "Backend service overloaded" } }),
+            None,
+        ),
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "error": { "message": "Internal error" } }),
+            None,
+        ),
+    ]);
+
+    let config = GroqConfig {
+        api_key: Some("test_key".to_string()),
+        base_url: format!("http://{}", addr),
+        model: "openai/gpt-oss-120b".to_string(),
+    };
+    let client = GroqClient::new(config).unwrap();
+
+    let request = CompletionRequest {
+        model: "openai/gpt-oss-120b".to_string(),
+        system_prompt: "sys".to_string(),
+        messages: vec![AgentMessage::User {
+            content: "hola".to_string(),
+        }],
+        tools: vec![],
+    };
+
+    let response = client
+        .complete(request)
+        .await
+        .expect("successful completion after 2 retries");
+    assert_eq!(response.content.as_deref(), Some("¡Hola! Soy Ressy."));
+    // Exactly 3 requests: initial attempt + 2 retries
+    assert_eq!(*state.request_count.lock().await, 3);
+}
+
+#[tokio::test]
+async fn test_groq_client_no_retry_on_400_or_401() {
+    let (addr, state) = start_mock_server().await;
+
+    let config = GroqConfig {
+        api_key: Some("test_key".to_string()),
+        base_url: format!("http://{}", addr),
+        model: "openai/gpt-oss-120b".to_string(),
+    };
+    let client = GroqClient::new(config).unwrap();
+
+    let make_req = || CompletionRequest {
+        model: "openai/gpt-oss-120b".to_string(),
+        system_prompt: "sys".to_string(),
+        messages: vec![AgentMessage::User {
+            content: "test".to_string(),
+        }],
+        tools: vec![],
+    };
+
+    // 401 Unauthorized should fail immediately without retry (1 request)
+    *state.response_status.lock().await = StatusCode::UNAUTHORIZED;
+    *state.request_count.lock().await = 0;
+    let err = client.complete(make_req()).await.unwrap_err();
+    assert!(matches!(err, ProviderError::Authentication));
+    assert_eq!(*state.request_count.lock().await, 1);
+
+    // 400 Bad Request should fail immediately without retry (1 request)
+    *state.response_status.lock().await = StatusCode::BAD_REQUEST;
+    *state.request_count.lock().await = 0;
+    let err2 = client.complete(make_req()).await.unwrap_err();
+    assert!(matches!(err2, ProviderError::Rejected(_)));
+    assert_eq!(*state.request_count.lock().await, 1);
+}
+
+#[tokio::test]
+async fn test_groq_client_max_retries_exceeded_on_429() {
+    let (addr, state) = start_mock_server().await;
+
+    *state.response_status.lock().await = StatusCode::TOO_MANY_REQUESTS;
+    *state.response_body.lock().await = json!({
+        "error": { "message": "Rate limit continuous" }
+    });
+
+    let config = GroqConfig {
+        api_key: Some("test_key".to_string()),
+        base_url: format!("http://{}", addr),
+        model: "openai/gpt-oss-120b".to_string(),
+    };
+    let client = GroqClient::new(config).unwrap();
+
+    let request = CompletionRequest {
+        model: "openai/gpt-oss-120b".to_string(),
+        system_prompt: "sys".to_string(),
+        messages: vec![AgentMessage::User {
+            content: "test".to_string(),
+        }],
+        tools: vec![],
+    };
+
+    let err = client.complete(request).await.unwrap_err();
+    assert!(matches!(err, ProviderError::RateLimited));
+    // 1 initial attempt + 3 retries = 4 total requests
+    assert_eq!(*state.request_count.lock().await, 4);
 }

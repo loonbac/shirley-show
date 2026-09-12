@@ -2,6 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
+use rand::Rng;
 use reqwest::{Client, StatusCode};
 
 use crate::config::GroqConfig;
@@ -15,6 +16,39 @@ use crate::infra::groq::error::ProviderError;
 use crate::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
 
 pub const DEFAULT_GROQ_TIMEOUT: Duration = Duration::from_secs(30);
+pub const MAX_GROQ_RETRIES: u32 = 3;
+pub const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
+
+fn parse_retry_after(response: &reqwest::Response) -> Option<Duration> {
+    let header_val = response.headers().get(reqwest::header::RETRY_AFTER)?;
+    let s = header_val.to_str().ok()?.trim();
+    if let Ok(seconds) = s.parse::<f64>() {
+        if seconds >= 0.0 {
+            return Some(Duration::from_secs_f64(seconds));
+        }
+    }
+    if let Ok(seconds) = s.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    if let Ok(date) = chrono::DateTime::parse_from_rfc2822(s) {
+        let now = chrono::Utc::now();
+        if let Ok(diff) = (date.with_timezone(&chrono::Utc) - now).to_std() {
+            return Some(diff);
+        }
+    }
+    None
+}
+
+fn calculate_backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
+    if let Some(duration) = retry_after {
+        return duration;
+    }
+    let base_ms = DEFAULT_INITIAL_BACKOFF
+        .as_millis()
+        .saturating_mul(1u128 << attempt.min(6)) as u64;
+    let jitter_ms = rand::thread_rng().gen_range(0..=50);
+    Duration::from_millis(base_ms.saturating_add(jitter_ms))
+}
 
 #[derive(Clone)]
 pub struct GroqClient {
@@ -125,73 +159,88 @@ impl ChatCompletionProvider for GroqClient {
                 tool_choice,
             };
 
-            let mut req_builder = client.post(&endpoint).json(&body);
-            if let Some(ref key) = api_key {
-                req_builder = req_builder.bearer_auth(key);
-            }
-
-            let response = req_builder.send().await.map_err(|e| {
-                if e.is_timeout() {
-                    ProviderError::Timeout
-                } else if e.is_connect() {
-                    ProviderError::Unavailable
-                } else {
-                    ProviderError::Rejected("Network request failed".to_string())
+            let mut retries: u32 = 0;
+            loop {
+                let mut req_builder = client.post(&endpoint).json(&body);
+                if let Some(ref key) = api_key {
+                    req_builder = req_builder.bearer_auth(key);
                 }
-            })?;
 
-            let status = response.status();
-            match status {
-                StatusCode::OK => {
-                    let parsed: GroqChatCompletionResponse =
-                        response.json().await.map_err(|_| {
-                            ProviderError::MalformedResponse(
-                                "Invalid response JSON schema".to_string(),
-                            )
+                let response = req_builder.send().await.map_err(|e| {
+                    if e.is_timeout() {
+                        ProviderError::Timeout
+                    } else if e.is_connect() {
+                        ProviderError::Unavailable
+                    } else {
+                        ProviderError::Rejected("Network request failed".to_string())
+                    }
+                })?;
+
+                let status = response.status();
+                if (status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error())
+                    && retries < MAX_GROQ_RETRIES
+                {
+                    let retry_after = parse_retry_after(&response);
+                    let backoff = calculate_backoff(retries, retry_after);
+                    retries += 1;
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+
+                match status {
+                    StatusCode::OK => {
+                        let parsed: GroqChatCompletionResponse =
+                            response.json().await.map_err(|_| {
+                                ProviderError::MalformedResponse(
+                                    "Invalid response JSON schema".to_string(),
+                                )
+                            })?;
+
+                        let choice = parsed.choices.into_iter().next().ok_or_else(|| {
+                            ProviderError::MalformedResponse("Choices array is empty".to_string())
                         })?;
 
-                    let choice = parsed.choices.into_iter().next().ok_or_else(|| {
-                        ProviderError::MalformedResponse("Choices array is empty".to_string())
-                    })?;
+                        let mut tool_calls = Vec::new();
+                        for tc in choice.message.tool_calls {
+                            if tc.id.is_empty() || tc.function.name.is_empty() {
+                                return Err(ProviderError::MalformedResponse(
+                                    "Invalid tool call attributes".to_string(),
+                                ));
+                            }
+                            tool_calls.push(ToolCall {
+                                id: tc.id,
+                                name: tc.function.name,
+                                arguments: tc.function.arguments,
+                            });
+                        }
 
-                    let mut tool_calls = Vec::new();
-                    for tc in choice.message.tool_calls {
-                        if tc.id.is_empty() || tc.function.name.is_empty() {
+                        let content = choice
+                            .message
+                            .content
+                            .map(|c| c.trim().to_string())
+                            .filter(|c| !c.is_empty());
+
+                        if content.is_none() && tool_calls.is_empty() {
                             return Err(ProviderError::MalformedResponse(
-                                "Invalid tool call attributes".to_string(),
+                                "Response contains neither content nor tool calls".to_string(),
                             ));
                         }
-                        tool_calls.push(ToolCall {
-                            id: tc.id,
-                            name: tc.function.name,
-                            arguments: tc.function.arguments,
+
+                        return Ok(CompletionResponse {
+                            content,
+                            tool_calls,
                         });
                     }
-
-                    let content = choice
-                        .message
-                        .content
-                        .map(|c| c.trim().to_string())
-                        .filter(|c| !c.is_empty());
-
-                    if content.is_none() && tool_calls.is_empty() {
-                        return Err(ProviderError::MalformedResponse(
-                            "Response contains neither content nor tool calls".to_string(),
-                        ));
+                    StatusCode::UNAUTHORIZED => return Err(ProviderError::Authentication),
+                    StatusCode::TOO_MANY_REQUESTS => return Err(ProviderError::RateLimited),
+                    s if s.is_server_error() => return Err(ProviderError::Unavailable),
+                    _ => {
+                        return Err(ProviderError::Rejected(format!(
+                            "Provider returned HTTP {}",
+                            status.as_u16()
+                        )));
                     }
-
-                    Ok(CompletionResponse {
-                        content,
-                        tool_calls,
-                    })
                 }
-                StatusCode::UNAUTHORIZED => Err(ProviderError::Authentication),
-                StatusCode::TOO_MANY_REQUESTS => Err(ProviderError::RateLimited),
-                s if s.is_server_error() => Err(ProviderError::Unavailable),
-                _ => Err(ProviderError::Rejected(format!(
-                    "Provider returned HTTP {}",
-                    status.as_u16()
-                ))),
             }
         })
     }

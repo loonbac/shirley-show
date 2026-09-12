@@ -2447,3 +2447,173 @@ async fn test_destructive_confirmation_strictly_exact_phrases_rejects_missing_ti
     assert_eq!(output_exact.actions_taken[0].tool, "eliminar_presentacion");
     assert!(registry.peek(&conv_id).is_none());
 }
+
+#[tokio::test]
+async fn test_agent_chat_fuzzy_matching_sesion_2_executes_sale_without_wasting_turn() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+
+    // Create target event
+    let mut setup_ctx = shirley_show::agent::turn_context::TurnToolContext::default();
+    let create_call = ToolCall {
+        id: "call_setup_s2".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Shirley Show y sus Amigos - Sesión 2",
+            "fecha_hora": "2026-08-15T20:00",
+            "lugar": "Teatro Canout",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 45.0, "capacidad": 80 }]
+        })
+        .to_string(),
+    };
+    let create_res = dispatcher.dispatch(&create_call, &mut setup_ctx).await;
+    let event_id = create_res["id"].as_str().unwrap().to_string();
+
+    // Model attempts to call vender_entradas with substring "sesión 2" instead of UUID
+    let provider = Arc::new(StubChatProvider::new(vec![
+        Ok(CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_vender_s2".to_string(),
+                name: "vender_entradas".to_string(),
+                arguments: json!({
+                    "evento_id": "sesión 2",
+                    "nombre_comprador": "Pedro Ruiz",
+                    "contacto": "999111222",
+                    "tipo_entrada": "General",
+                    "cantidad": 1,
+                    "medio_pago": "Yape",
+                    "estado_pago": "Pagado"
+                })
+                .to_string(),
+            }],
+        }),
+        Ok(CompletionResponse {
+            content: Some(
+                "¡Listo! Vendí la entrada para Shirley Show y sus Amigos - Sesión 2 a Pedro Ruiz."
+                    .to_string(),
+            ),
+            tool_calls: vec![],
+        }),
+    ]));
+
+    let agent_chat = AgentChat::new(
+        Some(provider),
+        dispatcher,
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+
+    let input = AgentChatInput {
+        message: "Vende 1 entrada para sesión 2 a Pedro Ruiz".to_string(),
+        history: vec![],
+        presentation_id: None,
+        event_id: None,
+        staged_audio_id: None,
+        staged_audio: None,
+        staged_image: None,
+        staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+    assert_eq!(output.actions_taken.len(), 1);
+    assert_eq!(output.actions_taken[0].tool, "vender_entradas");
+    assert_eq!(output.actions_taken[0].status, "success");
+    assert_eq!(output.actions_taken[0].event_id, Some(event_id));
+    assert!(output.message.contains("Pedro Ruiz"));
+}
+
+#[tokio::test]
+async fn test_agent_chat_fuzzy_matching_ambiguous_event_returns_clarification_to_agent() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state.clone());
+
+    // Create two events with shared substring
+    let mut setup_ctx = shirley_show::agent::turn_context::TurnToolContext::default();
+    let create_1 = ToolCall {
+        id: "call_setup_ambig_1".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Shirley Show y sus Amigos - Sesión 1",
+            "fecha_hora": "2026-08-14T20:00",
+            "lugar": "Teatro Canout",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 45.0, "capacidad": 80 }]
+        })
+        .to_string(),
+    };
+    dispatcher.dispatch(&create_1, &mut setup_ctx).await;
+
+    let create_2 = ToolCall {
+        id: "call_setup_ambig_2".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Shirley Show y sus Amigos - Sesión 2",
+            "fecha_hora": "2026-08-15T20:00",
+            "lugar": "Teatro Canout",
+            "tipos_de_entrada": [{ "nombre": "General", "precio": 45.0, "capacidad": 80 }]
+        })
+        .to_string(),
+    };
+    dispatcher.dispatch(&create_2, &mut setup_ctx).await;
+
+    // Model calls resumen_evento with "sesión" which matches both
+    struct ClarificationProvider;
+    impl ChatCompletionProvider for ClarificationProvider {
+        fn complete(
+            &self,
+            request: CompletionRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse, ProviderError>> + Send>>
+        {
+            Box::pin(async move {
+                let has_ambig_tool_error = request.messages.iter().any(|m| match m {
+                    AgentMessage::Tool { content, .. } => content.contains("ambiguous_event_id"),
+                    _ => false,
+                });
+
+                if !has_ambig_tool_error {
+                    Ok(CompletionResponse {
+                        content: None,
+                        tool_calls: vec![ToolCall {
+                            id: "call_ambig_sum".to_string(),
+                            name: "resumen_evento".to_string(),
+                            arguments: json!({ "evento_id": "sesión" }).to_string(),
+                        }],
+                    })
+                } else {
+                    Ok(CompletionResponse {
+                        content: Some("Encontré dos eventos llamados «Sesión»: «Shirley Show y sus Amigos - Sesión 1» y «Shirley Show y sus Amigos - Sesión 2». ¿A cuál te refieres?".to_string()),
+                        tool_calls: vec![],
+                    })
+                }
+            })
+        }
+    }
+
+    let agent_chat = AgentChat::new(
+        Some(Arc::new(ClarificationProvider)),
+        dispatcher,
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+
+    let input = AgentChatInput {
+        message: "Dame el resumen de sesión".to_string(),
+        history: vec![],
+        presentation_id: None,
+        event_id: None,
+        staged_audio_id: None,
+        staged_audio: None,
+        staged_image: None,
+        staged_filename: None,
+        conversation_id: None,
+        pending_destructive_action: None,
+    };
+
+    let output = agent_chat.execute(input).await;
+    assert_eq!(output.actions_taken.len(), 0);
+    assert!(output.message.contains("Sesión 1"));
+    assert!(output.message.contains("Sesión 2"));
+    assert!(output.message.contains("¿A cuál"));
+}

@@ -90,3 +90,185 @@
     display: none;
   }
 }
+
+/* ==========================================================================
+   Global Floating Bubble Launcher (.agent-chat-floating-trigger)
+   Always visible across routes (except Stage Mode), golden brand styling,
+   soft breath/pulse animation, and first-time attention badge.
+   ========================================================================== */
+
+.agent-chat-floating-trigger {
+  position: fixed;
+  bottom: max(24px, env(safe-area-inset-bottom, 24px));
+  right: max(24px, env(safe-area-inset-right, 24px));
+  z-index: calc(var(--z-modal, 1000) + 2);
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #d4a017 0%, #b8860b 50%, #9a7209 100%);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(184, 134, 11, 0.4), 0 2px 6px rgba(28, 25, 23, 0.15);
+  transition: transform var(--transition-fast, 150ms cubic-bezier(0.16, 1, 0.3, 1)),
+              box-shadow var(--transition-fast, 150ms ease),
+              background-color var(--transition-fast, 150ms ease);
+  animation: ressy-float-pulse 3.5s ease-in-out infinite;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.agent-chat-floating-trigger:hover {
+  transform: scale(1.08) translateY(-2px);
+  box-shadow: 0 10px 28px rgba(184, 134, 11, 0.5), 0 4px 10px rgba(28, 25, 23, 0.2);
+  animation-play-state: paused;
+}
+
+.agent-chat-floating-trigger:active {
+  transform: scale(0.96);
+}
+
+.agent-chat-floating-trigger:focus-visible {
+  outline: 3px solid var(--color-focus-ring, #b8860b);
+  outline-offset: 3px;
+}
+
+/* Open / Active state (toggled when panel is open) */
+.agent-chat-floating-trigger.is-open {
+  background: #9a7209;
+  animation: none;
+  box-shadow: 0 4px 14px rgba(28, 25, 23, 0.25);
+}
+
+.agent-chat-floating-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.agent-chat-floating-icon-sparkles {
+  color: #ffffff;
+  width: 26px;
+  height: 26px;
+}
+
+.agent-chat-floating-icon-close {
+  display: none;
+  color: #ffffff;
+  width: 24px;
+  height: 24px;
+}
+
+.agent-chat-floating-trigger.is-open .agent-chat-floating-icon-sparkles {
+  display: none;
+}
+
+.agent-chat-floating-trigger.is-open .agent-chat-floating-icon-close {
+  display: block;
+}
+
+/* Hidden state: Suppressed during Stage Mode live performance */
+.agent-chat-floating-trigger.is-hidden {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* Attention Badge: subtle attention pill for first-time discovery */
+.agent-chat-floating-badge {
+  position: absolute;
+  top: -8px;
+  right: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 9px;
+  background: #ffffff;
+  color: #805e05;
+  border: 1.5px solid #b8860b;
+  border-radius: 9999px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(184, 134, 11, 0.35);
+  pointer-events: none;
+  transition: opacity 250ms ease, transform 250ms cubic-bezier(0.16, 1, 0.3, 1), visibility 250ms;
+  animation: ressy-badge-float 2.5s ease-in-out infinite;
+}
+
+.agent-chat-floating-badge.is-dismissed {
+  opacity: 0;
+  transform: scale(0.6);
+  visibility: hidden;
+  pointer-events: none;
+  animation: none;
+}
+
+.agent-chat-floating-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+@keyframes ressy-float-pulse {
+  0% {
+    box-shadow: 0 6px 20px rgba(184, 134, 11, 0.4), 0 0 0 0 rgba(184, 134, 11, 0.45);
+  }
+  65% {
+    box-shadow: 0 8px 26px rgba(184, 134, 11, 0.45), 0 0 0 14px rgba(184, 134, 11, 0);
+  }
+  100% {
+    box-shadow: 0 6px 20px rgba(184, 134, 11, 0.4), 0 0 0 0 rgba(184, 134, 11, 0);
+  }
+}
+
+@keyframes ressy-badge-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .agent-chat-floating-trigger {
+    width: 52px;
+    height: 52px;
+    bottom: max(16px, env(safe-area-inset-bottom, 16px));
+    right: max(16px, env(safe-area-inset-right, 16px));
+  }
+
+  /* On mobile fullscreen, hide floating bubble so it does not obstruct the composer */
+  .agent-chat-floating-trigger.is-open {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat-floating-trigger {
+    animation: none !important;
+    transition: none !important;
+  }
+  .agent-chat-floating-badge {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+

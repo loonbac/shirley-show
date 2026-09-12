@@ -10,51 +10,82 @@
 }
 
 .agent-chat-panel.is-open {
-  pointer-events: auto;
   visibility: visible;
 }
 
-/* Backdrop */
-.agent-chat-backdrop {
-  position: fixed;
-  inset: 0;
-  background-color: var(--color-overlay, rgba(28, 25, 23, 0.5));
-  opacity: 0;
-  transition: opacity var(--transition-base, 250ms ease-in-out);
-}
-
-.agent-chat-panel.is-open .agent-chat-backdrop {
-  opacity: 1;
-}
-
-/* Surface */
+/* Surface base */
 .agent-chat-surface {
   position: relative;
   display: flex;
   flex-direction: column;
-  height: 100%;
   background-color: var(--color-bg, #faf8f5);
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
   z-index: 1;
-  transform: translateX(100%);
-  transition: transform var(--transition-slide, 350ms cubic-bezier(0.16, 1, 0.3, 1));
-  will-change: transform;
+  pointer-events: auto;
+  will-change: transform, opacity;
 }
 
-.agent-chat-panel.is-open .agent-chat-surface {
-  transform: translateX(0);
-}
-
-/* Desktop layout constraint: exactly 580px */
+/* Desktop: Floating overlay without blocking backdrop to allow viewing & interacting with list */
 @media (min-width: 769px) {
+  .agent-chat-panel {
+    justify-content: flex-end;
+    align-items: flex-end;
+    padding-right: 24px;
+    padding-bottom: 92px;
+    pointer-events: none;
+  }
+
+  /* Sin backdrop bloqueante en PC para seguir viendo la lista mientras chateas */
+  .agent-chat-backdrop {
+    display: none !important;
+    pointer-events: none !important;
+  }
+
+  /* Desktop layout constraint: exactly 580px width, ~80vh height, soft rounded corners, warm shadow */
   .agent-chat-surface {
     width: 580px;
-    max-width: 90vw;
+    min-width: 400px;
+    max-width: min(580px, calc(100vw - 48px));
+    height: 80vh;
+    max-height: calc(100vh - 116px);
+    border-radius: var(--radius-lg, 16px);
+    border: 1px solid var(--color-border-subtle, #ede7db);
+    box-shadow: 0 20px 48px -8px rgba(184, 134, 11, 0.22), 0 12px 32px -4px rgba(28, 25, 23, 0.18);
+    overflow: hidden;
+    transform: translateY(16px) scale(0.98);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform var(--transition-slide, 300ms cubic-bezier(0.16, 1, 0.3, 1)),
+                opacity var(--transition-base, 200ms ease);
+  }
+
+  .agent-chat-panel.is-open .agent-chat-surface {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 
-/* Mobile layout constraint: 100vw x 100dvh fullscreen overlay with safe-area insets */
+/* Mobile layout constraint: 100vw x 100dvh fullscreen overlay with safe-area insets and soft backdrop */
 @media (max-width: 768px) {
+  .agent-chat-panel.is-open {
+    pointer-events: auto;
+  }
+
+  /* Backdrop suave en móvil */
+  .agent-chat-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: var(--color-overlay, rgba(28, 25, 23, 0.35));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-base, 250ms ease-in-out);
+  }
+
+  .agent-chat-panel.is-open .agent-chat-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
   .agent-chat-surface {
     width: 100vw;
     height: 100dvh;
@@ -62,6 +93,13 @@
     border-radius: 0;
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    transform: translateX(100%);
+    transition: transform var(--transition-slide, 350ms cubic-bezier(0.16, 1, 0.3, 1));
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+  }
+
+  .agent-chat-panel.is-open .agent-chat-surface {
+    transform: translateX(0);
   }
 }
 

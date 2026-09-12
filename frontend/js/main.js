@@ -32,6 +32,9 @@ function init() {
   const chatState = createChatState();
   const agentChatController = createAgentChatController({ chatState });
   document.body.appendChild(agentChatController.panelEl);
+  if (agentChatController.floatingTriggerEl) {
+    document.body.appendChild(agentChatController.floatingTriggerEl);
+  }
 
   // Global keyboard shortcuts (Ctrl+K / Cmd+K), suppressed during Stage Mode
   bindAgentChatShortcuts({
