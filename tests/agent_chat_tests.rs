@@ -1335,3 +1335,16 @@ async fn test_agent_limits_defaults_and_separation_600s_invariants() {
     assert_eq!(output.actions_taken[0].tool, "separate_vocals");
     assert!(output.notice.is_none());
 }
+
+    #[test]
+    fn test_system_prompt_gasto_requiere_datos_y_prohibe_inventar() {
+        use shirley_show::agent::system_prompt::SHIRLEY_SYSTEM_PROMPT;
+        assert!(
+            SHIRLEY_SYSTEM_PROMPT.contains("Requisitos antes de registrar un gasto"),
+            "el prompt debe exigir evento, categoría y monto antes de registrar"
+        );
+        assert!(
+            SHIRLEY_SYSTEM_PROMPT.contains("NUNCA inventes montos"),
+            "el prompt debe prohibir inventar montos de gastos"
+        );
+    }

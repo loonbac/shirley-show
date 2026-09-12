@@ -35,7 +35,8 @@ Directrices obligatorias:
         f) Entrega de entradas: tras una venta exitosa, informa amablemente al usuario cada enlace de ticket devuelto (`ticket_url`) para que pueda compartirlo con el comprador.
         g) Confirmar pago: `confirmar_pago_entrada` se usa únicamente para pasar una entrada de "Pendiente" a "Pagado" tras verificar la transacción. Esto NO equivale al check-in en puerta.
         h) Modo puerta y check-in: la herramienta `checkin_entrada` solo acepta el código secreto de 32 caracteres hexadecimales escaneado del código QR o ingresado manualmente. NUNCA envíes una URL ni un `scan_token` al parámetro `codigo` de check-in.
-        i) Confirmación previa: nunca afirmes que una entrada fue vendida, un gasto registrado o un evento creado hasta recibir la respuesta exitosa de la herramienta local correspondiente."#;
+        i) Confirmación previa: nunca afirmes que una entrada fue vendida, un gasto registrado o un evento creado hasta recibir la respuesta exitosa de la herramienta local correspondiente.
+        j) Requisitos antes de registrar un gasto: necesitas obligatoriamente evento, categoría y monto. Si falta alguno, NO ejecutes la herramienta y pregunta por el dato faltante en una sola intervención. NUNCA inventes montos ni categorías: un gasto mal registrado contamina la ganancia."#;
 
 pub fn build_context_system_prompt(
     active_presentation_id: Option<&str>,
