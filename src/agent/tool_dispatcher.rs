@@ -333,7 +333,41 @@ fn matches_fuzzy_substring(name: &str, query: &str) -> bool {
     }
     let name_norm = normalize_for_fuzzy(name);
     let query_norm = normalize_for_fuzzy(query);
-    name_norm.contains(&query_norm)
+    if name_norm.contains(&query_norm) {
+        return true;
+    }
+
+    let ignored = ["a", "al", "de", "del", "el", "en", "la", "las", "los", "para"];
+    let name_tokens: Vec<&str> = name_norm
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|token| !token.is_empty() && !ignored.contains(token))
+        .collect();
+    let query_tokens: Vec<&str> = query_norm
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|token| !token.is_empty() && !ignored.contains(token))
+        .collect();
+
+    !query_tokens.is_empty()
+        && query_tokens
+            .iter()
+            .all(|token| name_tokens.contains(token))
+}
+
+#[cfg(test)]
+mod fuzzy_match_tests {
+    use super::matches_fuzzy_substring;
+
+    #[test]
+    fn matches_destination_when_connector_words_are_omitted() {
+        assert!(matches_fuzzy_substring(
+            "Eventos 13 de setiembre",
+            "eventos 13 setiembre"
+        ));
+        assert!(!matches_fuzzy_substring(
+            "Eventos 13 de octubre",
+            "eventos 13 setiembre"
+        ));
+    }
 }
 
 fn is_authorized_event(context: &TurnToolContext, evento_id: &str) -> bool {

@@ -773,7 +773,21 @@ impl AgentChat {
 fn staged_audio_destination_query(message: &str) -> Option<&str> {
     let trimmed = message.trim();
     let lower = trimmed.to_lowercase();
-    for prefix in ["a la de ", "a la ", "al de ", "al ", "a "] {
+    for prefix in [
+        "ponlo en ",
+        "ponla en ",
+        "agregalo en ",
+        "agrégalo en ",
+        "agregala en ",
+        "agrégala en ",
+        "a la de ",
+        "a la ",
+        "al de ",
+        "al ",
+        "en ",
+        "para ",
+        "a ",
+    ] {
         if lower.starts_with(prefix) {
             let destination = trimmed[prefix.len()..].trim();
             if !destination.is_empty() {
@@ -782,6 +796,23 @@ fn staged_audio_destination_query(message: &str) -> Option<&str> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod destination_query_tests {
+    use super::staged_audio_destination_query;
+
+    #[test]
+    fn extracts_common_staged_audio_destination_replies() {
+        assert_eq!(
+            staged_audio_destination_query("a la de setiembre"),
+            Some("setiembre")
+        );
+        assert_eq!(
+            staged_audio_destination_query("en eventos 13 setiembre"),
+            Some("eventos 13 setiembre")
+        );
+    }
 }
 
 fn prune_history(history: Vec<HistoryMessage>) -> (Vec<AgentMessage>, bool) {
