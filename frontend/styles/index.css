@@ -52,3 +52,6 @@
 /* Views */
 @import "./views/presentations-view.css";
 @import "./views/presentation-detail-view.css";
+
+/* Events & Ticketing */
+@import "./events/index.css";

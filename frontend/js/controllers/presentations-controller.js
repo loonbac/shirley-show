@@ -11,7 +11,7 @@ import { listPresentations } from '../data/list-presentations.js';
 import { createPresentation } from '../data/create-presentation.js';
 import { renamePresentation } from '../data/rename-presentation.js';
 import { deletePresentation } from '../data/delete-presentation.js';
-import { toPresentation } from '../router/navigate.js';
+import { toPresentation, toEvents } from '../router/navigate.js';
 
 /**
  * Controller orchestrating the presentations catalog.
@@ -84,6 +84,12 @@ export function createPresentationsController(deps) {
 
   const topbar = createAppTopbar({
     title: 'Shirley Show',
+    activeSection: 'presentations',
+    onSectionChange: (sec) => {
+      if (sec === 'events') {
+        toEvents();
+      }
+    },
     actions: [agentChatTrigger.el],
   });
 

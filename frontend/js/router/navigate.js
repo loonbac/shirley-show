@@ -23,3 +23,34 @@ export function toPresentations() {
 export function toPresentation(id) {
   navigateTo(`#/presentations/${encodeURIComponent(id)}`);
 }
+
+/**
+ * Navigates to the events catalog view.
+ */
+export function toEvents() {
+  navigateTo('#/eventos');
+}
+
+/**
+ * Navigates to a specific event detail view.
+ * @param {string} id 
+ */
+export function toEvent(id) {
+  navigateTo(`#/eventos/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Navigates to the public ticket view for a given scan_token.
+ * @param {string} token 
+ */
+export function toPublicTicket(token) {
+  navigateTo(`#/ticket/${encodeURIComponent(token)}`);
+}
+
+/**
+ * Navigates to the door / check-in view for a given event id.
+ * @param {string} id 
+ */
+export function toDoor(id) {
+  navigateTo(`#/puerta/${encodeURIComponent(id)}`);
+}

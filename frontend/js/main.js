@@ -5,6 +5,7 @@ import { navigateTo } from './router/navigate.js';
 import { activeRouteSignal } from './state/active-route.js';
 import { createPresentationsController } from './controllers/presentations-controller.js';
 import { createPresentationDetailController } from './controllers/presentation-detail-controller.js';
+import { createEventsCatalogController, createEventDetailController } from './modules/events/controllers.js';
 import { createChatState } from './core/state/chat-state.js';
 import { createAgentChatController } from './controllers/agent-chat-controller.js';
 import { bindAgentChatShortcuts } from './behaviors/bind-agent-chat-shortcuts.js';
@@ -13,7 +14,7 @@ import { stageModeSignal } from './core/state/stage-mode-state.js';
 /**
  * Shirley Show Composition Root.
  * Initializes singleton audio controller, singleton AI agent chat controller,
- * sets up shell layout, and handles routing.
+ * sets up shell layout, and handles routing for presentations and ticketing.
  */
 function init() {
   const rootEl = document.getElementById('app');
@@ -70,6 +71,22 @@ function init() {
       const presentationId = parsed.params.id;
       activeController = createPresentationDetailController({
         presentationId,
+        audioController,
+        onOpenAgent: () => agentChatController.open(),
+      });
+      shell.setHeader(activeController.topbarEl);
+      shell.setMain(activeController.viewEl);
+    } else if (parsed.view === 'events') {
+      activeController = createEventsCatalogController({
+        audioController,
+        onOpenAgent: () => agentChatController.open(),
+      });
+      shell.setHeader(activeController.topbarEl);
+      shell.setMain(activeController.viewEl);
+    } else if (parsed.view === 'event-detail') {
+      const eventId = parsed.params.id;
+      activeController = createEventDetailController({
+        eventId,
         audioController,
         onOpenAgent: () => agentChatController.open(),
       });

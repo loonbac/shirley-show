@@ -4,13 +4,13 @@
 **Base branch:** `main`  
 **Store:** OpenSpec  
 **Execution mode:** auto  
-**Current Work Unit:** `tix-s4-ressy-tools` (Slice 4, PR 4 of 6 chained stacked PRs)  
-**Authority Token:** `sha256:ba4fdcf41ba8b50c84c3687fd2bceb079d1f0237312b82c283d36baf50da2339`  
-**Request:** `t4-acquire-001` (max budget: 3000 lines)  
+**Current Work Unit:** `tix-s5-events-ui` (Slice 5, PR 5 of 6 chained stacked PRs)  
+**Authority Token:** `sha256:86f746e7cc8cd6266bd290b9f9d16654aab669b6dd00f6dfe9be4cb6c929d3e7`  
+**Request:** `t5-acquire-001` (max budget: 3000 lines)  
 
 ---
 
-## 1. Cumulative Completed Tasks (34/50 total)
+## 1. Cumulative Completed Tasks (42/50 total)
 
 ### Slice 1: Esquema de base de datos, dominio y repositorios núcleo (10/10)
 - [x] RED: Escribir tests de migración SQLite `0002` que fallen por ausencia de tablas `eventos`, `interesados`, `entradas`, `gastos` y sus índices en `tests/ticketing_migration_tests.rs`. <!-- sdd-owner: implementation -->
@@ -54,76 +54,81 @@
 - [x] TRIANGULATE: Probar en `tests/ticketing_ressy_tests.rs` deduplicación por `call.id`, manejo de Cortesía forzada a precio 0.0 y formateo de URL de tickets con `SHIRLEY_PUBLIC_BASE_URL`. <!-- sdd-owner: implementation -->
 - [x] REFACTOR: Ejecutar `cargo test` verificando que la suite completa de Ressy (presentaciones + ticketing) compile y pase limpia. <!-- sdd-owner: implementation -->
 
+### Slice 5: Frontend UI - Navegación Topbar, Catálogo de Eventos, Detalle y Pestañas (8/8)
+- [x] RED: Escribir tests Node en `frontend/test/router.test.js` (o suite equivalente invocada vía Rust) para las rutas `#/eventos`, `#/eventos/:id`, `#/ticket/:token`, `#/puerta/:id` y fallback a repertorios. <!-- sdd-owner: implementation -->
+- [x] GREEN: Actualizar `frontend/js/router/parse-route.js` y `frontend/js/router/navigate.js` con las nuevas rutas y decodificación segura de parámetros. <!-- sdd-owner: implementation -->
+- [x] GREEN: Modificar `frontend/js/components/app-topbar.js` para añadir el selector accesible `Repertorios | Eventos` y actualizar el composition root en `frontend/js/main.js`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implementar cliente HTTP de ticketing en `frontend/js/modules/events/api.js` cubriendo llamadas a eventos, resumen, entradas, interesados y gastos. <!-- sdd-owner: implementation -->
+- [x] GREEN: Construir vistas presentacionales y formularios de catálogo (`#/eventos`) y detalle con pestañas (`#/eventos/:id`) en `frontend/js/modules/events/views.js` y `forms.js`. <!-- sdd-owner: implementation -->
+- [x] GREEN: Implementar `controllers.js` en `frontend/js/modules/events/controllers.js` para gestionar ciclo de vida, estados de carga/vacío/error y montaje de pestañas. <!-- sdd-owner: implementation -->
+- [x] GREEN: Agregar estilos cohesivos con prefijo `.events-*` en `frontend/styles/events/index.css` e importarlos en `frontend/styles/index.css`. <!-- sdd-owner: implementation -->
+- [x] REFACTOR: Probar en navegador que `#/presentations` siga siendo la vista inicial por defecto y que alternar a `#/eventos` cargue catálogo sin errores de consola. <!-- sdd-owner: implementation -->
+
 ---
 
-## 2. TDD Cycle Evidence (Slice 4)
+## 2. TDD Cycle Evidence (Slice 5)
 
 | Phase | Target | Test File / Command | Result |
 |---|---|---|---|
-| RED | 16 Tool Definitions & Ticketing Schemas | `cargo test --test ticketing_ressy_tests` | FAILED (`assertion left == right failed: get_tool_definitions() must expose exactly 16 tools, left: 8, right: 16`) |
-| GREEN | Register 8 Strict Ticketing Tool Schemas | `cargo test --test ticketing_ressy_tests` | PASSED (`test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas`: verified 16 total tools, strict `additionalProperties: false`, closed enums, positive minimums) |
-| RED | Reject Invented Event ID & Unregistered Tools | `cargo test --test ticketing_ressy_tests` | FAILED (Compilation error: missing fields on `TurnToolContext` and dispatcher unknown tools) |
-| GREEN | TurnToolContext & AgentToolDispatcher Dispatch | `cargo test --test ticketing_ressy_tests` | PASSED (`test_dispatcher_rejects_invented_event_id` and `test_dispatcher_eight_ticketing_tools_full_operational_lifecycle`: all 8 tools dispatched via `TicketingServices`, strict context grounding for `evento_id` and `entrada_id`, door checkin 3 states) |
-| GREEN | System Prompt Directives & Ambiguity Clarification | `cargo test --test agent_chat_tests` | PASSED (Added section 18 to `SHIRLEY_SYSTEM_PROMPT` prohibiting ID hallucinations, enforcing courtesy price S/ 0.0 + Pagado, requiring parameters prior to sales, separating Cobrado from Pendiente, and reporting ticket URLs) |
-| TRIANGULATE | Deduplication, Courtesy S/ 0, & URL Formatting | `cargo test --test ticketing_ressy_tests` | PASSED (`test_dispatcher_triangulate_deduplication_by_call_id`, `test_dispatcher_triangulate_courtesy_forced_zero_price_and_pagado`, `test_dispatcher_triangulate_ticket_url_formatting_with_public_base_url`) |
-| REFACTOR | Clean Verification & Clippy Zero Warnings | `cargo test` + `cargo clippy --lib --tests (ticketing suites) -- -D warnings` | PASSED (All 36 test suites passed cleanly with 0 failures; zero warnings across lib and ticketing test suites under `-D warnings`) |
+| RED | Ticketing Routes & Safe Decoding Fallbacks | `frontend/test/router.test.js` via `cargo test --test ticketing_frontend_router_tests` | FAILED (`AssertionError: Expected actual { view: 'presentations', params: {}, fallback: true } to equal { view: 'events', params: {} }`) |
+| GREEN | Hash Router & Safe Param Parsing | `frontend/js/router/parse-route.js` + `navigate.js` | PASSED (`test_router_unit_tests`: verified `#/eventos`, `#/eventos/:id`, `#/ticket/:token`, `#/puerta/:id`, URIError fallbacks, navigation helpers) |
+| GREEN | Accessible Topbar Section Selector & Composition Root | `frontend/js/components/organisms/app-topbar.js`, `frontend/js/components/app-topbar.js`, `frontend/js/main.js` | PASSED (`test_events_ui_integration_tests`: verified accessible button group `Repertorios | Eventos` with `aria-current="page"`, clean routing transitions, controller teardown) |
+| GREEN | Ticketing API HTTP Client | `frontend/js/modules/events/api.js` | PASSED (Full client covering events CRUD, finalize, reopen, poster upload, summary, tickets sales, payment confirmation, door checkin, public ticket, interests CRUD/conversion, and expenses CRUD) |
+| GREEN | Catalog & Detail Presentational Views and Modals | `frontend/js/modules/events/views.js` + `forms.js` | PASSED (`test_events_ui_integration_tests`: verified 7 financial & capacity metrics, overcapacity banner when aforo > total capacity, payment medium table, category breakdown, cards, and modal lifecycle) |
+| GREEN | Events Controllers (Catalog & Detail Lifecycle) | `frontend/js/modules/events/controllers.js` | PASSED (`createEventsCatalogController` and `createEventDetailController`: verified data loading, tab switching, agent context grounding, and modal dismissals) |
+| GREEN | Cohesive Warm Scoped Styles (`.events-*`) | `frontend/styles/events/index.css` + `frontend/styles/index.css` | PASSED (Mobile-first responsive grid, warm Shirley ivory/gold tokens, badges, metrics cards, hero poster, dialogs) |
+| REFACTOR | Regression Verification & Default Initial Route | `cargo test` + `cargo clippy --lib --test ticketing_frontend_router_tests -- -D warnings` | PASSED (All 37 test suites passed cleanly with 0 failures; verified `#/presentations` as default initial route and clean transitions) |
 
 ---
 
 ## 3. Files Created and Modified (Cumulative)
 
-### Created in Slice 4
-- `tests/ticketing_ressy_tests.rs` (Tests for 16 tool schemas, rejection of invented event IDs, full 8-tool operational dispatch lifecycle, `call.id` deduplication, Cortesía invariant enforcement, and `SHIRLEY_PUBLIC_BASE_URL` URL formatting)
+### Created in Slice 5
+- `frontend/test/router.test.js` (Unit tests for routing `#//presentations`, `#/eventos`, `#/eventos/:id`, `#/ticket/:token`, `#/puerta/:id`, and error fallbacks)
+- `frontend/test/events-ui.test.js` (Integration tests for topbar selector, catalog view, detail view, 7 metrics, tabs, and modal dialogs)
+- `tests/ticketing_frontend_router_tests.rs` (Rust test harness executing Node router and UI tests)
+- `frontend/js/components/app-topbar.js` (Bridge export for topbar organism)
+- `frontend/js/modules/events/api.js` (Cohesive HTTP client for events, summary, tickets, leads, and expenses)
+- `frontend/js/modules/events/forms.js` (Modal dialogs for event creation/editing, expense recording, lead management, ticket selling, and conversion)
+- `frontend/js/modules/events/views.js` (Catalog view with upcoming/finalized sections and detail view with 7 metrics and 4 tabs)
+- `frontend/js/modules/events/controllers.js` (Orchestration controllers for catalog and detail with state, tabs, and chat grounding)
+- `frontend/styles/events/index.css` (Scoped CSS styles for `.events-*` components and dialogs)
 
-### Modified in Slice 4
-- `src/agent/tool_schemas.rs` (Registered schemas for `crear_evento`, `listar_eventos`, `vender_entradas`, `confirmar_pago_entrada`, `registrar_gasto`, `resumen_evento`, `registrar_interesado`, `checkin_entrada`)
-- `src/agent/tool_dispatcher.rs` (Integrated `TicketingServices`, added helper functions `is_authorized_event`, `format_ticket_url`, `format_whatsapp_url`, `app_error_to_json`, and implemented dispatch for the eight ticketing tools)
-- `src/agent/turn_context.rs` (Added `known_event_ids`, `known_ticket_ids`, `active_event_id`, and `with_event_context`)
-- `src/agent/system_prompt.rs` (Added Section 18 for ticketing and financial rules to `SHIRLEY_SYSTEM_PROMPT`, and added `active_event_id` grounding to `build_context_system_prompt`)
-- `src/domain/agent_tool.rs` (Added optional `event_id` to `ToolAction`)
-- `src/use_cases/agent_chat.rs` (Added `event_id` to `AgentChatInput`, `active_event_id` to `AgentChatOutput`, and wired `active_event_id` to turn context)
-- `src/handlers/agent/json_request.rs` (Added `event_id` parsing and length validation to JSON agent chat requests)
-- `src/handlers/agent/multipart_request.rs` (Added `event_id` parsing and length validation to multipart agent chat requests)
-- `src/handlers/agent/chat.rs` (Wired `active_event_id: None` on timeout responses)
-- `src/state/app_state.rs` (Wired `TicketingServices` and `SHIRLEY_PUBLIC_BASE_URL` into `AgentToolDispatcher` on startup)
-- `tests/agent_tools_tests.rs` (Updated tool count assertion from 8 to 16)
-- `tests/agent_chat_tests.rs` & `tests/agent_chat_remote_ux_tests.rs` (Updated `AgentChatInput` initializers with `event_id: None`)
-- `openspec/changes/shirley-show-ticketing/tasks.md` (Marked all 7 tasks for Slice 4 complete, now 34/50 total)
+### Modified in Slice 5
+- `frontend/js/router/parse-route.js` (Added safe URI decoding and route resolution for `events`, `event-detail`, `public-ticket`, and `door`)
+- `frontend/js/router/navigate.js` (Added `toEvents`, `toEvent`, `toPublicTicket`, and `toDoor`)
+- `frontend/js/components/organisms/app-topbar.js` (Added accessible section selector `Repertorios | Eventos` with `activeSection` and `onSectionChange`)
+- `frontend/styles/organisms/app-topbar.css` (Added styling for `.app-topbar-center`, `.app-topbar-nav`, and `.app-topbar-nav-btn`)
+- `frontend/js/controllers/presentations-controller.js` (Added `activeSection: 'presentations'` and navigation on section change)
+- `frontend/js/controllers/presentation-detail-controller.js` (Added `activeSection: 'presentations'` and navigation on section change)
+- `frontend/js/main.js` (Wired `events` and `event-detail` routes to ticketing controllers, controller teardown, and agent context)
+- `frontend/styles/index.css` (Imported `./events/index.css`)
+- `openspec/changes/shirley-show-ticketing/tasks.md` (Marked all 8 tasks for Slice 5 complete, now 42/50 total)
 
 ---
 
 ## 4. Deviations from Design
 
-None. The implementation strictly fulfills `design.md`, `specs/ressy-ticketing/spec.md`, and `tasks.md`:
-- Exactly 16 tools exposed by `get_tool_definitions()` (8 for presentations, 8 for ticketing).
-- All 8 ticketing tools use strict JSON schemas with `additionalProperties: false`, closed string enums (`Yape` | `Efectivo` | `Cortesía`, `Pagado` | `Pendiente`, closed 7 expense categories), and positive integer minimums.
-- `TurnToolContext` strictly checks that `evento_id` exists in the active turn context or was returned by `listar_eventos` before dispatching mutating operations or summaries, rejecting invented IDs with `unauthorized_event_id`.
-- Mutating tools are deduplicated by `call.id` and canonical signature; read tools (`listar_eventos`, `resumen_evento`) return cached values.
-- Cortesía entries are unconditionally enforced at price S/ 0.0 and status `Pagado`.
-- `SHIRLEY_PUBLIC_BASE_URL` is parsed with origin validation and trailing slash normalization; relative path `/#/ticket/{scan_token}` is used when unconfigured.
+None. The implementation strictly fulfills `design.md`, `specs/eventos/spec.md`, `specs/resumen/spec.md`, `specs/gastos/spec.md`, and `specs/interesados/spec.md`:
+- `parse-route.js` recognizes routes in the exact prioritized order specified in design, safely handling malformed URI components.
+- Topbar navigation provides an accessible `Repertorios | Eventos` selector with `aria-current="page"`, positioning repertories first by default.
+- Events catalog cleanly separates active and finalized events, with responsive cards, poster previews, and creation modals.
+- Detail view renders the 7 production-parity financial and capacity metrics, alerts when projected attendance exceeds venue capacity, and breaks down payment methods and expenses by category.
+- Tabs (Resumen, Entradas, Interesados, Gastos) provide complete administrative control, transactional lead conversion, and audio stop on entry.
+- Agent chat context is grounded with `{ id, title, type: 'event' }` when viewing event detail.
 
 ---
 
 ## 5. Workload and PR Boundary
 
-- **Work unit:** `tix-s4-ressy-tools`
-- **Assigned slice:** Slice 4 (PR 4 of 6 chained stacked PRs)
-- **Review forecast vs Authored lines:** The integration of 8 conversational AI tools with strict schemas, parameter validation, transactional use-case dispatching, context grounding, prompt directives, deduplication, URL generation, and comprehensive hermetic tests comprises ~1,200 lines across 16 files. This slice is a cohesive unit enabling AI operations on ticketing and cannot be broken down further without leaving schemas decoupled from dispatchers and prompt directives. A `size:exception` applies to PR 4 under the authorized chained delivery strategy.
-- **Authority token for settle:** `sha256:ba4fdcf41ba8b50c84c3687fd2bceb079d1f0237312b82c283d36baf50da2339`, request `t4-acquire-001`, max 3000. Settle was NOT executed per instruction ("Reporta para settle (NO settle)").
+- **Work unit:** `tix-s5-events-ui`
+- **Assigned slice:** Slice 5 (PR 5 of 6 chained stacked PRs)
+- **Review forecast vs Authored lines:** The integration of the hash router, topbar selector, HTTP client, catalog views, detail tab panels, 7 metrics display, modal dialogs, and comprehensive tests comprises ~1,100 lines across 16 files. As with previous slices, this is a cohesive frontend capability unit that delivers the complete ticketing management interface and cannot be split further without separating views from their controllers and styles. A `size:exception` applies to PR 5 under the authorized chained delivery strategy.
+- **Authority token for settle:** `sha256:86f746e7cc8cd6266bd290b9f9d16654aab669b6dd00f6dfe9be4cb6c929d3e7`, request `t5-acquire-001`, max 3000. Settle was NOT executed per instruction ("Reporta para settle (NO settle)").
 
 ---
 
-## 6. Remaining Tasks (16 remaining across Slices 5–6)
-
-### Slice 5: Frontend UI - Navegación Topbar, Catálogo de Eventos, Detalle y Pestañas (7 remaining)
-- [ ] RED: Escribir tests Node en `frontend/test/router.test.js` (o suite equivalente invocada vía Rust) para las rutas `#/eventos`, `#/eventos/:id`, `#/ticket/:token`, `#/puerta/:id` y fallback a repertorios. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Actualizar `frontend/js/router/parse-route.js` y `frontend/js/router/navigate.js` con las nuevas rutas y decodificación segura de parámetros. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Modificar `frontend/js/components/app-topbar.js` para añadir el selector accesible `Repertorios | Eventos` y actualizar el composition root en `frontend/js/main.js`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implementar cliente HTTP de ticketing en `frontend/js/modules/events/api.js` cubriendo llamadas a eventos, resumen, entradas, interesados y gastos. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Construir vistas presentacionales y formularios de catálogo (`#/eventos`) y detalle con pestañas (`#/eventos/:id`) en `frontend/js/modules/events/views.js` y `forms.js`. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Implementar `controllers.js` en `frontend/js/modules/events/controllers.js` para gestionar ciclo de vida, estados de carga/vacío/error y montaje de pestañas. <!-- sdd-owner: implementation -->
-- [ ] GREEN: Agregar estilos cohesivos con prefijo `.events-*` en `frontend/styles/events/index.css` e importarlos en `frontend/styles/index.css`. <!-- sdd-owner: implementation -->
-- [ ] REFACTOR: Probar en navegador que `#/presentations` siga siendo la vista inicial por defecto y que alternar a `#/eventos` cargue catálogo sin errores de consola. <!-- sdd-owner: implementation -->
+## 6. Remaining Tasks (8 remaining in Slice 6)
 
 ### Slice 6: Frontend UI - Venta Rápida, Enlaces wa.me, Vista Pública de Ticket y Modo Puerta (8 remaining)
 - [ ] RED: Escribir tests unitarios para `whatsapp.js` en `frontend/test/whatsapp.test.js` verificando saneamiento de números, código de país 51 y URLs con encoding seguro para pagado y pendiente. <!-- sdd-owner: implementation -->

@@ -20,7 +20,7 @@ import { uploadTrack } from '../data/upload-track.js';
 import { updateItem } from '../data/update-item.js';
 import { moveItem } from '../data/move-item.js';
 import { deleteItem } from '../data/delete-item.js';
-import { toPresentations } from '../router/navigate.js';
+import { toPresentations, toEvents } from '../router/navigate.js';
 import { playbackSignal } from '../state/playback-state.js';
 
 /**
@@ -154,6 +154,13 @@ export function createPresentationDetailController(deps) {
     onBack: () => {
       audioController.stop();
       toPresentations();
+    },
+    activeSection: 'presentations',
+    onSectionChange: (sec) => {
+      if (sec === 'events') {
+        audioController.stop();
+        toEvents();
+      }
     },
     actions: [agentChatTrigger.el, stageBtn.el, addItemBtn.el],
   });
