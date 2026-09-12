@@ -48,8 +48,9 @@ Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n /run/current-sys
 
 | Variable | Ejemplo | Notas |
 |---|---|---|
-| `GROQ_API_KEY` | `gsk_...` | Requerida. Guarda como secreto. |
-| `GROQ_MODEL` | `openai/gpt-oss-120b` | Opcional. |
+| `OPENCODE_API_KEY` | key de OpenCode Go | Requerida. Guarda como secreto. |
+| `OPENCODE_MODEL` | `deepseek-v4-flash` | Opcional. |
+| `GROQ_API_KEY` / `GROQ_MODEL` | `gsk_...` | Opcional, solo como fallback. |
 | `JOSHUA_PC_HOST` | `100.73.247.39` | Vacío = modo local (sin GPU remota). |
 | `JOSHUA_PC_USER` / `JOSHUA_PC_PORT` | `loonbac` / `22` | Opcional. |
 | `JOSHUA_PC_SSH_KEY` | `/home/shirley/.ssh/id_ed25519` | Ruta **dentro** del contenedor. |
