@@ -191,7 +191,7 @@ impl AgentChat {
             );
         }
         conversation_messages.push(AgentMessage::User {
-            content: user_message,
+            content: user_message.clone(),
         });
 
         let tracker = Arc::new(Mutex::new(CommittedTurnState {
@@ -345,11 +345,30 @@ impl AgentChat {
                 };
             }
 
+            let tools = if user_message.contains("youtu")
+                || user_message.contains("voz")
+                || user_message.contains("vocal")
+                || user_message.contains("coros")
+                || user_message.contains("instrument")
+            {
+                get_tool_definitions()
+                    .into_iter()
+                    .filter(|tool| {
+                        matches!(
+                            tool.name.as_str(),
+                            "download_youtube_track" | "add_track_from_staged" | "separate_vocals"
+                        )
+                    })
+                    .collect()
+            } else {
+                get_tool_definitions()
+            };
+
             let req = CompletionRequest {
                 model: self.model.clone(),
                 system_prompt: full_system_prompt.clone(),
                 messages: conversation_messages.clone(),
-                tools: get_tool_definitions(),
+                tools,
             };
 
             let remaining = current_deadline.saturating_duration_since(now);

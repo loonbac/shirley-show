@@ -220,13 +220,6 @@ impl Ticket {
             ));
         }
         let contacto = contacto.trim().to_string();
-        if contacto.is_empty() {
-            return Err(AppError::validation(
-                "empty_contacto",
-                "contacto no puede estar vacío",
-                "contacto",
-            ));
-        }
         let tipo_entrada = tipo_entrada.trim().to_string();
         if tipo_entrada.is_empty() {
             return Err(AppError::validation(
