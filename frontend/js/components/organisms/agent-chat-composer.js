@@ -217,16 +217,21 @@ export function createAgentChatComposer(props) {
   renderChip();
 
   function update(nextProps = {}) {
-    if (nextProps.draft !== undefined && nextProps.draft !== draft) {
-      draft = nextProps.draft;
-      textareaEl.value = draft;
-      autoGrowTextarea();
+    if (nextProps.draft !== undefined) {
+      if (nextProps.draft !== draft || textareaEl.value !== nextProps.draft) {
+        draft = nextProps.draft;
+        if (textareaEl.value !== nextProps.draft) {
+          textareaEl.value = nextProps.draft || '';
+          autoGrowTextarea();
+        }
+      }
     }
-    if (nextProps.attachment !== undefined) {
+    if (nextProps.attachment !== undefined && nextProps.attachment !== attachment) {
       attachment = nextProps.attachment;
       renderChip();
     }
-    if (nextProps.pending !== undefined) {
+    if (nextProps.pending !== undefined && nextProps.pending !== pending) {
+      const wasPending = pending;
       pending = nextProps.pending;
       if (pending) {
         textareaEl.setAttribute('disabled', '');
@@ -236,6 +241,13 @@ export function createAgentChatComposer(props) {
         textareaEl.removeAttribute('disabled');
         attachBtnEl.removeAttribute('disabled');
         sendBtnEl.removeAttribute('disabled');
+        if (wasPending && (!document.activeElement || document.activeElement === document.body)) {
+          try {
+            textareaEl.focus();
+          } catch {
+            // ignore
+          }
+        }
       }
       if (chipComponent) {
         chipComponent.update({ disabled: pending });
@@ -244,6 +256,7 @@ export function createAgentChatComposer(props) {
     if (nextProps.onSend !== undefined) onSend = nextProps.onSend;
     if (nextProps.onChangeDraft !== undefined) onChangeDraft = nextProps.onChangeDraft;
     if (nextProps.onAttach !== undefined) onAttach = nextProps.onAttach;
+    if (nextProps.onAttachClick !== undefined) onAttachClick = nextProps.onAttachClick;
     if (nextProps.onRemoveAttachment !== undefined) onRemoveAttachment = nextProps.onRemoveAttachment;
   }
 

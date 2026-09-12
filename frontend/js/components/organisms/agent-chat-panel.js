@@ -6,6 +6,71 @@ import { createAgentChatComposer } from './agent-chat-composer.js';
 import { useFocusTrap } from '../../behaviors/use-focus-trap.js';
 import { useStickToBottom } from '../../behaviors/use-stick-to-bottom.js';
 
+// Safe DOM helpers that support standard DOM and test environments like FakeNode
+function removeNode(node) {
+  if (!node) return;
+  if (typeof node.remove === 'function') {
+    node.remove();
+  } else if (node.parentNode && typeof node.parentNode.removeChild === 'function') {
+    node.parentNode.removeChild(node);
+  }
+}
+
+function insertNodeBefore(parent, node, refNode) {
+  if (!parent || !node) return;
+  if (typeof parent.insertBefore === 'function') {
+    parent.insertBefore(node, refNode || null);
+    return;
+  }
+  // Fallback for test harnesses (FakeNode) lacking native insertBefore
+  if (node.parentNode && typeof node.parentNode.removeChild === 'function') {
+    node.parentNode.removeChild(node);
+  }
+  node.parentNode = parent;
+  if (!Array.isArray(parent.childNodes)) {
+    parent.childNodes = [];
+  }
+  if (!refNode) {
+    parent.childNodes.push(node);
+  } else {
+    const idx = parent.childNodes.indexOf(refNode);
+    if (idx !== -1) {
+      parent.childNodes.splice(idx, 0, node);
+    } else {
+      parent.childNodes.push(node);
+    }
+  }
+}
+
+function replaceNode(parent, newChild, oldChild) {
+  if (!parent || !newChild || !oldChild) return;
+  if (typeof parent.replaceChild === 'function') {
+    parent.replaceChild(newChild, oldChild);
+    return;
+  }
+  insertNodeBefore(parent, newChild, oldChild);
+  removeNode(oldChild);
+}
+
+function getNextSibling(parent, node) {
+  if (!node) return parent ? (parent.firstChild || null) : null;
+  if ('nextSibling' in node && node.nextSibling !== undefined) {
+    return node.nextSibling;
+  }
+  if (parent && Array.isArray(parent.childNodes)) {
+    const idx = parent.childNodes.indexOf(node);
+    if (idx !== -1 && idx + 1 < parent.childNodes.length) {
+      return parent.childNodes[idx + 1];
+    }
+  }
+  return null;
+}
+
+function getLastChild(parent) {
+  if (!parent) return null;
+  return parent.lastElementChild || parent.lastChild || null;
+}
+
 /**
  * Organism managing the large Ressy AI conversational interface.
  * Implements 580px slide-over on desktop, 100% overlay on mobile,
@@ -162,31 +227,119 @@ export function createAgentChatPanel(props) {
     [backdropEl, dialogEl]
   );
 
-  function renderTranscript() {
-    transcriptEl.innerHTML = '';
+  // Empty state element (created once)
+  const emptyIcon = createIcon({ name: 'sparkles', size: 'lg' });
+  const emptyTitle = createElement('p', { class: 'agent-chat-empty-title' }, ['¡Hola! Soy Ressy']);
+  const emptyDesc = createElement('p', { class: 'agent-chat-empty-desc' }, [
+    'Puedo ayudarte a crear shows, agregar letras, notas o pistas de audio con playback listo.',
+  ]);
+  const emptyEl = createElement('div', { class: 'agent-chat-empty-state' }, [emptyIcon, emptyTitle, emptyDesc]);
 
-    if (messages.length === 0) {
-      const emptyIcon = createIcon({ name: 'sparkles', size: 'lg' });
-      const emptyTitle = createElement('p', { class: 'agent-chat-empty-title' }, ['¡Hola! Soy Ressy']);
-      const emptyDesc = createElement('p', { class: 'agent-chat-empty-desc' }, [
-        'Puedo ayudarte a crear shows, agregar letras, notas o pistas de audio con playback listo.',
-      ]);
-      const emptyEl = createElement('div', { class: 'agent-chat-empty-state' }, [emptyIcon, emptyTitle, emptyDesc]);
-      transcriptEl.appendChild(emptyEl);
-    } else {
-      for (const msg of messages) {
-        const bubble = createAgentMessageBubble({ message: msg });
-        transcriptEl.appendChild(bubble.el);
+  // Persistent typing indicator (created once, updated via setLabel, attached/detached without touching bubbles)
+  const typingIndicator = createAgentTypingIndicator({ label: pendingLabel });
+
+  // Map of messageId -> { message, lastContent, component }
+  const messageNodes = new Map();
+
+  function syncMessages(newMessages) {
+    if (!newMessages || newMessages.length === 0) {
+      for (const [, item] of messageNodes) {
+        if (item.component.el.parentNode === transcriptEl) {
+          removeNode(item.component.el);
+        }
+      }
+      messageNodes.clear();
+
+      if (emptyEl.parentNode !== transcriptEl) {
+        if (typingIndicator.el.parentNode === transcriptEl) {
+          insertNodeBefore(transcriptEl, emptyEl, typingIndicator.el);
+        } else {
+          transcriptEl.appendChild(emptyEl);
+        }
+      }
+      return;
+    }
+
+    if (emptyEl.parentNode === transcriptEl) {
+      removeNode(emptyEl);
+    }
+
+    const newIds = new Set();
+    for (let i = 0; i < newMessages.length; i++) {
+      const msg = newMessages[i];
+      const id = msg.id || `msg-${i}`;
+      newIds.add(id);
+    }
+
+    for (const [id, item] of messageNodes) {
+      if (!newIds.has(id)) {
+        if (item.component.el.parentNode === transcriptEl) {
+          removeNode(item.component.el);
+        }
+        messageNodes.delete(id);
       }
     }
 
-    if (pending) {
-      const typing = createAgentTypingIndicator({ label: pendingLabel });
-      transcriptEl.appendChild(typing.el);
+    let prevNode = null;
+    for (let i = 0; i < newMessages.length; i++) {
+      const msg = newMessages[i];
+      const id = msg.id || `msg-${i}`;
+      let item = messageNodes.get(id);
+
+      if (!item) {
+        const component = createAgentMessageBubble({ message: msg });
+        item = { message: msg, lastContent: msg.content, component };
+        messageNodes.set(id, item);
+      } else {
+        const contentChanged = item.message !== msg || item.lastContent !== msg.content;
+        const actionsChanged = JSON.stringify(item.message.actions) !== JSON.stringify(msg.actions);
+        const attachmentChanged = JSON.stringify(item.message.attachment) !== JSON.stringify(msg.attachment);
+
+        if (actionsChanged || attachmentChanged) {
+          const newComponent = createAgentMessageBubble({ message: msg });
+          if (item.component.el.parentNode === transcriptEl) {
+            replaceNode(transcriptEl, newComponent.el, item.component.el);
+          }
+          item = { message: msg, lastContent: msg.content, component: newComponent };
+          messageNodes.set(id, item);
+        } else if (contentChanged) {
+          item.component.update({ message: msg });
+          item.message = msg;
+          item.lastContent = msg.content;
+        }
+      }
+
+      const el = item.component.el;
+      const expectedNextSibling = getNextSibling(transcriptEl, prevNode);
+      if (el !== expectedNextSibling) {
+        insertNodeBefore(transcriptEl, el, expectedNextSibling);
+      }
+      prevNode = el;
     }
 
-    renderNotice();
-    stickToBottom.scrollToBottom(pending);
+    if (typingIndicator.el.parentNode === transcriptEl) {
+      if (getLastChild(transcriptEl) !== typingIndicator.el) {
+        transcriptEl.appendChild(typingIndicator.el);
+      }
+    }
+  }
+
+  function syncTypingIndicator(isPending, label) {
+    if (label && typeof typingIndicator.setLabel === 'function') {
+      typingIndicator.setLabel(label);
+    }
+
+    if (isPending) {
+      if (typingIndicator.el.parentNode !== transcriptEl) {
+        transcriptEl.appendChild(typingIndicator.el);
+      } else if (getLastChild(transcriptEl) !== typingIndicator.el) {
+        transcriptEl.appendChild(typingIndicator.el);
+      }
+    } else {
+      if (typingIndicator.el.parentNode === transcriptEl) {
+        removeNode(typingIndicator.el);
+      }
+    }
   }
 
   function getNoticeMessage(code) {
@@ -207,24 +360,37 @@ export function createAgentChatPanel(props) {
   }
 
   function renderNotice() {
-    noticeBannerEl.innerHTML = '';
     if (notice && (notice.message || notice.code)) {
       const text = notice.message || getNoticeMessage(notice.code);
+      const lastMsg = messages[messages.length - 1];
+      const hasCommittedActions = lastMsg && Array.isArray(lastMsg.actions) && lastMsg.actions.length > 0;
+      const canRetry = Boolean(notice.retryable && !hasCommittedActions && typeof onRetry === 'function');
+
+      const currentTextEl = noticeBannerEl.querySelector('.agent-chat-notice-text');
+      const currentRetryBtn = noticeBannerEl.querySelector('.agent-chat-retry-btn');
+      if (
+        noticeBannerEl.style.display === 'flex' &&
+        currentTextEl &&
+        currentTextEl.textContent === text &&
+        Boolean(currentRetryBtn) === canRetry
+      ) {
+        return;
+      }
+
+      noticeBannerEl.innerHTML = '';
       const noticeText = createElement('span', { class: 'agent-chat-notice-text' }, [text]);
       const children = [noticeText];
 
-      // Safe retry rule: offer retry button ONLY if retryable and last message has no confirmed actions
-      const lastMsg = messages[messages.length - 1];
-      const hasCommittedActions = lastMsg && Array.isArray(lastMsg.actions) && lastMsg.actions.length > 0;
-
-      if (notice.retryable && !hasCommittedActions && typeof onRetry === 'function') {
+      if (canRetry) {
         const retryBtn = createElement(
           'button',
           {
             type: 'button',
             class: 'agent-chat-retry-btn',
             onClick: () => {
-              onRetry();
+              if (typeof onRetry === 'function') {
+                onRetry();
+              }
             },
           },
           ['Reintentar']
@@ -237,19 +403,28 @@ export function createAgentChatPanel(props) {
       }
       noticeBannerEl.style.display = 'flex';
     } else {
-      noticeBannerEl.style.display = 'none';
+      if (noticeBannerEl.style.display !== 'none') {
+        noticeBannerEl.innerHTML = '';
+        noticeBannerEl.style.display = 'none';
+      }
     }
   }
 
   // Initial render
-  renderTranscript();
+  syncMessages(messages);
+  syncTypingIndicator(pending, pendingLabel);
+  renderNotice();
+  stickToBottom.scrollToBottom(false);
 
   if (isOpen) {
     focusTrap.activate();
   }
 
   function update(nextProps = {}) {
-    let transcriptNeedsUpdate = false;
+    let messagesChanged = false;
+    let pendingChanged = false;
+    let pendingLabelChanged = false;
+    let noticeChanged = false;
 
     if (nextProps.isOpen !== undefined && nextProps.isOpen !== isOpen) {
       isOpen = nextProps.isOpen;
@@ -258,77 +433,94 @@ export function createAgentChatPanel(props) {
 
       if (isOpen) {
         focusTrap.activate();
-        transcriptNeedsUpdate = true;
+        stickToBottom.scrollToBottom(false);
       } else {
         focusTrap.deactivate();
       }
     }
 
-    if (nextProps.activeContext !== undefined) {
+    if (nextProps.activeContext !== undefined && nextProps.activeContext !== activeContext) {
       activeContext = nextProps.activeContext;
       contextBadgeEl.textContent = formatContextText(activeContext);
     }
 
-    if (nextProps.messages !== undefined && nextProps.messages !== messages) {
+    if (
+      nextProps.messages !== undefined &&
+      (nextProps.messages !== messages || nextProps.messages.length !== messageNodes.size)
+    ) {
       messages = nextProps.messages;
-      transcriptNeedsUpdate = true;
+      messagesChanged = true;
     }
 
     if (nextProps.pending !== undefined && nextProps.pending !== pending) {
       pending = nextProps.pending;
-      composer.update({ pending });
-      transcriptNeedsUpdate = true;
+      pendingChanged = true;
     }
 
     if (nextProps.pendingLabel !== undefined && nextProps.pendingLabel !== pendingLabel) {
       pendingLabel = nextProps.pendingLabel;
-      if (pending) {
-        transcriptNeedsUpdate = true;
-      }
+      pendingLabelChanged = true;
     }
 
     if (nextProps.draft !== undefined) {
       draft = nextProps.draft;
-      composer.update({ draft });
     }
 
     if (nextProps.attachment !== undefined) {
       attachment = nextProps.attachment;
-      composer.update({ attachment });
     }
 
-    if (nextProps.notice !== undefined) {
+    if (nextProps.notice !== undefined && nextProps.notice !== notice) {
       notice = nextProps.notice;
-      transcriptNeedsUpdate = true;
+      noticeChanged = true;
     }
 
     if (nextProps.onClose !== undefined) onClose = nextProps.onClose;
-    if (nextProps.onSend !== undefined) {
-      onSend = nextProps.onSend;
-      composer.update({ onSend });
+    if (nextProps.onSend !== undefined) onSend = nextProps.onSend;
+    if (nextProps.onChangeDraft !== undefined) onChangeDraft = nextProps.onChangeDraft;
+    if (nextProps.onAttach !== undefined) onAttach = nextProps.onAttach;
+    if (nextProps.onAttachClick !== undefined) onAttachClick = nextProps.onAttachClick;
+    if (nextProps.onRemoveAttachment !== undefined) onRemoveAttachment = nextProps.onRemoveAttachment;
+    if (nextProps.onRetry !== undefined && nextProps.onRetry !== onRetry) {
+      onRetry = nextProps.onRetry;
+      noticeChanged = true;
     }
-    if (nextProps.onChangeDraft !== undefined) {
-      onChangeDraft = nextProps.onChangeDraft;
-      composer.update({ onChangeDraft });
-    }
-    if (nextProps.onAttach !== undefined) {
-      onAttach = nextProps.onAttach;
-      composer.update({ onAttach });
-    }
-    if (nextProps.onRemoveAttachment !== undefined) {
-      onRemoveAttachment = nextProps.onRemoveAttachment;
-      composer.update({ onRemoveAttachment });
-    }
-    if (nextProps.onRetry !== undefined) onRetry = nextProps.onRetry;
 
-    if (transcriptNeedsUpdate) {
-      renderTranscript();
+    composer.update({
+      draft: nextProps.draft,
+      attachment: nextProps.attachment,
+      pending: nextProps.pending,
+      onSend: nextProps.onSend,
+      onChangeDraft: nextProps.onChangeDraft,
+      onAttach: nextProps.onAttach,
+      onAttachClick: nextProps.onAttachClick,
+      onRemoveAttachment: nextProps.onRemoveAttachment,
+    });
+
+    if (messagesChanged) {
+      syncMessages(messages);
+      if (notice) {
+        noticeChanged = true;
+      }
+    }
+
+    if (pendingChanged || pendingLabelChanged) {
+      syncTypingIndicator(pending, pendingLabel);
+    }
+
+    if (noticeChanged) {
+      renderNotice();
+    }
+
+    if (messagesChanged || pendingChanged) {
+      stickToBottom.scrollToBottom(false);
     }
   }
 
   function destroy() {
     focusTrap.destroy();
     stickToBottom.destroy();
+    messageNodes.clear();
   }
 
   return {
