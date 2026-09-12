@@ -162,7 +162,6 @@ impl AgentChat {
         };
 
         let has_staged_audio = input.staged_audio.is_some();
-        let has_staged_audio_id = input.staged_audio_id.is_some();
         let has_staged_image = input.staged_image.is_some();
         let staged_filename = input.staged_filename.clone();
         let initial_presentation_id = input.presentation_id.clone();
@@ -353,7 +352,12 @@ impl AgentChat {
                 };
             }
 
-            let is_audio_operation = has_staged_audio_id
+            let has_available_staged_audio = turn_context.staged_audio_id.is_some();
+            let has_active_destination = turn_context
+                .active_presentation_id
+                .as_deref()
+                .is_some_and(|id| !id.trim().is_empty());
+            let is_audio_operation = has_available_staged_audio
                 || user_message.contains("youtu")
                 || user_message.contains("voz")
                 || user_message.contains("vocal")
@@ -362,15 +366,15 @@ impl AgentChat {
             let tools = if is_audio_operation {
                 get_tool_definitions()
                     .into_iter()
-                    .filter(|tool| {
-                        matches!(
+                    .filter(|tool| match has_available_staged_audio {
+                        true => matches!(
                             tool.name.as_str(),
                             "list_presentations"
                                 | "get_presentation"
-                                | "download_youtube_track"
                                 | "add_track_from_staged"
                                 | "separate_vocals"
-                        )
+                        ),
+                        false => tool.name == "download_youtube_track",
                     })
                     .collect()
             } else {
@@ -378,9 +382,9 @@ impl AgentChat {
             };
 
             let system_prompt = if is_audio_operation {
-                if has_staged_audio_id {
+                if has_available_staged_audio {
                     format!(
-                        "Continúa la solicitud de audio usando el historial completo, incluida la intención original. Hay un audio temporal disponible. Destino confirmado: {has_confirmed_destination}. Si no está confirmado, llama a list_presentations, identifica por el nombre escrito por la usuaria una única presentación y llama a get_presentation con su ID. Si la solicitud original pide sacar, separar, aislar, voz, coros o instrumentación, NO agregues el audio original: llama a separate_vocals. Para quitar solo la voz principal y conservar coros más instrumentación usa mode=chorus. Para quitar todas las voces usa mode=instrumental. Después de separar, agrega el nuevo audio temporal a la presentación con add_track_from_staged y el título devuelto por la separación. Solo usa add_track_from_staged directamente cuando la usuaria no haya pedido ninguna separación. No pidas IDs que puedas obtener con las herramientas."
+                        "Continúa la solicitud de audio usando el historial completo, incluida la intención original. El audio ya está descargado y disponible temporalmente: no vuelvas a descargarlo. Destino confirmado: {has_active_destination}. Si no está confirmado, llama a list_presentations, identifica por el nombre escrito por la usuaria una única presentación y llama a get_presentation con su ID. Si la solicitud original pide sacar, separar, aislar, voz, coros o instrumentación, NO agregues el audio original: llama a separate_vocals. Para quitar solo la voz principal y conservar coros más instrumentación usa mode=chorus. Para quitar todas las voces usa mode=instrumental. Después de separar, agrega el nuevo audio temporal a la presentación con add_track_from_staged y el título devuelto por la separación. Solo usa add_track_from_staged directamente cuando la usuaria no haya pedido ninguna separación. No pidas IDs que puedas obtener con las herramientas."
                     )
                 } else {
                     format!(
@@ -576,16 +580,14 @@ impl AgentChat {
                     }
 
                     // The configured OpenCode provider can return an empty completion after a
-                    // successful tool result. Audio operations are intentionally one action per
-                    // user turn (download first, then add or separate the staged file), so a
-                    // second provider round-trip is neither needed nor safe here.
+                    // successful tool result. Stop after preparing audio only when the user must
+                    // still choose its destination; otherwise let the model continue the workflow.
                     if is_audio_operation
                         && turn_context.actions_taken.last().is_some_and(|action| {
                             action.status == "success"
-                                && matches!(
-                                    action.tool.as_str(),
-                                    "download_youtube_track" | "add_track_from_staged"
-                                )
+                                && (action.tool == "add_track_from_staged"
+                                    || (action.tool == "download_youtube_track"
+                                        && !has_confirmed_destination))
                         })
                     {
                         return AgentChatOutput {
