@@ -4,8 +4,7 @@ import { createTextInput } from '../../components/atoms/text-input.js';
 import { bindDialogDismiss } from '../../behaviors/bind-dialog-dismiss.js';
 import { bindFormSubmit } from '../../behaviors/bind-form-submit.js';
 import { trimRequired } from '../../utils/validation/trim-required.js';
-import { buildTicketPublicUrl } from './whatsapp.js';
-import { generarFotoEntrada, descargarBlob } from './ticket-photo.js';
+import { createTicketImagePreviewDialog } from './ticket-image-preview-dialog.js';
 
 /**
  * Creates an accessible modal dialog for creating or editing an event.
@@ -688,6 +687,14 @@ export function createConvertInterestDialog(props) {
  */
 export function createSellTicketDialog(props) {
   const { eventName = '', event = null, ticketTypes = [], onSell, onCancel } = props;
+  let ticketImageDialog = null;
+
+  function closeTicketImageDialog() {
+    if (ticketImageDialog) {
+      ticketImageDialog.destroy();
+      ticketImageDialog = null;
+    }
+  }
 
   const titleEl = createElement('h3', { class: 'events-dialog-title' }, ['Venta Rápida de Entradas']);
 
@@ -828,62 +835,30 @@ export function createSellTicketDialog(props) {
         createElement('span', {}, [`Precio: S/ ${Number(ticket.precio).toFixed(2)}`]),
       ]);
 
-      const copyStatus = createElement('span', {
-        class: 'events-quick-ticket-copy-status',
-        role: 'status',
-        'aria-live': 'polite',
-      });
-
-      const copyBtn = createButton({
-        text: 'Copiar imagen',
+      const previewBtn = createButton({
+        text: 'Ver imagen de la entrada',
         variant: 'primary',
         type: 'button',
-        onClick: async () => {
-          copyBtn.el.setAttribute('disabled', 'true');
-          copyStatus.textContent = 'Preparando imagen…';
-          try {
-            const imagePromise = generarFotoEntrada(ticket, event || { nombre: eventName });
-            if (
-              typeof navigator !== 'undefined' &&
-              navigator.clipboard &&
-              typeof navigator.clipboard.write === 'function' &&
-              typeof ClipboardItem !== 'undefined'
-            ) {
-              await navigator.clipboard.write([
-                new ClipboardItem({ 'image/png': imagePromise }),
-              ]);
-              copyStatus.textContent = 'Imagen copiada. Ya puedes pegarla en el chat.';
-            } else {
-              const blob = await imagePromise;
-              descargarBlob(blob, `entrada-${ticket.nombre_comprador || 'ticket'}.png`);
-              copyStatus.textContent = 'El navegador no permite copiar imágenes; se descargó el PNG.';
-            }
-          } catch (err) {
-            copyStatus.textContent = (err && err.message) || 'No se pudo copiar la imagen.';
-          } finally {
-            copyBtn.el.removeAttribute('disabled');
-          }
+        onClick: () => {
+          closeTicketImageDialog();
+          ticketImageDialog = createTicketImagePreviewDialog({
+            ticket,
+            event: event || { nombre: eventName },
+            onClose: closeTicketImageDialog,
+          });
+          document.body.appendChild(ticketImageDialog.el);
         },
       });
-      copyBtn.el.classList.add('events-quick-ticket-copy-btn');
-
-      const publicTicketUrl = buildTicketPublicUrl(ticket.scan_token);
-      const publicBtn = createElement('a', {
-        href: publicTicketUrl,
-        target: '_blank',
-        class: 'btn btn-secondary btn-sm',
-      }, ['Ver Ticket']);
+      previewBtn.el.classList.add('events-quick-ticket-preview-btn');
 
       const cardActions = createElement('div', { class: 'events-quick-ticket-card-actions' }, [
-        copyBtn.el,
-        publicBtn,
+        previewBtn.el,
       ]);
 
       return createElement('div', { class: 'events-quick-ticket-card' }, [
         header,
         details,
         cardActions,
-        copyStatus,
       ]);
     });
 
@@ -961,6 +936,7 @@ export function createSellTicketDialog(props) {
   });
 
   function destroy() {
+    closeTicketImageDialog();
     unbindDismiss();
     unbindSubmit();
     if (overlayEl.parentNode) {

@@ -39,7 +39,7 @@ import {
   createInterestFormDialog,
   createConvertInterestDialog,
   createSellTicketDialog,
-} from './forms.js?v=20260912-2';
+} from './forms.js?v=20260912-3';
 
 /**
  * Controller orchestrating the Events Catalog (#/eventos).

@@ -20,6 +20,9 @@ const {
   createSellTicketDialog,
 } = await import(pathToFileURL(formsModulePath).href);
 
+const ticketPreviewModulePath = resolve(process.cwd(), 'frontend/js/modules/events/ticket-image-preview-dialog.js');
+const { createTicketImagePreviewDialog } = await import(pathToFileURL(ticketPreviewModulePath).href);
+
 const routerModulePath = resolve(process.cwd(), 'frontend/js/router/parse-route.js');
 const { parseRoute } = await import(pathToFileURL(routerModulePath).href);
 
@@ -30,6 +33,19 @@ const controllersModulePath = resolve(process.cwd(), 'frontend/js/modules/events
 const { createEventsCatalogController, createEventDetailController } = await import(pathToFileURL(controllersModulePath).href);
 
 console.log('Running Events UI and Integration Tests...');
+
+{
+  const preview = createTicketImagePreviewDialog({
+    ticket: { nombre_comprador: 'Ana', estado_pago: 'Pendiente' },
+    event: { nombre: 'Noche de Gala' },
+    onClose: () => {},
+  });
+  assert.ok(preview.el.textContent.includes('Imagen de la entrada'));
+  assert.ok(preview.el.textContent.includes('abre WhatsApp'));
+  assert.ok(preview.el.textContent.includes('clic derecho'));
+  assert.ok(preview.el.textContent.includes('Copiar imagen'));
+  preview.destroy();
+}
 
 // 1. App Topbar with Section Selector (Repertorios | Eventos)
 {
@@ -410,9 +426,12 @@ console.log('Running Events UI and Integration Tests...');
       'The issued ticket card must not open WhatsApp with a link'
     );
     assert.ok(
-      cards[0].querySelector('.events-quick-ticket-copy-btn'),
-      'The issued ticket card must offer copying the PNG image'
+      cards[0].querySelector('.events-quick-ticket-preview-btn'),
+      'The issued ticket card must offer a simple image preview'
     );
+    assert.equal(cards[0].textContent.includes('Ver Ticket'), false);
+    assert.equal(cards[0].textContent.includes('Compartir por WhatsApp'), false);
+    assert.equal(cards[0].textContent.includes('Ver imagen de la entrada'), true);
 
     quickSale.destroy();
   }

@@ -5,7 +5,7 @@ import { navigateTo } from './router/navigate.js';
 import { activeRouteSignal } from './state/active-route.js';
 import { createPresentationsController } from './controllers/presentations-controller.js';
 import { createPresentationDetailController } from './controllers/presentation-detail-controller.js';
-import { createEventsCatalogController, createEventDetailController } from './modules/events/controllers.js?v=20260912-2';
+import { createEventsCatalogController, createEventDetailController } from './modules/events/controllers.js?v=20260912-3';
 import { createPublicTicketController } from './modules/events/public-ticket-controller.js';
 import { createDoorController } from './modules/events/door-controller.js';
 import { createChatState } from './core/state/chat-state.js';

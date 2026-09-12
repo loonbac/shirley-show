@@ -681,9 +681,26 @@
   align-items: center;
 }
 
-.events-quick-ticket-copy-status:not(:empty) {
+.ticket-image-dialog {
+  max-width: 620px;
+}
+
+.ticket-image-help,
+.ticket-image-status {
   color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.ticket-image-status {
+  font-weight: var(--font-weight-medium);
+}
+
+.ticket-image-preview {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
 }
 
 /* --- Public Ticket Mobile View --- */
