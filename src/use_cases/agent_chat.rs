@@ -162,6 +162,7 @@ impl AgentChat {
         };
 
         let has_staged_audio = input.staged_audio.is_some();
+        let has_staged_audio_id = input.staged_audio_id.is_some();
         let has_staged_image = input.staged_image.is_some();
         let staged_filename = input.staged_filename.clone();
         let initial_presentation_id = input.presentation_id.clone();
@@ -349,7 +350,8 @@ impl AgentChat {
                 };
             }
 
-            let is_audio_operation = user_message.contains("youtu")
+            let is_audio_operation = has_staged_audio_id
+                || user_message.contains("youtu")
                 || user_message.contains("voz")
                 || user_message.contains("vocal")
                 || user_message.contains("coros")
@@ -369,7 +371,11 @@ impl AgentChat {
             };
 
             let system_prompt = if is_audio_operation {
-                "Ejecuta la solicitud de audio usando las herramientas disponibles. Para un enlace de YouTube llama primero download_youtube_track. El destino ya está confirmado. Responde solo con llamadas de herramienta cuando la petición sea operativa.".to_string()
+                if has_staged_audio_id {
+                    "Hay un audio temporal disponible y el destino está confirmado. Ejecuta add_track_from_staged o separate_vocals según la petición. Responde solo con llamadas de herramienta.".to_string()
+                } else {
+                    "Ejecuta la solicitud de audio usando las herramientas disponibles. Para un enlace de YouTube llama primero download_youtube_track. El destino ya está confirmado. Responde solo con llamadas de herramienta cuando la petición sea operativa.".to_string()
+                }
             } else {
                 full_system_prompt.clone()
             };
