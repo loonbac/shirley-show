@@ -4,6 +4,7 @@ import { createTextInput } from '../../components/atoms/text-input.js';
 import { bindDialogDismiss } from '../../behaviors/bind-dialog-dismiss.js';
 import { bindFormSubmit } from '../../behaviors/bind-form-submit.js';
 import { trimRequired } from '../../utils/validation/trim-required.js';
+import { buildWhatsAppTicketLink, buildTicketPublicUrl } from './whatsapp.js';
 
 /**
  * Creates an accessible modal dialog for creating or editing an event.
@@ -562,10 +563,12 @@ export function createConvertInterestDialog(props) {
   });
 
   const medioSelect = createElement('select', { class: 'text-input events-select' }, [
+
     createElement('option', { value: 'Yape' }, ['Yape']),
     createElement('option', { value: 'Efectivo' }, ['Efectivo']),
     createElement('option', { value: 'Cortesía' }, ['Cortesía']),
   ]);
+  medioSelect.value = 'Yape';
   const medioField = createElement('div', { class: 'text-input-field' }, [
     createElement('label', { class: 'text-input-label' }, ['Medio de Pago']),
     medioSelect,
@@ -575,6 +578,7 @@ export function createConvertInterestDialog(props) {
     createElement('option', { value: 'Pagado' }, ['Pagado']),
     createElement('option', { value: 'Pendiente' }, ['Pendiente']),
   ]);
+  estadoSelect.value = 'Pagado';
   const estadoField = createElement('div', { class: 'text-input-field' }, [
     createElement('label', { class: 'text-input-label' }, ['Estado de Pago']),
     estadoSelect,
@@ -661,8 +665,12 @@ export function createConvertInterestDialog(props) {
 }
 
 /**
- * Creates an accessible modal dialog for selling tickets.
+ * Creates an accessible modal dialog for quick ticket sales.
+ * Solicits buyer data, enforces single-option preselection rule, and upon
+ * issuance renders cards with wa.me sharing links and public ticket links for each emitted ticket.
+ *
  * @param {{
+ *   eventName?: string,
  *   ticketTypes: Array<{ nombre: string, precio: number, capacidad: number }>,
  *   onSell: (data: {
  *     nombre_comprador: string,
@@ -671,15 +679,15 @@ export function createConvertInterestDialog(props) {
  *     cantidad: number,
  *     medio_pago: string,
  *     estado_pago: string
- *   }) => Promise<void> | void,
+ *   }) => Promise<any> | any,
  *   onCancel: () => void,
  * }} props 
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
 export function createSellTicketDialog(props) {
-  const { ticketTypes = [], onSell, onCancel } = props;
+  const { eventName = '', ticketTypes = [], onSell, onCancel } = props;
 
-  const titleEl = createElement('h3', { class: 'events-dialog-title' }, ['Venta de Entradas']);
+  const titleEl = createElement('h3', { class: 'events-dialog-title' }, ['Venta Rápida de Entradas']);
 
   const compradorInput = createTextInput({
     label: 'Nombre del Comprador',
@@ -695,10 +703,24 @@ export function createSellTicketDialog(props) {
     required: true,
   });
 
-  const typeOptions = ticketTypes.map((t) =>
-    createElement('option', { value: t.nombre }, [`${t.nombre} (S/ ${t.precio.toFixed(2)})`])
-  );
+  // Preselection rule: preselect ONLY if there is exactly one valid ticket type option
+  const hasSingleType = ticketTypes.length === 1;
+  const typeOptions = [];
+  if (!hasSingleType) {
+    typeOptions.push(createElement('option', { value: '' }, ['Seleccione tipo de entrada...']));
+  }
+  ticketTypes.forEach((t) => {
+    typeOptions.push(
+      createElement('option', {
+        value: t.nombre,
+        selected: hasSingleType ? 'selected' : undefined,
+      }, [`${t.nombre} (S/ ${Number(t.precio).toFixed(2)})`])
+    );
+  });
+
   const typeSelect = createElement('select', { class: 'text-input events-select' }, typeOptions);
+  typeSelect.value = hasSingleType ? ticketTypes[0].nombre : '';
+
   const typeField = createElement('div', { class: 'text-input-field' }, [
     createElement('label', { class: 'text-input-label' }, ['Tipo de Entrada']),
     typeSelect,
@@ -714,10 +736,12 @@ export function createSellTicketDialog(props) {
   });
 
   const medioSelect = createElement('select', { class: 'text-input events-select' }, [
+
     createElement('option', { value: 'Yape' }, ['Yape']),
     createElement('option', { value: 'Efectivo' }, ['Efectivo']),
     createElement('option', { value: 'Cortesía' }, ['Cortesía']),
   ]);
+  medioSelect.value = 'Yape';
   const medioField = createElement('div', { class: 'text-input-field' }, [
     createElement('label', { class: 'text-input-label' }, ['Medio de Pago']),
     medioSelect,
@@ -727,6 +751,7 @@ export function createSellTicketDialog(props) {
     createElement('option', { value: 'Pagado' }, ['Pagado']),
     createElement('option', { value: 'Pendiente' }, ['Pendiente']),
   ]);
+  estadoSelect.value = 'Pagado';
   const estadoField = createElement('div', { class: 'text-input-field' }, [
     createElement('label', { class: 'text-input-label' }, ['Estado de Pago']),
     estadoSelect,
@@ -780,6 +805,74 @@ export function createSellTicketDialog(props) {
 
   const overlayEl = createElement('div', { class: 'dialog-overlay' }, [dialogCard]);
 
+  function showIssuedTicketsView(issuedTickets, metadata) {
+    titleEl.textContent = `¡Venta Realizada! (${issuedTickets.length} ${issuedTickets.length === 1 ? 'entrada emitida' : 'entradas emitidas'})`;
+
+    const subtitle = createElement('p', { class: 'events-dialog-subtitle' }, [
+      `Comprador: ${metadata.nombre_comprador} (${metadata.contacto}) - ${metadata.medio_pago} [${metadata.estado_pago}]`
+    ]);
+
+    const cards = issuedTickets.map((ticket, idx) => {
+      const waLink = buildWhatsAppTicketLink({
+        ticket,
+        eventName,
+      });
+
+      const isPaid = ticket.estado_pago === 'Pagado';
+      const badgeClass = isPaid ? 'events-badge-success' : 'events-badge-warning';
+
+      const header = createElement('div', { class: 'events-quick-ticket-card-header' }, [
+        createElement('strong', {}, [`Entrada #${idx + 1}: ${ticket.tipo_entrada}`]),
+        createElement('span', { class: `events-badge ${badgeClass}` }, [ticket.estado_pago]),
+      ]);
+
+      const details = createElement('div', { class: 'events-quick-ticket-card-details' }, [
+        createElement('span', {}, [`Precio: S/ ${Number(ticket.precio).toFixed(2)}`]),
+      ]);
+
+      const waBtn = createElement('a', {
+        href: waLink,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        class: 'btn btn-primary btn-sm events-quick-ticket-wa-btn',
+      }, ['Compartir por WhatsApp']);
+
+      const publicTicketUrl = buildTicketPublicUrl(ticket.scan_token);
+      const publicBtn = createElement('a', {
+        href: publicTicketUrl,
+        target: '_blank',
+        class: 'btn btn-secondary btn-sm',
+      }, ['Ver Ticket']);
+
+      const cardActions = createElement('div', { class: 'events-quick-ticket-card-actions' }, [
+        waBtn,
+        publicBtn,
+      ]);
+
+      return createElement('div', { class: 'events-quick-ticket-card' }, [
+        header,
+        details,
+        cardActions,
+      ]);
+    });
+
+    const listEl = createElement('div', { class: 'events-quick-tickets-list' }, cards);
+
+    const closeBtn = createButton({
+      text: 'Listo / Cerrar',
+      variant: 'secondary',
+      onClick: onCancel,
+    });
+
+    const resultActions = createElement('div', { class: 'events-dialog-actions' }, [closeBtn.el]);
+
+    dialogCard.innerHTML = '';
+    dialogCard.appendChild(titleEl);
+    dialogCard.appendChild(subtitle);
+    dialogCard.appendChild(listEl);
+    dialogCard.appendChild(resultActions);
+  }
+
   const unbindDismiss = bindDialogDismiss(overlayEl, onCancel);
   const unbindSubmit = bindFormSubmit(formEl, async () => {
     errorEl.style.display = 'none';
@@ -791,13 +884,14 @@ export function createSellTicketDialog(props) {
     const estado_pago = medio_pago === 'Cortesía' ? 'Pagado' : estadoSelect.value;
 
     if (!nombre_comprador || !contacto || !tipo_entrada || isNaN(cantidad) || cantidad < 1) {
-      errorEl.textContent = 'Complete todos los campos requeridos.';
+      errorEl.textContent = 'Complete todos los campos requeridos y seleccione un tipo de entrada.';
       errorEl.style.display = 'block';
       return;
     }
 
     try {
-      await onSell({
+      submitBtn.el.setAttribute('disabled', 'true');
+      const result = await onSell({
         nombre_comprador,
         contacto,
         tipo_entrada,
@@ -805,7 +899,20 @@ export function createSellTicketDialog(props) {
         medio_pago,
         estado_pago,
       });
+
+      if (Array.isArray(result) && result.length > 0) {
+        showIssuedTicketsView(result, {
+          nombre_comprador,
+          contacto,
+          tipo_entrada,
+          medio_pago,
+          estado_pago,
+        });
+      } else if (typeof onCancel === 'function') {
+        onCancel();
+      }
     } catch (err) {
+      submitBtn.el.removeAttribute('disabled');
       errorEl.textContent = (err && err.message) || 'Error al emitir entradas.';
       errorEl.style.display = 'block';
     }
@@ -821,3 +928,5 @@ export function createSellTicketDialog(props) {
 
   return { el: overlayEl, destroy };
 }
+
+export const createQuickSaleDialog = createSellTicketDialog;

@@ -642,3 +642,343 @@
 .text-danger { color: var(--color-danger); }
 .text-right { text-align: right; }
 .font-bold { font-weight: var(--font-weight-bold); }
+
+/* --- Quick Sale Tickets List & Cards --- */
+.events-quick-tickets-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: var(--space-3) 0;
+}
+
+.events-quick-ticket-card {
+  padding: var(--space-3);
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.events-quick-ticket-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.events-quick-ticket-card-details {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.events-quick-ticket-card-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* --- Public Ticket Mobile View --- */
+.public-ticket-container {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.public-ticket-card {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.public-ticket-header {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  color: #ffffff;
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.public-ticket-brand-tag {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  opacity: 0.9;
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+.public-ticket-event-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  margin: 0 0 var(--space-1);
+}
+
+.public-ticket-event-meta {
+  font-size: var(--font-size-sm);
+  opacity: 0.9;
+  margin: 0;
+}
+
+.public-ticket-body {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.public-ticket-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.public-ticket-badges-row {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-1) 0;
+}
+
+.public-ticket-qr-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: #ffffff;
+  border-radius: var(--radius-md);
+  margin: var(--space-2) 0;
+  border: 2px dashed var(--color-border);
+  color: #111827;
+}
+
+.public-ticket-qr-box svg {
+  max-width: 240px;
+  max-height: 240px;
+  width: 100%;
+  height: auto;
+}
+
+.public-ticket-qr-instruction {
+  font-size: var(--font-size-xs);
+  color: #4b5563;
+  text-align: center;
+  margin-top: var(--space-2);
+}
+
+.public-ticket-pending-banner {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #92400e;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  text-align: center;
+  margin: var(--space-2) 0;
+}
+
+.public-ticket-pending-title {
+  font-weight: var(--font-weight-bold);
+  margin: 0 0 var(--space-1);
+}
+
+.public-ticket-pending-msg {
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.public-ticket-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-2);
+}
+
+.public-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 56px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 var(--space-4);
+}
+
+.public-topbar-title {
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-lg);
+  color: var(--color-brand-primary, #d97706);
+}
+
+/* --- Door Mode Mobile Styles --- */
+.door-container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.door-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-height: 56px;
+}
+
+.door-header-text {
+  text-align: center;
+}
+
+.door-header-event {
+  font-size: var(--font-size-xs);
+}
+
+.door-device-notice {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.door-banner {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  transition: all 0.2s ease-in-out;
+}
+
+.door-banner-valid {
+  background: #16a34a;
+  color: #ffffff;
+  border: 2px solid #15803d;
+}
+
+.door-banner-used {
+  background: #d97706;
+  color: #ffffff;
+  border: 2px solid #b45309;
+}
+
+.door-banner-invalid {
+  background: #dc2626;
+  color: #ffffff;
+  border: 2px solid #b91c1c;
+}
+
+.door-banner-idle {
+  background: var(--color-surface-hover);
+  border: 1px dashed var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.door-banner-icon {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.door-banner-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.door-banner-buyer {
+  font-size: var(--font-size-lg);
+  margin: var(--space-1) 0;
+}
+
+.door-banner-type,
+.door-banner-time,
+.door-banner-sub {
+  font-size: var(--font-size-sm);
+  margin: var(--space-1) 0;
+}
+
+.door-camera-section {
+  position: relative;
+  background: #000000;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+}
+
+.door-camera-video {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+}
+
+.door-camera-guide {
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.door-manual-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.door-manual-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.door-manual-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.door-manual-input {
+  width: 100%;
+  min-height: 48px;
+  font-size: var(--font-size-lg);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-sizing: border-box;
+}
+
+.door-submit-btn {
+  width: 100%;
+  min-height: 48px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+}

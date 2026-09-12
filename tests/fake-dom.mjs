@@ -145,6 +145,9 @@ export class FakeElement extends FakeNode {
   set innerHTML(html) {
     this._innerHTML = html;
     if (html === '') {
+      for (const child of this.childNodes) {
+        child.parentNode = null;
+      }
       this.childNodes = [];
     }
   }

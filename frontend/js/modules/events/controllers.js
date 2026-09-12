@@ -4,6 +4,7 @@ import { createConfirmationDialog } from '../../components/molecules/confirmatio
 import { getActiveAgentChatController } from '../../controllers/agent-chat-controller.js';
 import { activePresentationContextSignal } from '../../core/state/active-presentation-context.js';
 import { toPresentations, toEvent, toEvents, toDoor } from '../../router/navigate.js';
+import { buildWhatsAppTicketLink } from './whatsapp.js';
 
 import {
   listEvents,
@@ -355,14 +356,25 @@ export function createEventDetailController(deps) {
   }
 
   // Tickets actions
+  function handleTicketWhatsApp(ticket) {
+    const link = buildWhatsAppTicketLink({
+      ticket,
+      eventName: (event && event.nombre) || '',
+    });
+    if (typeof window !== 'undefined' && window.open) {
+      window.open(link, '_blank', 'noopener,noreferrer');
+    }
+  }
+
   function handleSellTickets() {
     closeActiveDialog();
     activeDialog = createSellTicketDialog({
+      eventName: (event && event.nombre) || '',
       ticketTypes: (event && event.tipos_de_entrada) || [],
       onSell: async (data) => {
-        await sellTickets(eventId, data);
-        closeActiveDialog();
+        const issued = await sellTickets(eventId, data);
         await loadAllData();
+        return issued;
       },
       onCancel: closeActiveDialog,
     });
@@ -519,6 +531,7 @@ export function createEventDetailController(deps) {
     onDeleteEvent: handleDeleteEvent,
     onSellTickets: handleSellTickets,
     onConfirmPayment: handleConfirmPayment,
+    onTicketWhatsApp: handleTicketWhatsApp,
     onDeleteTicket: handleDeleteTicket,
     onCreateInterest: handleCreateInterest,
     onEditInterest: handleEditInterest,

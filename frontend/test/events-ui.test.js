@@ -312,13 +312,89 @@ console.log('Running Events UI and Integration Tests...');
   assert.ok(interestDialog.el.querySelector('.events-dialog'));
   interestDialog.destroy();
 
-  const sellDialog = createSellTicketDialog({
-    ticketTypes: [{ nombre: 'General', precio: 30, capacidad: 50 }],
-    onSell: () => {},
-    onCancel: () => {},
-  });
-  assert.ok(sellDialog.el.querySelector('.events-dialog'));
-  sellDialog.destroy();
+  // Test Venta Rápida with single ticket type (preselected) and multiple ticket types (not preselected)
+  {
+    const singleTypeDialog = createSellTicketDialog({
+      ticketTypes: [{ nombre: 'General', precio: 30, capacidad: 50 }],
+      onSell: () => {},
+      onCancel: () => {},
+    });
+    const typeSelect = singleTypeDialog.el.querySelector('select');
+    assert.equal(typeSelect.value, 'General', 'Single ticket type must be preselected');
+    singleTypeDialog.destroy();
+
+    const multiTypeDialog = createSellTicketDialog({
+      ticketTypes: [
+        { nombre: 'General', precio: 30, capacidad: 50 },
+        { nombre: 'VIP', precio: 60, capacidad: 20 },
+      ],
+      onSell: () => {},
+      onCancel: () => {},
+    });
+    const multiSelect = multiTypeDialog.el.querySelector('select');
+    assert.equal(multiSelect.value, '', 'Multiple ticket types must NOT be preselected');
+    multiTypeDialog.destroy();
+  }
+
+  // Test Venta Rápida submission and issued tickets result cards with WhatsApp links
+  {
+    let soldData = null;
+    const fakeIssuedTickets = [
+      {
+        id: 't-1',
+        tipo_entrada: 'General',
+        precio: 30,
+        nombre_comprador: 'Ana Silva',
+        contacto: '987654321',
+        scan_token: 'tok_ana_1',
+        medio_pago: 'Yape',
+        estado_pago: 'Pagado',
+      },
+      {
+        id: 't-2',
+        tipo_entrada: 'General',
+        precio: 30,
+        nombre_comprador: 'Ana Silva',
+        contacto: '987654321',
+        scan_token: 'tok_ana_2',
+        medio_pago: 'Yape',
+        estado_pago: 'Pagado',
+      },
+    ];
+
+    const quickSale = createSellTicketDialog({
+      eventName: 'Noche de Gala',
+      ticketTypes: [{ nombre: 'General', precio: 30, capacidad: 50 }],
+      onSell: async (data) => {
+        soldData = data;
+        return fakeIssuedTickets;
+      },
+      onCancel: () => {},
+    });
+
+    const form = quickSale.el.querySelector('form');
+    const inputs = quickSale.el.querySelectorAll('input');
+    inputs[0].value = 'Ana Silva';
+    inputs[1].value = '987654321';
+    inputs[2].value = '2';
+
+    form.dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(soldData.nombre_comprador, 'Ana Silva');
+    assert.equal(soldData.cantidad, 2);
+
+    const cardsList = quickSale.el.querySelector('.events-quick-tickets-list');
+    assert.ok(cardsList, 'Must render .events-quick-tickets-list after successful sale');
+    const cards = quickSale.el.querySelectorAll('.events-quick-ticket-card');
+    assert.equal(cards.length, 2, 'Must render 2 ticket cards');
+
+    const waLink = cards[0].querySelector('.events-quick-ticket-wa-btn');
+    assert.ok(waLink, 'Card must have WhatsApp sharing link');
+    assert.ok(waLink.getAttribute('href').startsWith('https://wa.me/51987654321?text='), 'WhatsApp link targets cleaned phone with 51');
+
+    quickSale.destroy();
+  }
 
   const convertDialog = createConvertInterestDialog({
     interest: { nombre: 'Juan', contacto: '999', personas: 2 },

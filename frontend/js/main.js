@@ -6,6 +6,8 @@ import { activeRouteSignal } from './state/active-route.js';
 import { createPresentationsController } from './controllers/presentations-controller.js';
 import { createPresentationDetailController } from './controllers/presentation-detail-controller.js';
 import { createEventsCatalogController, createEventDetailController } from './modules/events/controllers.js';
+import { createPublicTicketController } from './modules/events/public-ticket-controller.js';
+import { createDoorController } from './modules/events/door-controller.js';
 import { createChatState } from './core/state/chat-state.js';
 import { createAgentChatController } from './controllers/agent-chat-controller.js';
 import { bindAgentChatShortcuts } from './behaviors/bind-agent-chat-shortcuts.js';
@@ -91,6 +93,22 @@ function init() {
         onOpenAgent: () => agentChatController.open(),
       });
       shell.setHeader(activeController.topbarEl);
+      shell.setMain(activeController.viewEl);
+    } else if (parsed.view === 'public-ticket') {
+      const scanToken = parsed.params.token;
+      activeController = createPublicTicketController({
+        scanToken,
+        audioController,
+      });
+      shell.setHeader(activeController.headerEl);
+      shell.setMain(activeController.viewEl);
+    } else if (parsed.view === 'door') {
+      const eventId = parsed.params.id;
+      activeController = createDoorController({
+        eventId,
+        audioController,
+      });
+      shell.setHeader(activeController.headerEl || null);
       shell.setMain(activeController.viewEl);
     }
   }

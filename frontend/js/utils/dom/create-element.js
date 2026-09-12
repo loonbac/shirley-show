@@ -26,8 +26,19 @@ export function createElement(tag, props = {}, children = []) {
     } else if (key.startsWith('on') && typeof value === 'function') {
       const eventName = key.slice(2).toLowerCase();
       el.addEventListener(eventName, value);
-    } else if (key === 'style' && typeof value === 'object') {
-      Object.assign(el.style, value);
+    } else if (key === 'style') {
+      if (typeof value === 'object') {
+        Object.assign(el.style, value);
+      } else if (typeof value === 'string') {
+        el.setAttribute('style', value);
+        // parse basic declarations for fake-dom compatibility
+        value.split(';').forEach((decl) => {
+          const [prop, val] = decl.split(':').map((s) => s && s.trim());
+          if (prop && val && typeof el.style === 'object') {
+            el.style[prop] = val;
+          }
+        });
+      }
     } else if (typeof value === 'boolean') {
       if (value) {
         el.setAttribute(key, '');
