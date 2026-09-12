@@ -30,8 +30,8 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
     let tools = get_tool_definitions();
     assert_eq!(
         tools.len(),
-        16,
-        "get_tool_definitions() must expose exactly 16 tools (8 presentations + 8 ticketing)"
+        24,
+        "get_tool_definitions() must expose exactly 24 tools in Slice 1 (8 original + 3 safe presentation + 8 original ticketing + 5 safe ticketing)"
     );
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -46,7 +46,7 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
     assert!(names.contains(&"download_youtube_track"));
     assert!(names.contains(&"separate_vocals"));
 
-    // 8 ticketing tools
+    // 8 original ticketing tools
     assert!(names.contains(&"crear_evento"));
     assert!(names.contains(&"listar_eventos"));
     assert!(names.contains(&"vender_entradas"));
@@ -55,6 +55,13 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
     assert!(names.contains(&"resumen_evento"));
     assert!(names.contains(&"registrar_interesado"));
     assert!(names.contains(&"checkin_entrada"));
+
+    // 5 safe ticketing tools (Slice 1)
+    assert!(names.contains(&"editar_evento"));
+    assert!(names.contains(&"reabrir_evento"));
+    assert!(names.contains(&"editar_gasto"));
+    assert!(names.contains(&"editar_interesado"));
+    assert!(names.contains(&"confirmar_interesado"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -198,6 +205,86 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
                 let props = params["properties"].as_object().unwrap();
                 assert_eq!(props["evento_id"]["type"], "string");
                 assert_eq!(props["codigo"]["type"], "string");
+            }
+            "editar_evento" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("editar_evento required");
+                assert!(required.contains(&json!("evento_id")));
+                assert!(required.contains(&json!("nombre")));
+                assert!(required.contains(&json!("fecha_hora")));
+                assert!(required.contains(&json!("lugar")));
+                assert!(required.contains(&json!("tipos_de_entrada")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["evento_id"]["type"], "string");
+                assert_eq!(props["nombre"]["type"], "string");
+                assert_eq!(props["fecha_hora"]["type"], "string");
+                assert_eq!(props["lugar"]["type"], "string");
+                assert_eq!(props["tipos_de_entrada"]["type"], "array");
+            }
+            "reabrir_evento" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("reabrir_evento required");
+                assert_eq!(required.len(), 1);
+                assert!(required.contains(&json!("evento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["evento_id"]["type"], "string");
+            }
+            "editar_gasto" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("editar_gasto required");
+                assert!(required.contains(&json!("gasto_id")));
+                assert!(required.contains(&json!("categoria")));
+                assert!(required.contains(&json!("monto")));
+                assert!(required.contains(&json!("descripcion")));
+                assert!(required.contains(&json!("fecha")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["monto"]["type"], "number");
+                assert_eq!(props["monto"]["minimum"], 0.0);
+                let cat_enum = props["categoria"]["enum"].as_array().unwrap();
+                assert!(cat_enum.contains(&json!("Local/Alquiler")));
+                assert!(cat_enum.contains(&json!("Sonido/Luces")));
+            }
+            "editar_interesado" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("editar_interesado required");
+                assert!(required.contains(&json!("interesado_id")));
+                assert!(required.contains(&json!("nombre")));
+                assert!(required.contains(&json!("contacto")));
+                assert!(required.contains(&json!("canal")));
+                assert!(required.contains(&json!("personas")));
+                assert!(required.contains(&json!("promotora")));
+                assert!(required.contains(&json!("estado")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["personas"]["type"], "integer");
+                assert_eq!(props["personas"]["minimum"], 1);
+                let est_enum = props["estado"]["enum"].as_array().unwrap();
+                assert!(est_enum.contains(&json!("Pendiente")));
+                assert!(est_enum.contains(&json!("Confirmado")));
+                assert!(est_enum.contains(&json!("Cancelado")));
+            }
+            "confirmar_interesado" => {
+                let required = params["required"]
+                    .as_array()
+                    .expect("confirmar_interesado required");
+                assert!(required.contains(&json!("interesado_id")));
+                assert!(required.contains(&json!("tipo_entrada")));
+                assert!(required.contains(&json!("cantidad")));
+                assert!(required.contains(&json!("medio_pago")));
+                assert!(required.contains(&json!("estado_pago")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["cantidad"]["type"], "integer");
+                assert_eq!(props["cantidad"]["minimum"], 1);
+                let mp_enum = props["medio_pago"]["enum"].as_array().unwrap();
+                assert!(mp_enum.contains(&json!("Yape")));
+                assert!(mp_enum.contains(&json!("Efectivo")));
+                assert!(mp_enum.contains(&json!("Cortesía")));
+                let ep_enum = props["estado_pago"]["enum"].as_array().unwrap();
+                assert!(ep_enum.contains(&json!("Pagado")));
+                assert!(ep_enum.contains(&json!("Pendiente")));
             }
             _ => {}
         }
@@ -749,4 +836,414 @@ async fn test_dispatcher_triangulate_ticket_url_formatting_with_public_base_url(
         res3["entradas"][0]["ticket_url"],
         format!("/#/ticket/{token3}")
     );
+}
+
+#[tokio::test]
+async fn test_dispatcher_safe_ticketing_tools_input_validations() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::default();
+    context.known_event_ids.insert("evt-1".to_string());
+
+    // 1. editar_evento: empty tipos_de_entrada
+    let edit_event_empty_tiers = ToolCall {
+        id: "call_ee_val_1".to_string(),
+        name: "editar_evento".to_string(),
+        arguments: json!({
+            "evento_id": "evt-1",
+            "nombre": "Evento Edit",
+            "fecha_hora": "2026-10-10T20:00",
+            "lugar": "Teatro",
+            "tipos_de_entrada": []
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_event_empty_tiers, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 2. editar_evento: negative price
+    let edit_event_neg_price = ToolCall {
+        id: "call_ee_val_2".to_string(),
+        name: "editar_evento".to_string(),
+        arguments: json!({
+            "evento_id": "evt-1",
+            "nombre": "Evento Edit",
+            "fecha_hora": "2026-10-10T20:00",
+            "lugar": "Teatro",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": -10.0, "capacidad": 50 }
+            ]
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_event_neg_price, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 3. editar_gasto: invalid closed enum categoria
+    let edit_expense_bad_cat = ToolCall {
+        id: "call_eg_val_1".to_string(),
+        name: "editar_gasto".to_string(),
+        arguments: json!({
+            "gasto_id": "exp-1",
+            "categoria": "CategoriaInvalida",
+            "monto": 50.0,
+            "descripcion": "Gasto test",
+            "fecha": "2026-10-10"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_expense_bad_cat, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 4. editar_gasto: negative monto
+    let edit_expense_neg_monto = ToolCall {
+        id: "call_eg_val_2".to_string(),
+        name: "editar_gasto".to_string(),
+        arguments: json!({
+            "gasto_id": "exp-1",
+            "categoria": "Otros",
+            "monto": -50.0,
+            "descripcion": "Gasto negativo",
+            "fecha": "2026-10-10"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_expense_neg_monto, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 5. editar_interesado: invalid estado enum
+    let edit_interest_bad_status = ToolCall {
+        id: "call_ei_val_1".to_string(),
+        name: "editar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": "int-1",
+            "nombre": "Interesado 1",
+            "contacto": "999111222",
+            "canal": "WhatsApp",
+            "personas": 2,
+            "promotora": "Valeria",
+            "estado": "EstadoInventado"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_interest_bad_status, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 6. editar_interesado: personas 0
+    let edit_interest_zero_persons = ToolCall {
+        id: "call_ei_val_2".to_string(),
+        name: "editar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": "int-1",
+            "nombre": "Interesado 1",
+            "contacto": "999111222",
+            "canal": "WhatsApp",
+            "personas": 0,
+            "promotora": "Valeria",
+            "estado": "Pendiente"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_interest_zero_persons, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 7. confirmar_interesado: invalid medio_pago
+    let confirm_bad_payment = ToolCall {
+        id: "call_ci_val_1".to_string(),
+        name: "confirmar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": "int-1",
+            "tipo_entrada": "General",
+            "cantidad": 2,
+            "medio_pago": "Bitcoin",
+            "estado_pago": "Pagado"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&confirm_bad_payment, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 8. confirmar_interesado: invalid estado_pago
+    let confirm_bad_status = ToolCall {
+        id: "call_ci_val_2".to_string(),
+        name: "confirmar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": "int-1",
+            "tipo_entrada": "General",
+            "cantidad": 2,
+            "medio_pago": "Yape",
+            "estado_pago": "Fiado"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&confirm_bad_status, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 9. confirmar_interesado: cantidad 0
+    let confirm_zero_qty = ToolCall {
+        id: "call_ci_val_3".to_string(),
+        name: "confirmar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": "int-1",
+            "tipo_entrada": "General",
+            "cantidad": 0,
+            "medio_pago": "Yape",
+            "estado_pago": "Pagado"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&confirm_zero_qty, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+}
+
+#[tokio::test]
+async fn test_dispatcher_safe_ticketing_tools_operational_lifecycle() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state.clone())
+        .with_public_base_url(Some("https://tickets.shirley.pe".to_string()));
+    let mut context = TurnToolContext::default();
+
+    // 1. Setup event via crear_evento
+    let create_call = ToolCall {
+        id: "call_evt_create".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Gran Peña Criolla",
+            "fecha_hora": "2026-11-20T21:00",
+            "lugar": "Centro de Convenciones",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": 35.0, "capacidad": 100 },
+                { "nombre": "VIP", "precio": 60.0, "capacidad": 30 }
+            ]
+        })
+        .to_string(),
+    };
+    let create_res = dispatcher.dispatch(&create_call, &mut context).await;
+    let event_id = create_res["id"].as_str().unwrap().to_string();
+
+    // 2. editar_evento
+    let edit_event_call = ToolCall {
+        id: "call_ee_op".to_string(),
+        name: "editar_evento".to_string(),
+        arguments: json!({
+            "evento_id": event_id,
+            "nombre": "Gran Peña Criolla 2026 - Renovada",
+            "fecha_hora": "2026-11-20T22:00",
+            "lugar": "Centro de Convenciones Lima",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": 40.0, "capacidad": 120 },
+                { "nombre": "VIP", "precio": 70.0, "capacidad": 40 }
+            ]
+        })
+        .to_string(),
+    };
+    let edit_evt_res = dispatcher.dispatch(&edit_event_call, &mut context).await;
+    assert_eq!(edit_evt_res["id"], event_id);
+    assert_eq!(edit_evt_res["nombre"], "Gran Peña Criolla 2026 - Renovada");
+    assert_eq!(edit_evt_res["lugar"], "Centro de Convenciones Lima");
+    assert_eq!(context.actions_taken.last().unwrap().tool, "editar_evento");
+    assert_eq!(context.actions_taken.last().unwrap().status, "success");
+    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+
+    // 3. Register expense then editar_gasto
+    let reg_exp_call = ToolCall {
+        id: "call_rg_op".to_string(),
+        name: "registrar_gasto".to_string(),
+        arguments: json!({
+            "evento_id": event_id,
+            "categoria": "Otros",
+            "monto": 50.0,
+            "descripcion": "Cables de audio"
+        })
+        .to_string(),
+    };
+    let reg_exp_res = dispatcher.dispatch(&reg_exp_call, &mut context).await;
+    let expense_id = reg_exp_res["id"].as_str().unwrap().to_string();
+
+    let edit_exp_call = ToolCall {
+        id: "call_eg_op".to_string(),
+        name: "editar_gasto".to_string(),
+        arguments: json!({
+            "gasto_id": expense_id,
+            "categoria": "Sonido/Luces",
+            "monto": 75.0,
+            "descripcion": "Cables de audio balanceados y micrófonos",
+            "fecha": "2026-10-15"
+        })
+        .to_string(),
+    };
+    let edit_exp_res = dispatcher.dispatch(&edit_exp_call, &mut context).await;
+    assert_eq!(edit_exp_res["id"], expense_id);
+    assert_eq!(edit_exp_res["categoria"], "Sonido/Luces");
+    assert_eq!(edit_exp_res["monto"], 75.0);
+    assert_eq!(context.actions_taken.last().unwrap().tool, "editar_gasto");
+    assert_eq!(context.actions_taken.last().unwrap().status, "success");
+    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+
+    // 4. Register interest then editar_interesado
+    let reg_int_call = ToolCall {
+        id: "call_ri_op".to_string(),
+        name: "registrar_interesado".to_string(),
+        arguments: json!({
+            "evento_id": event_id,
+            "nombre": "Ana Perez",
+            "contacto": "999888777",
+            "canal": "Instagram",
+            "personas": 2,
+            "promotora": "Valeria"
+        })
+        .to_string(),
+    };
+    let reg_int_res = dispatcher.dispatch(&reg_int_call, &mut context).await;
+    let lead_id = reg_int_res["id"].as_str().unwrap().to_string();
+
+    let edit_int_call = ToolCall {
+        id: "call_ei_op".to_string(),
+        name: "editar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": lead_id,
+            "nombre": "Ana Perez Gomez",
+            "contacto": "999888777",
+            "canal": "WhatsApp",
+            "personas": 3,
+            "promotora": "Valeria",
+            "estado": "Pendiente"
+        })
+        .to_string(),
+    };
+    let edit_int_res = dispatcher.dispatch(&edit_int_call, &mut context).await;
+    assert_eq!(edit_int_res["id"], lead_id);
+    assert_eq!(edit_int_res["nombre"], "Ana Perez Gomez");
+    assert_eq!(edit_int_res["personas"], 3);
+    assert_eq!(context.actions_taken.last().unwrap().tool, "editar_interesado");
+    assert_eq!(context.actions_taken.last().unwrap().status, "success");
+    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+
+    // 5. confirmar_interesado: atomically converts lead into sale
+    let conf_int_call = ToolCall {
+        id: "call_ci_op".to_string(),
+        name: "confirmar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": lead_id,
+            "tipo_entrada": "General",
+            "cantidad": 3,
+            "medio_pago": "Yape",
+            "estado_pago": "Pagado"
+        })
+        .to_string(),
+    };
+    let conf_int_res = dispatcher.dispatch(&conf_int_call, &mut context).await;
+    assert_eq!(conf_int_res["interesado_id"], lead_id);
+    assert_eq!(conf_int_res["tickets_creados"], 3);
+    let tickets = conf_int_res["tickets"].as_array().unwrap();
+    assert_eq!(tickets.len(), 3);
+    assert!(tickets[0]["ticket_url"].as_str().unwrap().contains("https://tickets.shirley.pe/#/ticket/"));
+    assert_eq!(context.actions_taken.last().unwrap().tool, "confirmar_interesado");
+    assert_eq!(context.actions_taken.last().unwrap().status, "success");
+    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+
+    // 6. Finalize event directly via use case, then reabrir_evento via dispatcher
+    state.ticketing.finalize_event.execute(&event_id).unwrap();
+
+    let reopen_call = ToolCall {
+        id: "call_reopen_op".to_string(),
+        name: "reabrir_evento".to_string(),
+        arguments: json!({
+            "evento_id": event_id
+        })
+        .to_string(),
+    };
+    let reopen_res = dispatcher.dispatch(&reopen_call, &mut context).await;
+    assert_eq!(reopen_res["id"], event_id);
+    assert_eq!(reopen_res["estado"], "Activo");
+    assert_eq!(context.actions_taken.last().unwrap().tool, "reabrir_evento");
+    assert_eq!(context.actions_taken.last().unwrap().status, "success");
+    assert_eq!(context.actions_taken.last().unwrap().event_id, Some(event_id.clone()));
+
+    // 7. Safe tool turn deduplication
+    let reopen_dup = ToolCall {
+        id: "call_reopen_dup".to_string(),
+        name: "reabrir_evento".to_string(),
+        arguments: json!({
+            "evento_id": event_id
+        })
+        .to_string(),
+    };
+    let reopen_dup_res = dispatcher.dispatch(&reopen_dup, &mut context).await;
+    assert_eq!(reopen_dup_res["warning"], "duplicate_call_ignored");
+}
+
+#[tokio::test]
+async fn test_dispatcher_safe_ticketing_tools_domain_errors() {
+    let (state, _tmp) = setup_test_state();
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::default();
+
+    // 1. Non-existent event on editar_evento
+    let edit_event_missing = ToolCall {
+        id: "call_ee_err".to_string(),
+        name: "editar_evento".to_string(),
+        arguments: json!({
+            "evento_id": "evt-non-existent-999",
+            "nombre": "Nombre",
+            "fecha_hora": "2026-10-10T20:00",
+            "lugar": "Lugar",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": 30.0, "capacidad": 50 }
+            ]
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_event_missing, &mut context).await;
+    assert_eq!(res["error"], "unauthorized_event_id");
+
+    // 2. Non-existent expense on editar_gasto
+    let edit_exp_missing = ToolCall {
+        id: "call_eg_err".to_string(),
+        name: "editar_gasto".to_string(),
+        arguments: json!({
+            "gasto_id": "exp-non-existent-999",
+            "categoria": "Otros",
+            "monto": 20.0,
+            "descripcion": "Desc",
+            "fecha": "2026-10-10"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_exp_missing, &mut context).await;
+    assert_eq!(res["error"], "expense_not_found");
+
+    // 3. Non-existent lead on editar_interesado
+    let edit_int_missing = ToolCall {
+        id: "call_ei_err".to_string(),
+        name: "editar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": "int-non-existent-999",
+            "nombre": "Nombre",
+            "contacto": "999888777",
+            "canal": "WhatsApp",
+            "personas": 2,
+            "promotora": "Valeria",
+            "estado": "Pendiente"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_int_missing, &mut context).await;
+    assert_eq!(res["error"], "interest_not_found");
+
+    // 4. Non-existent lead on confirmar_interesado
+    let conf_int_missing = ToolCall {
+        id: "call_ci_err".to_string(),
+        name: "confirmar_interesado".to_string(),
+        arguments: json!({
+            "interesado_id": "int-non-existent-999",
+            "tipo_entrada": "General",
+            "cantidad": 2,
+            "medio_pago": "Yape",
+            "estado_pago": "Pagado"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&conf_int_missing, &mut context).await;
+    assert_eq!(res["error"], "interest_not_found");
 }

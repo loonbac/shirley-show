@@ -130,8 +130,8 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     let tools = get_tool_definitions();
     assert_eq!(
         tools.len(),
-        16,
-        "Must expose exactly 16 tools (8 presentations + 8 ticketing)"
+        24,
+        "Must expose exactly 24 tools in Slice 1 (11 presentations + 13 ticketing)"
     );
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -143,6 +143,10 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     assert!(names.contains(&"add_track_from_staged"));
     assert!(names.contains(&"download_youtube_track"));
     assert!(names.contains(&"separate_vocals"));
+    // Safe presentation tools (Slice 1)
+    assert!(names.contains(&"renombrar_presentacion"));
+    assert!(names.contains(&"reordenar_elemento"));
+    assert!(names.contains(&"editar_elemento"));
 
     for tool in &tools {
         let params = &tool.parameters;
@@ -196,6 +200,38 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
                 let mode_enum = props["mode"]["enum"].as_array().unwrap();
                 assert!(mode_enum.contains(&json!("chorus")));
                 assert!(mode_enum.contains(&json!("instrumental")));
+            }
+            "renombrar_presentacion" => {
+                let required = params["required"].as_array().unwrap();
+                assert!(required.contains(&json!("presentacion_id")));
+                assert!(required.contains(&json!("nuevo_nombre")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["presentacion_id"]["type"], "string");
+                assert_eq!(props["nuevo_nombre"]["type"], "string");
+            }
+            "reordenar_elemento" => {
+                let required = params["required"].as_array().unwrap();
+                assert!(required.contains(&json!("presentacion_id")));
+                assert!(required.contains(&json!("elemento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["presentacion_id"]["type"], "string");
+                assert_eq!(props["elemento_id"]["type"], "string");
+                assert_eq!(props["posicion_destino"]["type"], "integer");
+                assert_eq!(props["posicion_destino"]["minimum"], 1);
+                assert_eq!(props["direccion"]["type"], "string");
+                let dir_enum = props["direccion"]["enum"].as_array().unwrap();
+                assert!(dir_enum.contains(&json!("arriba")));
+                assert!(dir_enum.contains(&json!("abajo")));
+            }
+            "editar_elemento" => {
+                let required = params["required"].as_array().unwrap();
+                assert!(required.contains(&json!("presentacion_id")));
+                assert!(required.contains(&json!("elemento_id")));
+                let props = params["properties"].as_object().unwrap();
+                assert_eq!(props["presentacion_id"]["type"], "string");
+                assert_eq!(props["elemento_id"]["type"], "string");
+                assert_eq!(props["texto"]["type"], "string");
+                assert_eq!(props["titulo"]["type"], "string");
             }
             _ => {} // Ticketing tools are validated in ticketing_ressy_tests
         }
@@ -941,4 +977,284 @@ async fn test_dispatcher_separate_vocals_deduplication_ignored() {
     let res2 = dispatcher.dispatch(&call_dup, &mut context).await;
     assert_eq!(res2["warning"], "duplicate_call_ignored");
     assert_eq!(context.actions_taken.len(), 1);
+}
+
+#[tokio::test]
+async fn test_dispatcher_safe_presentation_tools_input_validations() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Original").unwrap();
+    let note = state.add_note.execute(&pres.id, "Nota 1").unwrap();
+
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::with_event_context(
+        Some(pres.id.clone()),
+        None,
+        None,
+        None,
+        None,
+    );
+
+    // 1. renombrar_presentacion: empty or whitespace title rejected
+    let rename_empty = ToolCall {
+        id: "call_rn_1".to_string(),
+        name: "renombrar_presentacion".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "nuevo_nombre": "   "
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&rename_empty, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 2. reordenar_elemento: neither posicion_destino nor direccion
+    let reorder_neither = ToolCall {
+        id: "call_ro_1".to_string(),
+        name: "reordenar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&reorder_neither, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 3. reordenar_elemento: both posicion_destino and direccion provided (mutually exclusive)
+    let reorder_both = ToolCall {
+        id: "call_ro_2".to_string(),
+        name: "reordenar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id,
+            "posicion_destino": 1,
+            "direccion": "arriba"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&reorder_both, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 4. reordenar_elemento: invalid direction enum
+    let reorder_inv_dir = ToolCall {
+        id: "call_ro_3".to_string(),
+        name: "reordenar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id,
+            "direccion": "al_final"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&reorder_inv_dir, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 5. editar_elemento: neither texto nor titulo
+    let edit_neither = ToolCall {
+        id: "call_ee_1".to_string(),
+        name: "editar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_neither, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 6. editar_elemento: both texto and titulo provided (mutually exclusive per kind)
+    let edit_both = ToolCall {
+        id: "call_ee_2".to_string(),
+        name: "editar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id,
+            "texto": "Nuevo texto",
+            "titulo": "Nuevo titulo"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_both, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 7. editar_elemento: empty trimmed texto
+    let edit_empty_texto = ToolCall {
+        id: "call_ee_3".to_string(),
+        name: "editar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id,
+            "texto": "   \n  "
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_empty_texto, &mut context).await;
+    assert_eq!(res["error"], "validation_error");
+}
+
+#[tokio::test]
+async fn test_dispatcher_safe_presentation_tools_execution_and_actions() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Acustico").unwrap();
+    let lyrics = state.add_lyrics.execute(&pres.id, "Estrofa 1").unwrap();
+    let note = state.add_note.execute(&pres.id, "Nota tecnica").unwrap();
+
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::with_event_context(
+        Some(pres.id.clone()),
+        None,
+        None,
+        None,
+        None,
+    );
+
+    // 1. renombrar_presentacion
+    let rename_call = ToolCall {
+        id: "call_ren_ok".to_string(),
+        name: "renombrar_presentacion".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "nuevo_nombre": "Show Acustico Renovado"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&rename_call, &mut context).await;
+    assert_eq!(res["id"], pres.id);
+    assert_eq!(res["title"], "Show Acustico Renovado");
+    assert!(res.get("updated_at").is_some());
+    assert_eq!(context.actions_taken.len(), 1);
+    assert_eq!(context.actions_taken[0].tool, "renombrar_presentacion");
+    assert_eq!(context.actions_taken[0].status, "success");
+    assert_eq!(context.actions_taken[0].presentation_id, Some(pres.id.clone()));
+
+    // 2. editar_elemento (lyrics)
+    let edit_call = ToolCall {
+        id: "call_edit_ok".to_string(),
+        name: "editar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": lyrics.id,
+            "texto": "Estrofa 1 corregida"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_call, &mut context).await;
+    assert_eq!(res["item_id"], lyrics.id);
+    assert_eq!(res["kind"], "lyrics");
+    assert_eq!(context.actions_taken.len(), 2);
+    assert_eq!(context.actions_taken[1].tool, "editar_elemento");
+    assert_eq!(context.actions_taken[1].status, "success");
+    assert_eq!(context.actions_taken[1].presentation_id, Some(pres.id.clone()));
+
+    // 3. reordenar_elemento with posicion_destino (move note to position 1)
+    let reorder_call = ToolCall {
+        id: "call_reorder_ok".to_string(),
+        name: "reordenar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id,
+            "posicion_destino": 1
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&reorder_call, &mut context).await;
+    assert_eq!(res["item_id"], note.id);
+    assert_eq!(res["position"], 1);
+    assert_eq!(res["presentation_id"], pres.id);
+    assert_eq!(context.actions_taken.len(), 3);
+    assert_eq!(context.actions_taken[2].tool, "reordenar_elemento");
+    assert_eq!(context.actions_taken[2].status, "success");
+    assert_eq!(context.actions_taken[2].presentation_id, Some(pres.id.clone()));
+
+    // 4. reordenar_elemento with direccion: "abajo"
+    let reorder_down = ToolCall {
+        id: "call_reorder_down".to_string(),
+        name: "reordenar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id,
+            "direccion": "abajo"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&reorder_down, &mut context).await;
+    assert_eq!(res["item_id"], note.id);
+    assert_eq!(res["position"], 2);
+    assert_eq!(context.actions_taken.len(), 4);
+
+    // 5. Turn deduplication for safe tool
+    let reorder_dup = ToolCall {
+        id: "call_reorder_dup".to_string(),
+        name: "reordenar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": note.id,
+            "direccion": "abajo"
+        })
+        .to_string(),
+    };
+    let res_dup = dispatcher.dispatch(&reorder_dup, &mut context).await;
+    assert_eq!(res_dup["warning"], "duplicate_call_ignored");
+    assert_eq!(context.actions_taken.len(), 4);
+}
+
+#[tokio::test]
+async fn test_dispatcher_safe_presentation_tools_domain_errors() {
+    let (state, _tmp) = setup_test_state();
+    let pres = state.create_presentation.execute("Show Errores").unwrap();
+    let lyrics = state.add_lyrics.execute(&pres.id, "Letra").unwrap();
+
+    let dispatcher = AgentToolDispatcher::new(state);
+    let mut context = TurnToolContext::with_event_context(
+        Some(pres.id.clone()),
+        None,
+        None,
+        None,
+        None,
+    );
+
+    // Reorder non-existent item
+    let reorder_call = ToolCall {
+        id: "call_ro_err".to_string(),
+        name: "reordenar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": "non-existent-item",
+            "posicion_destino": 1
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&reorder_call, &mut context).await;
+    assert!(res.get("error").is_some());
+    assert_eq!(res["error"], "item_not_found");
+
+    // Edit non-existent item
+    let edit_call = ToolCall {
+        id: "call_ee_err".to_string(),
+        name: "editar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": "non-existent-item",
+            "texto": "Texto nuevo"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_call, &mut context).await;
+    assert!(res.get("error").is_some());
+    assert_eq!(res["error"], "item_not_found");
+
+    // Incompatible field: trying to set 'titulo' on a lyrics item
+    let edit_incompat = ToolCall {
+        id: "call_ee_incompat".to_string(),
+        name: "editar_elemento".to_string(),
+        arguments: json!({
+            "presentacion_id": pres.id,
+            "elemento_id": lyrics.id,
+            "titulo": "Titulo invalido para letra"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_incompat, &mut context).await;
+    assert!(res.get("error").is_some());
+    assert_eq!(res["error"], "incompatible_field");
 }

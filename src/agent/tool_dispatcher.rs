@@ -1,8 +1,17 @@
-use crate::domain::ticketing::{ExpenseCategory, Money, PaymentMethod, PaymentStatus, TicketType};
+use crate::domain::move_direction::MoveDirection;
+use crate::domain::show_item::ShowItemPayload;
+use crate::domain::ticketing::{
+    ExpenseCategory, InterestStatus, Money, PaymentMethod, PaymentStatus, TicketType,
+};
 use crate::ports::ticketing::{CheckInOutcome, SellTicketsInput};
 use crate::state::ticketing_services::TicketingServices;
-use crate::use_cases::ticketing::events::CreateEventInput;
+use crate::use_cases::rename_presentation::RenamePresentation;
+use crate::use_cases::reorder_item::ReorderItem;
+use crate::use_cases::ticketing::events::{CreateEventInput, UpdateEventInput};
+use crate::use_cases::ticketing::expenses::UpdateExpenseInput;
+use crate::use_cases::ticketing::interests::{ConvertInterestInput, UpdateInterestInput};
 use crate::use_cases::ticketing::{CreateExpenseInput, CreateInterestInput};
+use crate::use_cases::update_show_item::UpdateShowItem;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -155,6 +164,83 @@ struct CheckinEntradaArgs {
     codigo: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenombrarPresentacionArgs {
+    presentacion_id: String,
+    nuevo_nombre: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReordenarElementoArgs {
+    presentacion_id: String,
+    elemento_id: String,
+    #[serde(default)]
+    posicion_destino: Option<i64>,
+    #[serde(default)]
+    direccion: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditarElementoArgs {
+    presentacion_id: String,
+    elemento_id: String,
+    #[serde(default)]
+    texto: Option<String>,
+    #[serde(default)]
+    titulo: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditarEventoArgs {
+    evento_id: String,
+    nombre: String,
+    fecha_hora: String,
+    lugar: String,
+    tipos_de_entrada: Vec<CrearEventoTipoEntradaArgs>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReabrirEventoArgs {
+    evento_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditarGastoArgs {
+    gasto_id: String,
+    categoria: String,
+    monto: f64,
+    descripcion: String,
+    fecha: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditarInteresadoArgs {
+    interesado_id: String,
+    nombre: String,
+    contacto: String,
+    canal: String,
+    personas: u32,
+    promotora: String,
+    estado: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfirmarInteresadoArgs {
+    interesado_id: String,
+    tipo_entrada: String,
+    cantidad: u32,
+    medio_pago: String,
+    estado_pago: String,
+}
+
 fn app_error_to_json(e: &crate::error::AppError) -> Value {
     match e {
         crate::error::AppError::BadRequest { code, message }
@@ -185,6 +271,58 @@ fn is_authorized_event(context: &TurnToolContext, evento_id: &str) -> bool {
             .as_deref()
             .map(|id| id.trim() == trimmed)
             .unwrap_or(false)
+}
+
+fn is_authorized_presentation(context: &TurnToolContext, pres_id: &str) -> bool {
+    let trimmed = pres_id.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    context.known_presentation_ids.contains(trimmed)
+        || context
+            .active_presentation_id
+            .as_deref()
+            .map(|id| id.trim() == trimmed)
+            .unwrap_or(false)
+}
+
+fn validation_err(msg: impl Into<String>) -> Value {
+    json!({
+        "error": "validation_error",
+        "message": msg.into()
+    })
+}
+
+fn unauthorized_presentation_err() -> Value {
+    json!({
+        "error": "unauthorized_presentation_id",
+        "message": "Identificador de presentación no autorizado en el contexto actual"
+    })
+}
+
+fn unauthorized_event_err() -> Value {
+    json!({
+        "error": "unauthorized_event_id",
+        "message": "Identificador de evento no autorizado en el contexto actual"
+    })
+}
+
+fn service_unavailable_err() -> Value {
+    json!({
+        "error": "service_unavailable",
+        "message": "El servicio de ticketing no está disponible"
+    })
+}
+
+fn normalize_event_fecha_hora(s: &str) -> String {
+    let trimmed = s.trim();
+    if chrono::DateTime::parse_from_rfc3339(trimmed).is_ok() {
+        return trimmed.to_string();
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M") {
+        return format!("{}:00Z", naive.format("%Y-%m-%dT%H:%M"));
+    }
+    trimmed.to_string()
 }
 
 fn format_ticket_url(public_base_url: Option<&str>, scan_token: &str) -> String {
@@ -230,6 +368,56 @@ fn format_whatsapp_url(
     Some(format!("https://wa.me/{phone}?text={encoded}"))
 }
 
+fn format_tickets_response(
+    tickets: &[crate::domain::ticketing::Ticket],
+    public_base_url: Option<&str>,
+    context: &mut TurnToolContext,
+) -> Vec<Value> {
+    let mut items = Vec::with_capacity(tickets.len());
+    for ticket in tickets {
+        context.known_ticket_ids.insert(ticket.id.clone());
+        let ticket_url = format_ticket_url(public_base_url, ticket.scan_token.as_str());
+        let whatsapp_url = format_whatsapp_url(
+            &ticket.contacto,
+            &ticket.nombre_comprador,
+            &ticket_url,
+            ticket.estado_pago.as_str(),
+        );
+        items.push(json!({
+            "id": ticket.id,
+            "scan_token": ticket.scan_token.as_str(),
+            "ticket_url": ticket_url,
+            "whatsapp_url": whatsapp_url,
+            "nombre_comprador": ticket.nombre_comprador,
+            "tipo_entrada": ticket.tipo_entrada,
+            "precio": ticket.precio.to_soles(),
+            "medio_pago": ticket.medio_pago.as_str(),
+            "estado_pago": ticket.estado_pago.as_str(),
+        }));
+    }
+    items
+}
+
+fn parse_ticket_types(
+    tipos_de_entrada: Vec<CrearEventoTipoEntradaArgs>,
+) -> Result<Vec<TicketType>, Value> {
+    if tipos_de_entrada.is_empty() {
+        return Err(validation_err("Debe incluir al menos un tipo de entrada"));
+    }
+    let mut tipos = Vec::with_capacity(tipos_de_entrada.len());
+    for t in tipos_de_entrada {
+        let precio = match Money::from_soles(t.precio) {
+            Ok(m) => m,
+            Err(e) => return Err(validation_err(format!("Precio inválido: {e}"))),
+        };
+        match TicketType::new(t.nombre, precio, t.capacidad) {
+            Ok(tipo) => tipos.push(tipo),
+            Err(e) => return Err(validation_err(format!("Tipo de entrada inválido: {e}"))),
+        }
+    }
+    Ok(tipos)
+}
+
 #[derive(Clone)]
 pub struct AgentToolDispatcher {
     create_presentation: Arc<CreatePresentation<SqlitePresentationRepository>>,
@@ -242,6 +430,9 @@ pub struct AgentToolDispatcher {
     download_youtube_audio: Arc<DownloadYouTubeAudio>,
     staged_audio_registry: Arc<StagedAudioRegistry>,
     separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>,
+    rename_presentation: Arc<RenamePresentation<SqlitePresentationRepository>>,
+    reorder_item: Arc<ReorderItem<SqliteShowItemRepository>>,
+    update_show_item: Arc<UpdateShowItem<SqliteShowItemRepository, SqliteShowItemRepository>>,
     ticketing: Option<TicketingServices>,
     public_base_url: Option<String>,
 }
@@ -263,6 +454,9 @@ impl AgentToolDispatcher {
         download_youtube_audio: Arc<DownloadYouTubeAudio>,
         staged_audio_registry: Arc<StagedAudioRegistry>,
         separate_vocals: Arc<SeparateVocals<SqliteShowItemRepository>>,
+        rename_presentation: Arc<RenamePresentation<SqlitePresentationRepository>>,
+        reorder_item: Arc<ReorderItem<SqliteShowItemRepository>>,
+        update_show_item: Arc<UpdateShowItem<SqliteShowItemRepository, SqliteShowItemRepository>>,
     ) -> Self {
         Self {
             create_presentation,
@@ -275,6 +469,9 @@ impl AgentToolDispatcher {
             download_youtube_audio,
             staged_audio_registry,
             separate_vocals,
+            rename_presentation,
+            reorder_item,
+            update_show_item,
             ticketing: None,
             public_base_url: None,
         }
@@ -302,6 +499,9 @@ impl AgentToolDispatcher {
             state.download_youtube_audio.clone(),
             state.staged_audio_registry.clone(),
             state.separate_vocals.clone(),
+            state.rename_presentation.clone(),
+            state.reorder_item.clone(),
+            state.update_show_item.clone(),
         )
         .with_ticketing(state.ticketing.clone())
         .with_public_base_url(std::env::var("SHIRLEY_PUBLIC_BASE_URL").ok())
@@ -428,20 +628,12 @@ impl AgentToolDispatcher {
             "get_presentation" => {
                 let args: PresentationIdArgs = match serde_json::from_str(&call.arguments) {
                     Ok(a) => a,
-                    Err(_) => {
-                        return json!({
-                            "error": "validation_error",
-                            "message": "Parámetros de herramienta inválidos"
-                        });
-                    }
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
                 let pres_id = args.presentation_id.trim();
-                if !context.known_presentation_ids.contains(pres_id) {
-                    return json!({
-                        "error": "unauthorized_presentation_id",
-                        "message": "Identificador de presentación no autorizado en el contexto actual"
-                    });
+                if !is_authorized_presentation(context, pres_id) {
+                    return unauthorized_presentation_err();
                 }
 
                 match self.get_presentation.execute(pres_id) {
@@ -486,28 +678,17 @@ impl AgentToolDispatcher {
             "add_lyrics" => {
                 let args: AddItemTextArgs = match serde_json::from_str(&call.arguments) {
                     Ok(a) => a,
-                    Err(_) => {
-                        return json!({
-                            "error": "validation_error",
-                            "message": "Parámetros de herramienta inválidos"
-                        });
-                    }
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
                 let pres_id = args.presentation_id.trim();
-                if !context.known_presentation_ids.contains(pres_id) {
-                    return json!({
-                        "error": "unauthorized_presentation_id",
-                        "message": "Identificador de presentación no autorizado en el contexto actual"
-                    });
+                if !is_authorized_presentation(context, pres_id) {
+                    return unauthorized_presentation_err();
                 }
 
                 let trimmed_text = args.text.trim();
                 if trimmed_text.is_empty() {
-                    return json!({
-                        "error": "validation_error",
-                        "message": "El texto no puede estar vacío"
-                    });
+                    return validation_err("El texto no puede estar vacío");
                 }
 
                 match self.add_lyrics.execute(pres_id, trimmed_text) {
@@ -541,28 +722,17 @@ impl AgentToolDispatcher {
             "add_note" => {
                 let args: AddItemTextArgs = match serde_json::from_str(&call.arguments) {
                     Ok(a) => a,
-                    Err(_) => {
-                        return json!({
-                            "error": "validation_error",
-                            "message": "Parámetros de herramienta inválidos"
-                        });
-                    }
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
                 let pres_id = args.presentation_id.trim();
-                if !context.known_presentation_ids.contains(pres_id) {
-                    return json!({
-                        "error": "unauthorized_presentation_id",
-                        "message": "Identificador de presentación no autorizado en el contexto actual"
-                    });
+                if !is_authorized_presentation(context, pres_id) {
+                    return unauthorized_presentation_err();
                 }
 
                 let trimmed_text = args.text.trim();
                 if trimmed_text.is_empty() {
-                    return json!({
-                        "error": "validation_error",
-                        "message": "El texto no puede estar vacío"
-                    });
+                    return validation_err("El texto no puede estar vacío");
                 }
 
                 match self.add_note.execute(pres_id, trimmed_text) {
@@ -596,28 +766,17 @@ impl AgentToolDispatcher {
             "add_track_from_staged" => {
                 let args: AddTrackArgs = match serde_json::from_str(&call.arguments) {
                     Ok(a) => a,
-                    Err(_) => {
-                        return json!({
-                            "error": "validation_error",
-                            "message": "Parámetros de herramienta inválidos"
-                        });
-                    }
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
                 };
 
                 let pres_id = args.presentation_id.trim();
-                if !context.known_presentation_ids.contains(pres_id) {
-                    return json!({
-                        "error": "unauthorized_presentation_id",
-                        "message": "Identificador de presentación no autorizado en el contexto actual"
-                    });
+                if !is_authorized_presentation(context, pres_id) {
+                    return unauthorized_presentation_err();
                 }
 
                 let trimmed_title = args.title.trim();
                 if trimmed_title.is_empty() {
-                    return json!({
-                        "error": "validation_error",
-                        "message": "El título no puede estar vacío"
-                    });
+                    return validation_err("El título no puede estar vacío");
                 }
 
                 // Resolve staged audio source:
@@ -983,31 +1142,14 @@ impl AgentToolDispatcher {
                     });
                 }
 
-                let mut tipos = Vec::new();
-                for t in args.tipos_de_entrada {
-                    let precio = match Money::from_soles(t.precio) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            return json!({
-                                "error": "validation_error",
-                                "message": format!("Precio inválido: {e}")
-                            });
-                        }
-                    };
-                    match TicketType::new(t.nombre, precio, t.capacidad) {
-                        Ok(tipo) => tipos.push(tipo),
-                        Err(e) => {
-                            return json!({
-                                "error": "validation_error",
-                                "message": format!("Tipo de entrada inválido: {e}")
-                            });
-                        }
-                    }
-                }
+                let tipos = match parse_ticket_types(args.tipos_de_entrada) {
+                    Ok(t) => t,
+                    Err(err_val) => return err_val,
+                };
 
                 match ticketing.create_event.execute(CreateEventInput {
                     nombre: nombre.to_string(),
-                    fecha_hora: args.fecha_hora.trim().to_string(),
+                    fecha_hora: normalize_event_fecha_hora(&args.fecha_hora),
                     lugar: args.lugar.trim().to_string(),
                     tipos_de_entrada: tipos,
                 }) {
@@ -1151,32 +1293,11 @@ impl AgentToolDispatcher {
 
                 match ticketing.sell_tickets.execute(input) {
                     Ok(tickets) => {
-                        let mut items = Vec::new();
-                        for ticket in &tickets {
-                            context.known_ticket_ids.insert(ticket.id.clone());
-                            let ticket_url = format_ticket_url(
-                                self.public_base_url.as_deref(),
-                                ticket.scan_token.as_str(),
-                            );
-                            let whatsapp_url = format_whatsapp_url(
-                                &ticket.contacto,
-                                &ticket.nombre_comprador,
-                                &ticket_url,
-                                ticket.estado_pago.as_str(),
-                            );
-
-                            items.push(json!({
-                                "id": ticket.id,
-                                "scan_token": ticket.scan_token.as_str(),
-                                "ticket_url": ticket_url,
-                                "whatsapp_url": whatsapp_url,
-                                "nombre_comprador": ticket.nombre_comprador,
-                                "tipo_entrada": ticket.tipo_entrada,
-                                "precio": ticket.precio.to_soles(),
-                                "medio_pago": ticket.medio_pago.as_str(),
-                                "estado_pago": ticket.estado_pago.as_str(),
-                            }));
-                        }
+                        let items = format_tickets_response(
+                            &tickets,
+                            self.public_base_url.as_deref(),
+                            context,
+                        );
 
                         let res = json!({
                             "entradas": items,
@@ -1522,6 +1643,457 @@ impl AgentToolDispatcher {
                             details: Some(res.clone()),
                         });
 
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "renombrar_presentacion" => {
+                let args: RenombrarPresentacionArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let pres_id = args.presentacion_id.trim();
+                if !is_authorized_presentation(context, pres_id) {
+                    return unauthorized_presentation_err();
+                }
+                let trimmed_title = args.nuevo_nombre.trim();
+                if trimmed_title.is_empty() {
+                    return validation_err("El nombre no puede estar vacío");
+                }
+                match self.rename_presentation.execute(pres_id, trimmed_title) {
+                    Ok(pres) => {
+                        let res = json!({
+                            "id": pres.id,
+                            "title": pres.title,
+                            "updated_at": pres.updated_at
+                        });
+                        context.record_action(ToolAction {
+                            tool: "renombrar_presentacion".to_string(),
+                            presentation_id: Some(pres.id),
+                            event_id: None,
+                            summary: format!("Presentación renombrada a “{}”", pres.title),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "reordenar_elemento" => {
+                let args: ReordenarElementoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let pres_id = args.presentacion_id.trim();
+                if !is_authorized_presentation(context, pres_id) {
+                    return unauthorized_presentation_err();
+                }
+                let item_id = args.elemento_id.trim();
+                if item_id.is_empty() {
+                    return validation_err("El identificador del elemento no puede estar vacío");
+                }
+                if (args.posicion_destino.is_some() && args.direccion.is_some())
+                    || (args.posicion_destino.is_none() && args.direccion.is_none())
+                {
+                    return validation_err(
+                        "Debe proporcionar exactamente un selector: 'posicion_destino' o 'direccion'",
+                    );
+                }
+
+                let outcome = if let Some(target_pos) = args.posicion_destino {
+                    if target_pos < 1 {
+                        return validation_err("La posición destino debe ser al menos 1");
+                    }
+                    let target_idx = target_pos - 1;
+                    self.reorder_item
+                        .execute_target_position(pres_id, item_id, target_idx)
+                } else if let Some(ref dir_str) = args.direccion {
+                    let dir = match dir_str.trim().to_lowercase().as_str() {
+                        "arriba" => MoveDirection::Up,
+                        "abajo" => MoveDirection::Down,
+                        _ => return validation_err("La dirección debe ser 'arriba' o 'abajo'"),
+                    };
+                    self.reorder_item.execute(pres_id, item_id, dir)
+                } else {
+                    unreachable!()
+                };
+
+                match outcome {
+                    Ok(items) => {
+                        let new_pos = items
+                            .iter()
+                            .find(|i| i.id == item_id)
+                            .map(|i| (i.position + 1) as u32)
+                            .unwrap_or(1);
+                        let res = json!({
+                            "item_id": item_id,
+                            "position": new_pos,
+                            "presentation_id": pres_id
+                        });
+                        context.record_action(ToolAction {
+                            tool: "reordenar_elemento".to_string(),
+                            presentation_id: Some(pres_id.to_string()),
+                            event_id: None,
+                            summary: format!("Elemento {} movido a la posición {}", item_id, new_pos),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "editar_elemento" => {
+                let args: EditarElementoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let pres_id = args.presentacion_id.trim();
+                if !is_authorized_presentation(context, pres_id) {
+                    return unauthorized_presentation_err();
+                }
+                let item_id = args.elemento_id.trim();
+                if item_id.is_empty() {
+                    return validation_err("El identificador del elemento no puede estar vacío");
+                }
+                if (args.texto.is_some() && args.titulo.is_some())
+                    || (args.texto.is_none() && args.titulo.is_none())
+                {
+                    return validation_err(
+                        "Debe proporcionar exactamente uno de 'texto' o 'titulo'",
+                    );
+                }
+
+                let title_opt = if let Some(ref t) = args.titulo {
+                    let trimmed = t.trim();
+                    if trimmed.is_empty() {
+                        return validation_err("El título no puede estar vacío");
+                    }
+                    Some(trimmed.to_string())
+                } else {
+                    None
+                };
+
+                let body_opt = if let Some(ref b) = args.texto {
+                    let trimmed = b.trim();
+                    if trimmed.is_empty() {
+                        return validation_err("El texto no puede estar vacío");
+                    }
+                    Some(trimmed.to_string())
+                } else {
+                    None
+                };
+
+                match self
+                    .update_show_item
+                    .execute(pres_id, item_id, title_opt, body_opt)
+                {
+                    Ok(item) => {
+                        let kind = item.kind().as_str().to_string();
+                        let title = match &item.payload {
+                            ShowItemPayload::Track(t) => Some(t.title.clone()),
+                            _ => None,
+                        };
+                        let res = json!({
+                            "item_id": item.id,
+                            "kind": kind,
+                            "title": title,
+                            "updated_at": chrono::Utc::now().to_rfc3339()
+                        });
+                        context.record_action(ToolAction {
+                            tool: "editar_elemento".to_string(),
+                            presentation_id: Some(pres_id.to_string()),
+                            event_id: None,
+                            summary: format!("Elemento {} actualizado ({})", item.id, item.kind().as_str()),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "editar_evento" => {
+                let Some(ticketing) = self.ticketing.as_ref() else {
+                    return service_unavailable_err();
+                };
+                let args: EditarEventoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let evento_id = args.evento_id.trim();
+                if !is_authorized_event(context, evento_id) {
+                    return unauthorized_event_err();
+                }
+                if args.nombre.trim().is_empty() {
+                    return validation_err("El nombre del evento no puede estar vacío");
+                }
+                if args.fecha_hora.trim().is_empty() {
+                    return validation_err("La fecha/hora del evento no puede estar vacía");
+                }
+                if args.lugar.trim().is_empty() {
+                    return validation_err("El lugar del evento no puede estar vacío");
+                }
+                if args.tipos_de_entrada.is_empty() {
+                    return validation_err("Debe incluir al menos un tipo de entrada");
+                }
+
+                let tipos = match parse_ticket_types(args.tipos_de_entrada) {
+                    Ok(t) => t,
+                    Err(err_val) => return err_val,
+                };
+
+                match ticketing.update_event.execute(UpdateEventInput {
+                    id: evento_id.to_string(),
+                    nombre: args.nombre.trim().to_string(),
+                    fecha_hora: normalize_event_fecha_hora(&args.fecha_hora),
+                    lugar: args.lugar.trim().to_string(),
+                    tipos_de_entrada: tipos,
+                }) {
+                    Ok(event) => {
+                        let res = json!({
+                            "id": event.id,
+                            "nombre": event.nombre,
+                            "fecha_hora": event.fecha_hora,
+                            "lugar": event.lugar,
+                            "estado": if event.finalizado { "Finalizado" } else { "Activo" }
+                        });
+                        context.record_action(ToolAction {
+                            tool: "editar_evento".to_string(),
+                            presentation_id: None,
+                            event_id: Some(event.id.clone()),
+                            summary: format!("Evento «{}» actualizado", event.nombre),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "reabrir_evento" => {
+                let Some(ticketing) = self.ticketing.as_ref() else {
+                    return service_unavailable_err();
+                };
+                let args: ReabrirEventoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let evento_id = args.evento_id.trim();
+                if !is_authorized_event(context, evento_id) {
+                    return unauthorized_event_err();
+                }
+                match ticketing.reopen_event.execute(evento_id) {
+                    Ok(()) => {
+                        let res = json!({
+                            "id": evento_id,
+                            "estado": "Activo"
+                        });
+                        context.record_action(ToolAction {
+                            tool: "reabrir_evento".to_string(),
+                            presentation_id: None,
+                            event_id: Some(evento_id.to_string()),
+                            summary: format!("Evento {} reabierto como Activo", evento_id),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "editar_gasto" => {
+                let Some(ticketing) = self.ticketing.as_ref() else {
+                    return service_unavailable_err();
+                };
+                let args: EditarGastoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let categoria = match ExpenseCategory::parse(&args.categoria) {
+                    Ok(c) => c,
+                    Err(e) => return validation_err(format!("Categoría inválida: {e}")),
+                };
+                let monto = match Money::from_soles(args.monto) {
+                    Ok(m) => m,
+                    Err(e) => return validation_err(format!("Monto inválido: {e}")),
+                };
+                let desc = args.descripcion.trim().to_string();
+                if desc.is_empty() {
+                    return validation_err("La descripción no puede estar vacía");
+                }
+                let fecha = args.fecha.trim().to_string();
+                if fecha.is_empty() {
+                    return validation_err("La fecha no puede estar vacía");
+                }
+                match ticketing.update_expense.execute(UpdateExpenseInput {
+                    id: args.gasto_id.trim().to_string(),
+                    categoria,
+                    monto,
+                    descripcion: desc,
+                    fecha,
+                }) {
+                    Ok(expense) => {
+                        let res = json!({
+                            "id": expense.id,
+                            "categoria": expense.categoria.as_str(),
+                            "monto": expense.monto.to_soles(),
+                            "descripcion": expense.descripcion,
+                            "fecha": expense.fecha
+                        });
+                        context.record_action(ToolAction {
+                            tool: "editar_gasto".to_string(),
+                            presentation_id: None,
+                            event_id: Some(expense.evento_id.clone()),
+                            summary: format!(
+                                "Gasto de S/ {:.2} actualizado ({})",
+                                expense.monto.to_soles(),
+                                expense.categoria.as_str()
+                            ),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "editar_interesado" => {
+                let Some(ticketing) = self.ticketing.as_ref() else {
+                    return service_unavailable_err();
+                };
+                let args: EditarInteresadoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                let nombre = args.nombre.trim().to_string();
+                if nombre.is_empty() {
+                    return validation_err("El nombre no puede estar vacío");
+                }
+                let contacto = args.contacto.trim().to_string();
+                if contacto.is_empty() {
+                    return validation_err("El contacto no puede estar vacío");
+                }
+                let canal = args.canal.trim().to_string();
+                if canal.is_empty() {
+                    return validation_err("El canal no puede estar vacío");
+                }
+                if args.personas < 1 {
+                    return validation_err("El número de personas debe ser al menos 1");
+                }
+                let promotora = args.promotora.trim().to_string();
+                if promotora.is_empty() {
+                    return validation_err("La promotora no puede estar vacía");
+                }
+                let estado = match InterestStatus::parse(&args.estado) {
+                    Ok(s) => s,
+                    Err(e) => return validation_err(format!("Estado inválido: {e}")),
+                };
+                match ticketing.update_interest.execute(UpdateInterestInput {
+                    id: args.interesado_id.trim().to_string(),
+                    nombre,
+                    contacto,
+                    canal,
+                    personas: args.personas,
+                    promotora,
+                    estado,
+                }) {
+                    Ok(lead) => {
+                        let res = json!({
+                            "id": lead.id,
+                            "nombre": lead.nombre,
+                            "personas": lead.personas,
+                            "estado": lead.estado.as_str()
+                        });
+                        context.record_action(ToolAction {
+                            tool: "editar_interesado".to_string(),
+                            presentation_id: None,
+                            event_id: Some(lead.evento_id.clone()),
+                            summary: format!("Interesado «{}» actualizado", lead.nombre),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
+                        context.executed_call_ids.insert(call.id.clone());
+                        context.executed_signatures.insert(signature, res.clone());
+                        res
+                    }
+                    Err(e) => app_error_to_json(&e),
+                }
+            }
+
+            "confirmar_interesado" => {
+                let Some(ticketing) = self.ticketing.as_ref() else {
+                    return service_unavailable_err();
+                };
+                let args: ConfirmarInteresadoArgs = match serde_json::from_str(&call.arguments) {
+                    Ok(a) => a,
+                    Err(_) => return validation_err("Parámetros de herramienta inválidos"),
+                };
+                if args.tipo_entrada.trim().is_empty() {
+                    return validation_err("El tipo de entrada no puede estar vacío");
+                }
+                if args.cantidad < 1 {
+                    return validation_err("La cantidad debe ser al menos 1");
+                }
+                let medio_pago = match PaymentMethod::parse(&args.medio_pago) {
+                    Ok(m) => m,
+                    Err(e) => return validation_err(format!("Medio de pago inválido: {e}")),
+                };
+                let estado_pago = match PaymentStatus::parse(&args.estado_pago) {
+                    Ok(s) => s,
+                    Err(e) => return validation_err(format!("Estado de pago inválido: {e}")),
+                };
+
+                match ticketing.convert_interest_to_sale.execute(ConvertInterestInput {
+                    interesado_id: args.interesado_id.trim().to_string(),
+                    tipo_entrada: args.tipo_entrada.trim().to_string(),
+                    cantidad: args.cantidad,
+                    medio_pago,
+                    estado_pago,
+                }) {
+                    Ok(tickets) => {
+                        let items = format_tickets_response(
+                            &tickets,
+                            self.public_base_url.as_deref(),
+                            context,
+                        );
+                        let event_id = tickets.first().map(|t| t.evento_id.clone());
+                        let res = json!({
+                            "interesado_id": args.interesado_id.trim(),
+                            "tickets_creados": tickets.len(),
+                            "tickets": items
+                        });
+                        context.record_action(ToolAction {
+                            tool: "confirmar_interesado".to_string(),
+                            presentation_id: None,
+                            event_id,
+                            summary: format!("{} entrada(s) confirmada(s) para interesado", tickets.len()),
+                            status: "success".to_string(),
+                            details: Some(res.clone()),
+                        });
                         context.executed_call_ids.insert(call.id.clone());
                         context.executed_signatures.insert(signature, res.clone());
                         res

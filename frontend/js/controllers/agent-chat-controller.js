@@ -156,19 +156,52 @@ export function createAgentChatController(deps) {
       // Emit reactive refresh signals for confirmed actions
       const actions = (response && response.actions_taken) || [];
       let refreshedCatalog = false;
+      let refreshedEvents = false;
 
       for (const act of actions) {
-        if (act.tool === 'create_presentation' && !refreshedCatalog) {
+        if ((act.tool === 'create_presentation' || act.tool === 'renombrar_presentacion') && !refreshedCatalog) {
           emitAgentRefresh({ scope: 'catalog' });
           refreshedCatalog = true;
-        } else if (
+        }
+
+        if (
           act.tool === 'add_lyrics' ||
           act.tool === 'add_note' ||
-          act.tool === 'add_track_from_staged'
+          act.tool === 'add_track_from_staged' ||
+          act.tool === 'renombrar_presentacion' ||
+          act.tool === 'reordenar_elemento' ||
+          act.tool === 'editar_elemento'
         ) {
           const targetId = act.presentation_id || response.active_presentation_id;
           if (targetId) {
             emitAgentRefresh({ scope: 'presentation', presentationId: targetId });
+          }
+        } else if (
+          act.tool === 'crear_evento' ||
+          act.tool === 'editar_evento' ||
+          act.tool === 'reabrir_evento'
+        ) {
+          if (!refreshedEvents) {
+            emitAgentRefresh({ scope: 'events' });
+            refreshedEvents = true;
+          }
+          const targetEventId = act.event_id || response.active_event_id;
+          if (targetEventId) {
+            emitAgentRefresh({ scope: 'event', eventId: targetEventId });
+          }
+        } else if (
+          act.tool === 'vender_entradas' ||
+          act.tool === 'confirmar_pago_entrada' ||
+          act.tool === 'registrar_gasto' ||
+          act.tool === 'registrar_interesado' ||
+          act.tool === 'checkin_entrada' ||
+          act.tool === 'editar_gasto' ||
+          act.tool === 'editar_interesado' ||
+          act.tool === 'confirmar_interesado'
+        ) {
+          const targetEventId = act.event_id || response.active_event_id;
+          if (targetEventId) {
+            emitAgentRefresh({ scope: 'event', eventId: targetEventId });
           }
         }
       }

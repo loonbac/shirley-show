@@ -654,4 +654,55 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   console.log('✓ 12. active_event_id preserved in chatState and sent on subsequent turns');
 }
 
+// 13. Safe tool execution reactive refresh signals (presentations, items, events, expenses, leads)
+{
+  const dataRefreshPath = resolve(process.cwd(), 'frontend/js/data/agent-refresh.js');
+  const { onAgentRefresh, agentRefreshSignal } = await import(pathToFileURL(dataRefreshPath).href);
+
+  const capturedEvents = [];
+  const unsubscribe = onAgentRefresh((event) => {
+    capturedEvents.push(event);
+  });
+
+  const state = createChatState();
+  const ctrl = createAgentChatController({
+    chatState: state,
+    sendAgentChatMessageFn: async () => ({
+      message: 'Acciones seguras ejecutadas',
+      actions_taken: [
+        { tool: 'renombrar_presentacion', presentation_id: 'pres-1', status: 'success' },
+        { tool: 'editar_elemento', presentation_id: 'pres-1', status: 'success' },
+        { tool: 'reordenar_elemento', presentation_id: 'pres-1', status: 'success' },
+        { tool: 'editar_evento', event_id: 'evt-1', status: 'success' },
+        { tool: 'reabrir_evento', event_id: 'evt-1', status: 'success' },
+        { tool: 'editar_gasto', event_id: 'evt-1', status: 'success' },
+        { tool: 'editar_interesado', event_id: 'evt-1', status: 'success' },
+        { tool: 'confirmar_interesado', event_id: 'evt-1', status: 'success' },
+      ],
+      active_presentation_id: 'pres-1',
+      active_event_id: 'evt-1',
+      notice: null,
+    }),
+  });
+
+  await ctrl.sendAndOpen('Actualizar repertorio y evento');
+
+  // Verify captured refresh scopes
+  const scopes = capturedEvents.map((e) => e.scope);
+  assert.ok(scopes.includes('catalog'), 'Must emit catalog refresh for renombrar_presentacion');
+  assert.ok(scopes.includes('presentation'), 'Must emit presentation refresh for safe item/presentation edits');
+  assert.ok(scopes.includes('events'), 'Must emit events refresh for editar_evento/reabrir_evento');
+  assert.ok(scopes.includes('event'), 'Must emit event detail refresh for expenses, leads, and event updates');
+
+  const presEvents = capturedEvents.filter((e) => e.scope === 'presentation');
+  assert.ok(presEvents.every((e) => e.presentationId === 'pres-1'));
+
+  const evtEvents = capturedEvents.filter((e) => e.scope === 'event');
+  assert.ok(evtEvents.every((e) => e.eventId === 'evt-1'));
+
+  unsubscribe();
+  ctrl.destroy();
+  console.log('✓ 13. Safe tool execution triggers reactive view refresh for presentations, items, events, expenses, and leads');
+}
+
 console.log('All Agent Chat Route and Composition integration tests passed!');

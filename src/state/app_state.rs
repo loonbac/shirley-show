@@ -202,6 +202,9 @@ impl AppState {
             download_youtube_audio.clone(),
             staged_audio_registry.clone(),
             separate_vocals.clone(),
+            rename_presentation.clone(),
+            reorder_item.clone(),
+            update_show_item.clone(),
         )
         .with_ticketing(ticketing.clone())
         .with_public_base_url(std::env::var("SHIRLEY_PUBLIC_BASE_URL").ok());

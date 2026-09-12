@@ -152,8 +152,83 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         },
+        ToolDefinition {
+            name: "renombrar_presentacion".to_string(),
+            description: "Renombra una presentación existente con un nuevo título.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "presentacion_id": {
+                        "type": "string",
+                        "description": "Identificador único de la presentación a renombrar."
+                    },
+                    "nuevo_nombre": {
+                        "type": "string",
+                        "description": "Nuevo título o nombre para la presentación."
+                    }
+                },
+                "required": ["presentacion_id", "nuevo_nombre"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "reordenar_elemento".to_string(),
+            description: "Cambia la posición de un elemento dentro de una presentación por posición destino absoluta (1-based) o dirección ('arriba' o 'abajo').".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "presentacion_id": {
+                        "type": "string",
+                        "description": "Identificador único de la presentación."
+                    },
+                    "elemento_id": {
+                        "type": "string",
+                        "description": "Identificador único del elemento a reordenar."
+                    },
+                    "posicion_destino": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Posición destino absoluta (1-based). Mutuamente excluyente con 'direccion'."
+                    },
+                    "direccion": {
+                        "type": "string",
+                        "enum": ["arriba", "abajo"],
+                        "description": "Dirección de desplazamiento: 'arriba' o 'abajo'. Mutuamente excluyente con 'posicion_destino'."
+                    }
+                },
+                "required": ["presentacion_id", "elemento_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "editar_elemento".to_string(),
+            description: "Edita el contenido de texto de una letra/nota o el título de una pista de audio en una presentación.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "presentacion_id": {
+                        "type": "string",
+                        "description": "Identificador único de la presentación."
+                    },
+                    "elemento_id": {
+                        "type": "string",
+                        "description": "Identificador único del elemento a editar."
+                    },
+                    "texto": {
+                        "type": "string",
+                        "description": "Nuevo contenido de texto (para letras o notas). Mutuamente excluyente con 'titulo'."
+                    },
+                    "titulo": {
+                        "type": "string",
+                        "description": "Nuevo título (para pistas de audio). Mutuamente excluyente con 'texto'."
+                    }
+                },
+                "required": ["presentacion_id", "elemento_id"],
+                "additionalProperties": false
+            }),
+        },
 
-        // Ticketing tools (8)
+        // Ticketing tools (8 + 5 safe = 13)
         ToolDefinition {
             name: "crear_evento".to_string(),
             description: "Crea un nuevo evento musical o show con fecha, lugar y tipos de entrada configurados.".to_string(),
@@ -389,6 +464,203 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["evento_id", "codigo"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "editar_evento".to_string(),
+            description: "Actualiza los datos básicos de un evento y sus tipos de entrada.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento a editar."
+                    },
+                    "nombre": {
+                        "type": "string",
+                        "description": "Nuevo nombre o título del evento."
+                    },
+                    "fecha_hora": {
+                        "type": "string",
+                        "description": "Fecha y hora del evento en formato ISO 8601 (YYYY-MM-DDTHH:MM)."
+                    },
+                    "lugar": {
+                        "type": "string",
+                        "description": "Lugar, recinto o dirección del evento."
+                    },
+                    "tipos_de_entrada": {
+                        "type": "array",
+                        "description": "Lista de tipos de entrada para el evento.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nombre": {
+                                    "type": "string",
+                                    "description": "Nombre del tipo o zona de entrada (ej: 'General', 'VIP', 'Cortesía')."
+                                },
+                                "precio": {
+                                    "type": "number",
+                                    "minimum": 0.0,
+                                    "description": "Precio unitario en soles (S/)."
+                                },
+                                "capacidad": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Capacidad o aforo disponible para este tipo."
+                                }
+                            },
+                            "required": ["nombre", "precio", "capacidad"],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": ["evento_id", "nombre", "fecha_hora", "lugar", "tipos_de_entrada"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "reabrir_evento".to_string(),
+            description: "Reabre un evento previamente finalizado cambiando su estado a 'Activo'.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "evento_id": {
+                        "type": "string",
+                        "description": "Identificador único del evento a reabrir."
+                    }
+                },
+                "required": ["evento_id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "editar_gasto".to_string(),
+            description: "Edita los detalles de un gasto financiero registrado.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "gasto_id": {
+                        "type": "string",
+                        "description": "Identificador único del gasto a editar."
+                    },
+                    "categoria": {
+                        "type": "string",
+                        "enum": [
+                            "Local/Alquiler",
+                            "Sonido/Luces",
+                            "Músicos/Personal",
+                            "Publicidad/Marketing",
+                            "Bebidas/Catering",
+                            "Transporte",
+                            "Otros"
+                        ],
+                        "description": "Categoría contable del gasto."
+                    },
+                    "monto": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "description": "Monto del gasto en soles (S/)."
+                    },
+                    "descripcion": {
+                        "type": "string",
+                        "description": "Descripción o detalle del gasto."
+                    },
+                    "fecha": {
+                        "type": "string",
+                        "description": "Fecha del gasto en formato YYYY-MM-DD."
+                    }
+                },
+                "required": ["gasto_id", "categoria", "monto", "descripcion", "fecha"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "editar_interesado".to_string(),
+            description: "Actualiza los datos y estado de una persona interesada o reserva en un evento.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "interesado_id": {
+                        "type": "string",
+                        "description": "Identificador único del interesado a editar."
+                    },
+                    "nombre": {
+                        "type": "string",
+                        "description": "Nombre de la persona interesada."
+                    },
+                    "contacto": {
+                        "type": "string",
+                        "description": "Teléfono o celular de contacto."
+                    },
+                    "canal": {
+                        "type": "string",
+                        "description": "Canal de comunicación (ej: WhatsApp, Instagram, Personal)."
+                    },
+                    "personas": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Número de personas estimadas en el grupo."
+                    },
+                    "promotora": {
+                        "type": "string",
+                        "description": "Nombre de la promotora responsable del contacto."
+                    },
+                    "estado": {
+                        "type": "string",
+                        "enum": ["Pendiente", "Confirmado", "Cancelado"],
+                        "description": "Estado del interesado: 'Pendiente', 'Confirmado' o 'Cancelado'."
+                    }
+                },
+                "required": [
+                    "interesado_id",
+                    "nombre",
+                    "contacto",
+                    "canal",
+                    "personas",
+                    "promotora",
+                    "estado"
+                ],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "confirmar_interesado".to_string(),
+            description: "Convierte un interesado en venta confirmada emitiendo sus entradas y actualizando su estado a Confirmado.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "interesado_id": {
+                        "type": "string",
+                        "description": "Identificador único de la persona interesada."
+                    },
+                    "tipo_entrada": {
+                        "type": "string",
+                        "description": "Nombre exacto del tipo de entrada a emitir."
+                    },
+                    "cantidad": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Cantidad de entradas a emitir."
+                    },
+                    "medio_pago": {
+                        "type": "string",
+                        "enum": ["Yape", "Efectivo", "Cortesía"],
+                        "description": "Medio de pago: 'Yape', 'Efectivo' o 'Cortesía'."
+                    },
+                    "estado_pago": {
+                        "type": "string",
+                        "enum": ["Pagado", "Pendiente"],
+                        "description": "Estado de la entrada: 'Pagado' o 'Pendiente'."
+                    }
+                },
+                "required": [
+                    "interesado_id",
+                    "tipo_entrada",
+                    "cantidad",
+                    "medio_pago",
+                    "estado_pago"
+                ],
                 "additionalProperties": false
             }),
         },

@@ -3,6 +3,7 @@ import { createAgentChatTrigger } from '../../components/molecules/agent-chat-tr
 import { createConfirmationDialog } from '../../components/molecules/confirmation-dialog.js';
 import { getActiveAgentChatController } from '../../controllers/agent-chat-controller.js';
 import { activePresentationContextSignal } from '../../core/state/active-presentation-context.js';
+import { onAgentRefresh } from '../../core/state/agent-refresh.js';
 import { toPresentations, toEvent, toEvents, toDoor } from '../../router/navigate.js';
 import { buildWhatsAppTicketLink } from './whatsapp.js';
 
@@ -175,6 +176,12 @@ export function createEventsCatalogController(deps = {}) {
     onDeleteEvent: handleDeleteEvent,
   });
 
+  const unsubscribeRefresh = onAgentRefresh(async (evt) => {
+    if (evt.scope === 'events') {
+      await loadData();
+    }
+  });
+
   loadData();
 
   function destroy() {
@@ -182,6 +189,9 @@ export function createEventsCatalogController(deps = {}) {
     if (typeof unsubscribeChat === 'function') {
       unsubscribeChat();
       unsubscribeChat = null;
+    }
+    if (typeof unsubscribeRefresh === 'function') {
+      unsubscribeRefresh();
     }
   }
 
@@ -582,6 +592,18 @@ export function createEventDetailController(deps) {
     onDeleteExpense: handleDeleteExpense,
   });
 
+  const unsubscribeRefresh = onAgentRefresh(async (evt) => {
+    if (evt.scope === 'event' && evt.eventId === eventId) {
+      if (evt.removed) {
+        toEvents();
+      } else {
+        await loadAllData();
+      }
+    } else if (evt.scope === 'events') {
+      await loadAllData();
+    }
+  });
+
   loadAllData();
 
   function destroy() {
@@ -589,6 +611,9 @@ export function createEventDetailController(deps) {
     if (typeof unsubscribeChat === 'function') {
       unsubscribeChat();
       unsubscribeChat = null;
+    }
+    if (typeof unsubscribeRefresh === 'function') {
+      unsubscribeRefresh();
     }
   }
 
