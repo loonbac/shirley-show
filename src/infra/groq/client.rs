@@ -133,7 +133,7 @@ impl ChatCompletionProvider for GroqClient {
                         content,
                         tool_calls,
                     } => {
-                        let wire_tool_calls = tool_calls
+                        let wire_tool_calls: Vec<GroqToolCall> = tool_calls
                             .into_iter()
                             .map(|tc| GroqToolCall {
                                 id: tc.id,
@@ -144,6 +144,14 @@ impl ChatCompletionProvider for GroqClient {
                                 },
                             })
                             .collect();
+                        // OpenCode Go requires `content` to be present on an assistant
+                        // message that carries tool calls; other OpenAI-compatible APIs
+                        // also accept the empty string.
+                        let content = if wire_tool_calls.is_empty() {
+                            content
+                        } else {
+                            Some(content.unwrap_or_default())
+                        };
                         wire_messages.push(GroqMessage::Assistant {
                             content,
                             tool_calls: wire_tool_calls,
