@@ -1348,3 +1348,24 @@ async fn test_agent_limits_defaults_and_separation_600s_invariants() {
             "el prompt debe prohibir inventar montos de gastos"
         );
     }
+
+#[test]
+fn test_system_prompt_interesado_promotora_y_ventas_por_persona() {
+    use shirley_show::agent::system_prompt::SHIRLEY_SYSTEM_PROMPT;
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("Requisitos antes de registrar un interesado"),
+        "el prompt debe exigir evento y nombre antes de registrar interesado"
+    );
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("NUNCA inventes teléfonos"),
+        "el prompt debe prohibir inventar datos de contacto"
+    );
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("UNA llamada a `vender_entradas` POR PERSONA"),
+        "el prompt debe vender una llamada por persona ante varios nombres"
+    );
+    assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("como promotora"),
+        "el prompt debe manejar el rol de promotora"
+    );
+}
