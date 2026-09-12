@@ -222,8 +222,13 @@ impl ChatCompletionProvider for GroqClient {
 
                 match status {
                     StatusCode::OK => {
+                        let raw_body = response.text().await.map_err(|_| {
+                            ProviderError::MalformedResponse(
+                                "Invalid response body".to_string(),
+                            )
+                        })?;
                         let parsed: GroqChatCompletionResponse =
-                            response.json().await.map_err(|_| {
+                            serde_json::from_str(&raw_body).map_err(|_| {
                                 ProviderError::MalformedResponse(
                                     "Invalid response JSON schema".to_string(),
                                 )

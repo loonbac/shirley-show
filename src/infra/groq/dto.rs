@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<T>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
+
 #[derive(Debug, Serialize)]
 pub struct GroqChatCompletionRequest {
     pub model: String,
@@ -76,6 +86,6 @@ pub struct GroqChoice {
 pub struct GroqChoiceMessage {
     pub role: Option<String>,
     pub content: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub tool_calls: Vec<GroqToolCall>,
 }

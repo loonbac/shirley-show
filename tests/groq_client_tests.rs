@@ -833,3 +833,11 @@ fn test_groq_config_debug_redacts_api_key() {
     assert!(debug_output.contains("[REDACTED]"));
     assert!(!debug_output.contains("super_secret_raw_key_never_leak"));
 }
+
+#[test]
+fn test_parse_null_tool_calls_as_empty() {
+    use shirley_show::infra::groq::dto::GroqChatCompletionResponse;
+    let raw = r#"{"id":"x","choices":[{"message":{"role":"assistant","content":"hola","tool_calls":null}}]}"#;
+    let parsed: GroqChatCompletionResponse = serde_json::from_str(raw).unwrap();
+    assert!(parsed.choices[0].message.tool_calls.is_empty());
+}
