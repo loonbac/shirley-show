@@ -316,7 +316,11 @@ impl AgentChat {
             };
         }
 
-        let mut effective_budget = Duration::from_secs(75).min(self.limits.request_timeout);
+        let mut effective_budget = if self.remote_vocal_enabled {
+            self.limits.separation_timeout
+        } else {
+            Duration::from_secs(75).min(self.limits.request_timeout)
+        };
         let mut current_deadline = fixed_deadline.unwrap_or_else(|| start_time + effective_budget);
 
         for iter in 0..self.limits.max_iterations {
