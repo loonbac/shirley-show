@@ -179,29 +179,23 @@ impl ConfirmationReply {
     pub fn classify(text: &str) -> Self {
         let trimmed = text.trim();
         let lower = trimmed.to_lowercase();
+
+        // SOLO frases exactas canónicas:
+        // "sí, elimínalo" o "sí elimínalo"
+        // "sí, finalízalo" o "sí finalízalo"
+        // Rechaza explícitamente "si" sin tilde, "eliminalo"/"finalizalo" sin tilde, y puntuación extra.
+        if lower == "sí, elimínalo" || lower == "sí elimínalo" {
+            return Self::ExactDelete;
+        }
+        if lower == "sí, finalízalo" || lower == "sí finalízalo" {
+            return Self::ExactFinalize;
+        }
+
         let stripped = lower
             .trim_matches(|c: char| {
                 c == '.' || c == '!' || c == '¡' || c == '?' || c == '¿' || c == '"' || c == '\''
             })
             .trim();
-
-        // Exact confirmation matches: "sí, elimínalo", "sí elimínalo", "si, elimínalo", "si elimínalo", "sí, eliminalo", "si eliminalo"
-        // Normalization: allow optional comma, strip accent from 'sí'/'si' and 'elimínalo'/'eliminalo'
-        let norm_words: Vec<&str> = stripped.split_whitespace().collect();
-        if norm_words.len() == 2 {
-            let w0 = norm_words[0].trim_end_matches(',');
-            let w1 = norm_words[1];
-            let is_si = w0 == "sí" || w0 == "si";
-            let is_eliminalo = w1 == "elimínalo" || w1 == "eliminalo";
-            let is_finalizalo = w1 == "finalízalo" || w1 == "finalizalo";
-
-            if is_si && is_eliminalo {
-                return Self::ExactDelete;
-            }
-            if is_si && is_finalizalo {
-                return Self::ExactFinalize;
-            }
-        }
 
         // Cancellation phrases
         // "cancela", "cancelar", "mejor no", "déjalo así", "espera", "ya no", "no lo hagas", "déjalo"
@@ -228,7 +222,7 @@ impl ConfirmationReply {
             return Self::Cancel;
         }
 
-        // Ambiguous phrases
+        // Ambiguous phrases:
         // "dale", "ok", "hazlo", "bueno", "procede", "adelante", "va", "si", "sí", "elimínalo", "finalízalo"
         if norm_cancel == "dale"
             || norm_cancel == "ok"
@@ -241,8 +235,25 @@ impl ConfirmationReply {
             || norm_cancel == "si"
             || norm_cancel == "eliminalo"
             || norm_cancel == "finalizalo"
+            || norm_cancel == "si eliminalo"
+            || norm_cancel == "si, eliminalo"
+            || norm_cancel == "si finalizalo"
+            || norm_cancel == "si, finalizalo"
         {
             return Self::Ambiguous;
+        }
+
+        // Also classify any near-confirmation (e.g. unaccented or punctuated) as Ambiguous
+        let norm_words: Vec<&str> = stripped.split_whitespace().collect();
+        if norm_words.len() == 2 {
+            let w0 = norm_words[0].trim_end_matches(',');
+            let w1 = norm_words[1];
+            let is_near_si = w0 == "sí" || w0 == "si";
+            let is_near_elim = w1 == "elimínalo" || w1 == "eliminalo";
+            let is_near_fin = w1 == "finalízalo" || w1 == "finalizalo";
+            if is_near_si && (is_near_elim || is_near_fin) {
+                return Self::Ambiguous;
+            }
         }
 
         Self::Other
@@ -295,5 +306,141 @@ impl PendingDestructiveRegistry {
         let mut guard = self.entries.lock().unwrap();
         let now = Instant::now();
         guard.retain(|_, action| !action.is_expired(now));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_confirmation_reply_exact_phrases_and_rejections() {
+        // EXACT POSITIVE: must classify as ExactDelete
+        assert_eq!(
+            ConfirmationReply::classify("sí, elimínalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_eq!(
+            ConfirmationReply::classify("sí elimínalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_eq!(
+            ConfirmationReply::classify("Sí, elimínalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_eq!(
+            ConfirmationReply::classify("SÍ, ELIMÍNALO"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_eq!(
+            ConfirmationReply::classify("  sí, elimínalo  "),
+            ConfirmationReply::ExactDelete
+        );
+
+        // EXACT POSITIVE: must classify as ExactFinalize
+        assert_eq!(
+            ConfirmationReply::classify("sí, finalízalo"),
+            ConfirmationReply::ExactFinalize
+        );
+        assert_eq!(
+            ConfirmationReply::classify("sí finalízalo"),
+            ConfirmationReply::ExactFinalize
+        );
+        assert_eq!(
+            ConfirmationReply::classify("Sí, finalízalo"),
+            ConfirmationReply::ExactFinalize
+        );
+        assert_eq!(
+            ConfirmationReply::classify("SÍ, FINALÍZALO"),
+            ConfirmationReply::ExactFinalize
+        );
+
+        // NEGATIVE: Missing accent on "si" -> REJECTED from ExactDelete / ExactFinalize
+        assert_ne!(
+            ConfirmationReply::classify("si, elimínalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("si elimínalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("si, finalízalo"),
+            ConfirmationReply::ExactFinalize
+        );
+        assert_ne!(
+            ConfirmationReply::classify("si finalízalo"),
+            ConfirmationReply::ExactFinalize
+        );
+
+        // NEGATIVE: Missing accent on "eliminalo" / "finalizalo" -> REJECTED
+        assert_ne!(
+            ConfirmationReply::classify("sí, eliminalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("sí eliminalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("si, eliminalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("si eliminalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("sí, finalizalo"),
+            ConfirmationReply::ExactFinalize
+        );
+        assert_ne!(
+            ConfirmationReply::classify("sí finalizalo"),
+            ConfirmationReply::ExactFinalize
+        );
+
+        // NEGATIVE: Extra punctuation -> REJECTED
+        assert_ne!(
+            ConfirmationReply::classify("sí, elimínalo!"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("¡sí, elimínalo!"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("sí, elimínalo."),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("¿sí, elimínalo?"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("sí, finalízalo!"),
+            ConfirmationReply::ExactFinalize
+        );
+        assert_ne!(
+            ConfirmationReply::classify("¡sí, finalízalo!"),
+            ConfirmationReply::ExactFinalize
+        );
+
+        // NEGATIVE: Partial phrases
+        assert_ne!(
+            ConfirmationReply::classify("sí"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("si"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("elimínalo"),
+            ConfirmationReply::ExactDelete
+        );
+        assert_ne!(
+            ConfirmationReply::classify("finalízalo"),
+            ConfirmationReply::ExactFinalize
+        );
     }
 }

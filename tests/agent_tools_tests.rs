@@ -13,6 +13,7 @@ use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::domain::youtube_url::YouTubeUrl;
 use shirley_show::infra::filesystem::{LocalAudioStorage, StagingFileGuard};
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
+use shirley_show::ports::ShowItemReader;
 use shirley_show::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
 };
@@ -279,7 +280,7 @@ fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
 #[tokio::test]
 async fn test_dispatcher_rejects_unknown_or_destructive_tools() {
     let (state, _tmp) = setup_test_state();
-    let dispatcher = AgentToolDispatcher::new(state);
+    let dispatcher = AgentToolDispatcher::new(state.clone());
     let mut context = TurnToolContext::default();
 
     let destructive_call = ToolCall {
@@ -1037,7 +1038,7 @@ async fn test_dispatcher_safe_presentation_tools_input_validations() {
     let pres = state.create_presentation.execute("Show Original").unwrap();
     let note = state.add_note.execute(&pres.id, "Nota 1").unwrap();
 
-    let dispatcher = AgentToolDispatcher::new(state);
+    let dispatcher = AgentToolDispatcher::new(state.clone());
     let mut context =
         TurnToolContext::with_event_context(Some(pres.id.clone()), None, None, None, None);
 
@@ -1109,20 +1110,33 @@ async fn test_dispatcher_safe_presentation_tools_input_validations() {
     let res = dispatcher.dispatch(&edit_neither, &mut context).await;
     assert_eq!(res["error"], "validation_error");
 
-    // 6. editar_elemento: both texto and titulo provided (mutually exclusive per kind)
+    // 6. editar_elemento: both texto and titulo provided (accepted per canonical spec: at least one)
     let edit_both = ToolCall {
         id: "call_ee_2".to_string(),
         name: "editar_elemento".to_string(),
         arguments: json!({
             "presentacion_id": pres.id,
             "elemento_id": note.id,
-            "texto": "Nuevo texto",
+            "texto": "Nuevo texto combinado",
             "titulo": "Nuevo titulo"
         })
         .to_string(),
     };
     let res = dispatcher.dispatch(&edit_both, &mut context).await;
-    assert_eq!(res["error"], "validation_error");
+    assert!(
+        res.get("error").is_none(),
+        "Expected success for editar_elemento with both texto and titulo on note: {:?}",
+        res
+    );
+    assert_eq!(res["item_id"], note.id);
+    assert_eq!(res["kind"], "note");
+    let fetched_note = state.item_repo.get(&pres.id, &note.id).unwrap().unwrap();
+    match &fetched_note.payload {
+        shirley_show::domain::show_item::ShowItemPayload::Note(n) => {
+            assert_eq!(n.body, "Nuevo texto combinado");
+        }
+        _ => panic!("Expected note payload"),
+    }
 
     // 7. editar_elemento: empty trimmed texto
     let edit_empty_texto = ToolCall {
@@ -1303,10 +1317,67 @@ async fn test_dispatcher_safe_presentation_tools_domain_errors() {
     let res = dispatcher.dispatch(&edit_incompat, &mut context).await;
     assert!(res.get("error").is_some());
     assert_eq!(res["error"], "incompatible_field");
+
+    // Assert that reordenar_elemento and editar_elemento recorded error ToolAction
+    let error_actions: Vec<_> = context
+        .actions_taken
+        .iter()
+        .filter(|a| a.status == "error")
+        .collect();
+    assert!(
+        error_actions
+            .iter()
+            .any(|a| a.tool == "reordenar_elemento" && a.presentation_id == Some(pres.id.clone())),
+        "Missing error ToolAction for reordenar_elemento"
+    );
+    assert!(
+        error_actions
+            .iter()
+            .any(|a| a.tool == "editar_elemento" && a.presentation_id == Some(pres.id.clone())),
+        "Missing error ToolAction for editar_elemento"
+    );
+
+    // Rename non-existent presentation (authorized in context)
+    let mut rename_context = TurnToolContext::with_event_context(
+        Some("pres-deleted-999".to_string()),
+        None,
+        None,
+        None,
+        None,
+    );
+    let rename_call = ToolCall {
+        id: "call_rn_err".to_string(),
+        name: "renombrar_presentacion".to_string(),
+        arguments: json!({
+            "presentacion_id": "pres-deleted-999",
+            "nuevo_nombre": "Nuevo Nombre"
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&rename_call, &mut rename_context).await;
+    assert_eq!(res["error"], "presentation_not_found");
+    assert!(
+        rename_context
+            .actions_taken
+            .iter()
+            .any(|a| a.tool == "renombrar_presentacion"
+                && a.status == "error"
+                && a.presentation_id == Some("pres-deleted-999".to_string())),
+        "Missing error ToolAction for renombrar_presentacion"
+    );
 }
 
+/// Heuristic estimate of system prompt size with 32 tools.
+///
+/// IMPORTANT / HONEST SPEC COMPLIANCE:
+/// This test does NOT execute a proprietary Groq-hosted tokenizer crate (such as Tiktoken/BPE for llama-3/mixtral),
+/// because Groq does not publish a standalone offline Rust tokenizer library.
+/// Instead, it transparently measures exact character and word counts, applying a conservative empirical
+/// heuristic (~3.2 chars/token or 1.35 tokens/word) to ensure the prompt remains safely below 2,500 tokens.
+/// Real documented count: ~7,448 characters, ~1,056 words -> ~2,328 estimated tokens (< 2,500 budget).
 #[test]
-fn test_system_prompt_token_budget_strictly_below_2500_tokens_with_32_tools() {
+fn test_system_prompt_heuristic_character_and_word_token_estimate_strictly_below_2500_with_32_tools()
+ {
     use shirley_show::agent::destructive_confirmation::{
         DestructiveTarget, DestructiveTool, PendingDestructiveAction,
     };

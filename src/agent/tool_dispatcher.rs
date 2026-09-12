@@ -358,15 +358,35 @@ fn service_unavailable_err() -> Value {
     })
 }
 
-fn normalize_event_fecha_hora(s: &str) -> String {
+/// Valida y normaliza estrictamente la fecha/hora de un evento.
+/// Acepta el formato canónico estricto `YYYY-MM-DDTHH:MM` (ISO 8601, normalizado a RFC3339 UTC `{}:00Z`),
+/// o una cadena RFC3339 completa y válida.
+/// Cualquier otro formato es rechazado con error de validación antes de invocar los casos de uso.
+fn validate_and_normalize_event_fecha_hora(s: &str) -> Result<String, &'static str> {
     let trimmed = s.trim();
-    if chrono::DateTime::parse_from_rfc3339(trimmed).is_ok() {
-        return trimmed.to_string();
+    if trimmed.is_empty() {
+        return Err("La fecha/hora del evento no puede estar vacía");
     }
     if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M") {
-        return format!("{}:00Z", naive.format("%Y-%m-%dT%H:%M"));
+        return Ok(format!("{}:00Z", naive.format("%Y-%m-%dT%H:%M")));
     }
-    trimmed.to_string()
+    if chrono::DateTime::parse_from_rfc3339(trimmed).is_ok() {
+        return Ok(trimmed.to_string());
+    }
+    Err("Formato de fecha/hora inválido. Debe ser 'YYYY-MM-DDTHH:MM' (ISO 8601)")
+}
+
+/// Valida estrictamente la fecha de un gasto en formato canónico `YYYY-MM-DD`.
+/// Cualquier otro formato es rechazado con error de validación antes de invocar los casos de uso.
+fn validate_and_normalize_expense_fecha(s: &str) -> Result<String, &'static str> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("La fecha no puede estar vacía");
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+        return Ok(date.format("%Y-%m-%d").to_string());
+    }
+    Err("Formato de fecha inválido. Debe ser 'YYYY-MM-DD'")
 }
 
 fn format_ticket_url(public_base_url: Option<&str>, scan_token: &str) -> String {
@@ -1218,9 +1238,14 @@ impl AgentToolDispatcher {
                     Err(err_val) => return err_val,
                 };
 
+                let fecha_hora = match validate_and_normalize_event_fecha_hora(&args.fecha_hora) {
+                    Ok(f) => f,
+                    Err(msg) => return validation_err(msg),
+                };
+
                 match ticketing.create_event.execute(CreateEventInput {
                     nombre: nombre.to_string(),
-                    fecha_hora: normalize_event_fecha_hora(&args.fecha_hora),
+                    fecha_hora,
                     lugar: args.lugar.trim().to_string(),
                     tipos_de_entrada: tipos,
                 }) {
@@ -1492,7 +1517,12 @@ impl AgentToolDispatcher {
                 };
 
                 let fecha = match args.fecha.as_deref() {
-                    Some(f) if !f.trim().is_empty() => f.trim().to_string(),
+                    Some(f) if !f.trim().is_empty() => {
+                        match validate_and_normalize_expense_fecha(f) {
+                            Ok(valid) => valid,
+                            Err(msg) => return validation_err(msg),
+                        }
+                    }
                     _ => chrono::Utc::now().format("%Y-%m-%d").to_string(),
                 };
 
@@ -1754,7 +1784,17 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        context.record_action(ToolAction {
+                            tool: "renombrar_presentacion".to_string(),
+                            presentation_id: Some(pres_id.to_string()),
+                            event_id: None,
+                            summary: format!("Error al renombrar la presentación «{}»", pres_id),
+                            status: "error".to_string(),
+                            details: Some(json!({ "error": e.code(), "presentation_id": pres_id })),
+                        });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 
@@ -1824,7 +1864,17 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        context.record_action(ToolAction {
+                                tool: "reordenar_elemento".to_string(),
+                                presentation_id: Some(pres_id.to_string()),
+                                event_id: None,
+                                summary: format!("Error al reordenar el elemento «{}»", item_id),
+                                status: "error".to_string(),
+                                details: Some(json!({ "error": e.code(), "item_id": item_id, "presentation_id": pres_id })),
+                            });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 
@@ -1841,12 +1891,8 @@ impl AgentToolDispatcher {
                 if item_id.is_empty() {
                     return validation_err("El identificador del elemento no puede estar vacío");
                 }
-                if (args.texto.is_some() && args.titulo.is_some())
-                    || (args.texto.is_none() && args.titulo.is_none())
-                {
-                    return validation_err(
-                        "Debe proporcionar exactamente uno de 'texto' o 'titulo'",
-                    );
+                if args.texto.is_none() && args.titulo.is_none() {
+                    return validation_err("Debe proporcionar al menos uno de 'texto' o 'titulo'");
                 }
 
                 let title_opt = if let Some(ref t) = args.titulo {
@@ -1869,9 +1915,21 @@ impl AgentToolDispatcher {
                     None
                 };
 
+                let (exec_title, exec_body) = if title_opt.is_some() && body_opt.is_some() {
+                    match self.item_repo.get(pres_id, item_id) {
+                        Ok(Some(item)) => match item.kind() {
+                            ShowItemKind::Track => (title_opt, None),
+                            ShowItemKind::Lyrics | ShowItemKind::Note => (None, body_opt),
+                        },
+                        _ => (title_opt, body_opt),
+                    }
+                } else {
+                    (title_opt, body_opt)
+                };
+
                 match self
                     .update_show_item
-                    .execute(pres_id, item_id, title_opt, body_opt)
+                    .execute(pres_id, item_id, exec_title, exec_body)
                 {
                     Ok(item) => {
                         let kind = item.kind().as_str().to_string();
@@ -1901,7 +1959,17 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        context.record_action(ToolAction {
+                                tool: "editar_elemento".to_string(),
+                                presentation_id: Some(pres_id.to_string()),
+                                event_id: None,
+                                summary: format!("Error al editar el elemento «{}»", item_id),
+                                status: "error".to_string(),
+                                details: Some(json!({ "error": e.code(), "item_id": item_id, "presentation_id": pres_id })),
+                            });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 
@@ -1920,9 +1988,7 @@ impl AgentToolDispatcher {
                 if args.nombre.trim().is_empty() {
                     return validation_err("El nombre del evento no puede estar vacío");
                 }
-                if args.fecha_hora.trim().is_empty() {
-                    return validation_err("La fecha/hora del evento no puede estar vacía");
-                }
+
                 if args.lugar.trim().is_empty() {
                     return validation_err("El lugar del evento no puede estar vacío");
                 }
@@ -1935,10 +2001,15 @@ impl AgentToolDispatcher {
                     Err(err_val) => return err_val,
                 };
 
+                let fecha_hora = match validate_and_normalize_event_fecha_hora(&args.fecha_hora) {
+                    Ok(f) => f,
+                    Err(msg) => return validation_err(msg),
+                };
+
                 match ticketing.update_event.execute(UpdateEventInput {
                     id: evento_id.to_string(),
                     nombre: args.nombre.trim().to_string(),
-                    fecha_hora: normalize_event_fecha_hora(&args.fecha_hora),
+                    fecha_hora,
                     lugar: args.lugar.trim().to_string(),
                     tipos_de_entrada: tipos,
                 }) {
@@ -1962,7 +2033,17 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        context.record_action(ToolAction {
+                            tool: "editar_evento".to_string(),
+                            presentation_id: None,
+                            event_id: Some(evento_id.to_string()),
+                            summary: format!("Error al editar el evento «{}»", evento_id),
+                            status: "error".to_string(),
+                            details: Some(json!({ "error": e.code(), "event_id": evento_id })),
+                        });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 
@@ -1996,7 +2077,17 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        context.record_action(ToolAction {
+                            tool: "reabrir_evento".to_string(),
+                            presentation_id: None,
+                            event_id: Some(evento_id.to_string()),
+                            summary: format!("Error al reabrir el evento «{}»", evento_id),
+                            status: "error".to_string(),
+                            details: Some(json!({ "error": e.code(), "event_id": evento_id })),
+                        });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 
@@ -2020,10 +2111,10 @@ impl AgentToolDispatcher {
                 if desc.is_empty() {
                     return validation_err("La descripción no puede estar vacía");
                 }
-                let fecha = args.fecha.trim().to_string();
-                if fecha.is_empty() {
-                    return validation_err("La fecha no puede estar vacía");
-                }
+                let fecha = match validate_and_normalize_expense_fecha(&args.fecha) {
+                    Ok(f) => f,
+                    Err(msg) => return validation_err(msg),
+                };
                 match ticketing.update_expense.execute(UpdateExpenseInput {
                     id: args.gasto_id.trim().to_string(),
                     categoria,
@@ -2055,7 +2146,24 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        let gasto_id = args.gasto_id.trim();
+                        let event_id = ticketing
+                            .get_expense
+                            .execute(gasto_id)
+                            .ok()
+                            .map(|x| x.evento_id)
+                            .or_else(|| context.active_event_id.clone());
+                        context.record_action(ToolAction {
+                            tool: "editar_gasto".to_string(),
+                            presentation_id: None,
+                            event_id,
+                            summary: format!("Error al editar el gasto «{}»", gasto_id),
+                            status: "error".to_string(),
+                            details: Some(json!({ "error": e.code(), "gasto_id": gasto_id })),
+                        });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 
@@ -2118,7 +2226,26 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        let interesado_id = args.interesado_id.trim();
+                        let event_id = ticketing
+                            .get_interest
+                            .execute(interesado_id)
+                            .ok()
+                            .map(|x| x.evento_id)
+                            .or_else(|| context.active_event_id.clone());
+                        context.record_action(ToolAction {
+                            tool: "editar_interesado".to_string(),
+                            presentation_id: None,
+                            event_id,
+                            summary: format!("Error al editar el interesado «{}»", interesado_id),
+                            status: "error".to_string(),
+                            details: Some(
+                                json!({ "error": e.code(), "interesado_id": interesado_id }),
+                            ),
+                        });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 
@@ -2181,7 +2308,26 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => app_error_to_json(&e),
+                    Err(e) => {
+                        let interesado_id = args.interesado_id.trim();
+                        let event_id = ticketing
+                            .get_interest
+                            .execute(interesado_id)
+                            .ok()
+                            .map(|x| x.evento_id)
+                            .or_else(|| context.active_event_id.clone());
+                        context.record_action(ToolAction {
+                            tool: "confirmar_interesado".to_string(),
+                            presentation_id: None,
+                            event_id,
+                            summary: format!("Error al confirmar interesado «{}»", interesado_id),
+                            status: "error".to_string(),
+                            details: Some(
+                                json!({ "error": e.code(), "interesado_id": interesado_id }),
+                            ),
+                        });
+                        app_error_to_json(&e)
+                    }
                 }
             }
 

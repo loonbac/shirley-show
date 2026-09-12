@@ -958,6 +958,45 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
         .await;
     assert_eq!(res["error"], "validation_error");
 
+    // 2b. editar_evento: invalid fecha_hora (not ISO 8601 YYYY-MM-DDTHH:MM)
+    let edit_event_bad_date = ToolCall {
+        id: "call_ee_val_bad_date".to_string(),
+        name: "editar_evento".to_string(),
+        arguments: json!({
+            "evento_id": "evt-1",
+            "nombre": "Evento Edit",
+            "fecha_hora": "2026-10-10", // missing time
+            "lugar": "Teatro",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": 30.0, "capacidad": 50 }
+            ]
+        })
+        .to_string(),
+    };
+    let res = dispatcher
+        .dispatch(&edit_event_bad_date, &mut context)
+        .await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 2c. crear_evento: invalid fecha_hora
+    let create_event_bad_date = ToolCall {
+        id: "call_ce_val_bad_date".to_string(),
+        name: "crear_evento".to_string(),
+        arguments: json!({
+            "nombre": "Evento Nuevo",
+            "fecha_hora": "mañana a las 8",
+            "lugar": "Teatro",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": 30.0, "capacidad": 50 }
+            ]
+        })
+        .to_string(),
+    };
+    let res = dispatcher
+        .dispatch(&create_event_bad_date, &mut context)
+        .await;
+    assert_eq!(res["error"], "validation_error");
+
     // 3. editar_gasto: invalid closed enum categoria
     let edit_expense_bad_cat = ToolCall {
         id: "call_eg_val_1".to_string(),
@@ -991,6 +1030,24 @@ async fn test_dispatcher_safe_ticketing_tools_input_validations() {
     };
     let res = dispatcher
         .dispatch(&edit_expense_neg_monto, &mut context)
+        .await;
+    assert_eq!(res["error"], "validation_error");
+
+    // 4b. editar_gasto: invalid fecha format (must be YYYY-MM-DD)
+    let edit_expense_bad_date = ToolCall {
+        id: "call_eg_val_bad_date".to_string(),
+        name: "editar_gasto".to_string(),
+        arguments: json!({
+            "gasto_id": "exp-1",
+            "categoria": "Otros",
+            "monto": 50.0,
+            "descripcion": "Gasto fecha invalida",
+            "fecha": "2026-10-10T15:30"
+        })
+        .to_string(),
+    };
+    let res = dispatcher
+        .dispatch(&edit_expense_bad_date, &mut context)
         .await;
     assert_eq!(res["error"], "validation_error");
 
@@ -1294,7 +1351,28 @@ async fn test_dispatcher_safe_ticketing_tools_domain_errors() {
     let dispatcher = AgentToolDispatcher::new(state);
     let mut context = TurnToolContext::default();
 
-    // 1. Non-existent event on editar_evento
+    // 1a. Unauthorized event on editar_evento
+    let edit_event_unauth = ToolCall {
+        id: "call_ee_unauth".to_string(),
+        name: "editar_evento".to_string(),
+        arguments: json!({
+            "evento_id": "evt-unauth-999",
+            "nombre": "Nombre",
+            "fecha_hora": "2026-10-10T20:00",
+            "lugar": "Lugar",
+            "tipos_de_entrada": [
+                { "nombre": "General", "precio": 30.0, "capacidad": 50 }
+            ]
+        })
+        .to_string(),
+    };
+    let res = dispatcher.dispatch(&edit_event_unauth, &mut context).await;
+    assert_eq!(res["error"], "unauthorized_event_id");
+
+    // 1b. Non-existent event on editar_evento (authorized in context)
+    context
+        .known_event_ids
+        .insert("evt-non-existent-999".to_string());
     let edit_event_missing = ToolCall {
         id: "call_ee_err".to_string(),
         name: "editar_evento".to_string(),
@@ -1310,7 +1388,7 @@ async fn test_dispatcher_safe_ticketing_tools_domain_errors() {
         .to_string(),
     };
     let res = dispatcher.dispatch(&edit_event_missing, &mut context).await;
-    assert_eq!(res["error"], "unauthorized_event_id");
+    assert_eq!(res["error"], "event_not_found");
 
     // 2. Non-existent expense on editar_gasto
     let edit_exp_missing = ToolCall {
@@ -1361,6 +1439,48 @@ async fn test_dispatcher_safe_ticketing_tools_domain_errors() {
     };
     let res = dispatcher.dispatch(&conf_int_missing, &mut context).await;
     assert_eq!(res["error"], "interest_not_found");
+
+    // 5. Non-existent event on reabrir_evento
+    let reopen_missing = ToolCall {
+        id: "call_re_err".to_string(),
+        name: "reabrir_evento".to_string(),
+        arguments: json!({ "evento_id": "evt-non-existent-999" }).to_string(),
+    };
+    let res = dispatcher.dispatch(&reopen_missing, &mut context).await;
+    assert_eq!(res["error"], "event_not_found");
+
+    // Assert that all 5 safe ticketing tools recorded a ToolAction with status="error" and affected IDs
+    let error_actions: Vec<_> = context
+        .actions_taken
+        .iter()
+        .filter(|a| a.status == "error")
+        .collect();
+    assert!(
+        error_actions
+            .iter()
+            .any(|a| a.tool == "editar_evento"
+                && a.event_id == Some("evt-non-existent-999".to_string())),
+        "Missing error ToolAction for editar_evento"
+    );
+    assert!(
+        error_actions.iter().any(|a| a.tool == "reabrir_evento"
+            && a.event_id == Some("evt-non-existent-999".to_string())),
+        "Missing error ToolAction for reabrir_evento"
+    );
+    assert!(
+        error_actions.iter().any(|a| a.tool == "editar_gasto"),
+        "Missing error ToolAction for editar_gasto"
+    );
+    assert!(
+        error_actions.iter().any(|a| a.tool == "editar_interesado"),
+        "Missing error ToolAction for editar_interesado"
+    );
+    assert!(
+        error_actions
+            .iter()
+            .any(|a| a.tool == "confirmar_interesado"),
+        "Missing error ToolAction for confirmar_interesado"
+    );
 }
 
 #[tokio::test]
