@@ -4,6 +4,7 @@ import { activePresentationContextSignal } from '../../core/state/active-present
 import { onAgentRefresh } from '../../core/state/agent-refresh.js';
 import { toPresentations, toEvent, toEvents, toDoor } from '../../router/navigate.js';
 import { buildWhatsAppTicketLink } from './whatsapp.js';
+import { compartirFotoEntrada, ensureTicketPhotoStyles } from './ticket-photo.js';
 
 import {
   listEvents,
@@ -16,6 +17,7 @@ import {
   uploadEventPoster,
   getEventSummary,
   listTickets,
+  getPublicTicket,
   sellTickets,
   confirmTicketPayment,
   deleteTicket,

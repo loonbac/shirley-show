@@ -267,6 +267,7 @@ export function createEventsCatalogView(props) {
  *   onConfirmPayment: (ticketId: string) => void,
  *   onDeleteTicket: (ticket: any) => void,
  *   onTicketWhatsApp?: (ticket: any) => void,
+ *   onTicketPhoto?: (ticket: any) => void,
  *   onCreateInterest: () => void,
  *   onEditInterest: (interest: any) => void,
  *   onDeleteInterest: (interest: any) => void,
@@ -532,7 +533,7 @@ export function createEventDetailView(props) {
   }
 
   function renderEntradasTab() {
-    const { tickets = [], onSellTickets, onConfirmPayment, onDeleteTicket, onTicketWhatsApp } = state;
+    const { tickets = [], onSellTickets, onConfirmPayment, onDeleteTicket, onTicketWhatsApp, onTicketPhoto } = state;
 
     const sellBtn = createButton({
       text: '+ Vender Entradas',
@@ -579,6 +580,15 @@ export function createEventDetailView(props) {
           }).el
         : null;
 
+      const photoBtn = isPaid && typeof onTicketPhoto === 'function'
+        ? createButton({
+            text: 'Foto WA',
+            variant: 'ghost',
+            size: 'sm',
+            onClick: () => onTicketPhoto(t),
+          }).el
+        : null;
+
       const waBtn = createButton({
         text: 'WhatsApp',
         variant: 'ghost',
@@ -611,6 +621,7 @@ export function createEventDetailView(props) {
         createElement('td', {}, [checkinBadge]),
         createElement('td', { class: 'events-table-actions' }, [
           confirmBtn,
+          photoBtn,
           waBtn,
           delBtn,
         ].filter(Boolean)),

@@ -1,12 +1,13 @@
 /**
  * Public Ticket View and Controller for attendee mobile access (#/ticket/:scan_token).
  * Pure attendee interface consuming exclusively public ticket DTOs.
- * Securely conditions QR SVG rendering only upon verified payment status.
+ * Securely conditions QR SVG rendering and WhatsApp photo card sharing upon verified payment.
  */
 
-import { createElement } from '../../utils/dom/create-element.js';
-import { createButton } from '../../components/atoms/button.js';
-import * as defaultApi from './api.js';
+import { createElement } from "../../utils/dom/create-element.js";
+import { createButton } from "../../components/atoms/button.js";
+import { compartirFotoEntrada, ensureTicketPhotoStyles } from "./ticket-photo.js";
+import * as defaultApi from "./api.js";
 
 /**
  * Formats ISO date string to a human-friendly Spanish format.
@@ -14,17 +15,17 @@ import * as defaultApi from './api.js';
  * @returns {string}
  */
 export function formatPublicDateTime(isoString) {
-  if (!isoString) return '';
+  if (!isoString) return "";
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return isoString;
-    return d.toLocaleString('es-PE', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+    return d.toLocaleString("es-PE", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   } catch {
     return isoString;
@@ -52,16 +53,18 @@ export function createPublicTicketView(initialState = {}) {
     errorMessage: initialState.errorMessage || null,
   };
 
-  const container = createElement('div', { class: 'public-ticket-container' });
+  ensureTicketPhotoStyles();
+
+  const container = createElement("div", { class: "public-ticket-container" });
 
   function render() {
-    container.innerHTML = '';
+    container.innerHTML = "";
 
     if (state.isLoading) {
-      const loadingCard = createElement('div', { class: 'public-ticket-card public-ticket-loading' }, [
-        createElement('div', { class: 'public-ticket-body' }, [
-          createElement('div', { class: 'events-spinner' }),
-          createElement('p', { class: 'text-center font-bold' }, ['Cargando entrada digital...']),
+      const loadingCard = createElement("div", { class: "public-ticket-card public-ticket-loading" }, [
+        createElement("div", { class: "public-ticket-body" }, [
+          createElement("div", { class: "events-spinner" }),
+          createElement("p", { class: "text-center font-bold" }, ["Cargando entrada digital..."]),
         ]),
       ]);
       container.appendChild(loadingCard);
@@ -69,12 +72,12 @@ export function createPublicTicketView(initialState = {}) {
     }
 
     if (state.errorMessage) {
-      const errorCard = createElement('div', { class: 'public-ticket-card public-ticket-error' }, [
-        createElement('div', { class: 'public-ticket-body' }, [
-          createElement('h3', { class: 'text-danger text-center font-bold' }, ['Entrada no disponible']),
-          createElement('p', { class: 'text-center' }, [state.errorMessage]),
-          createElement('p', { class: 'text-center text-muted' }, [
-            'Verifica que el enlace sea correcto o comunícate con la organización del evento.',
+      const errorCard = createElement("div", { class: "public-ticket-card public-ticket-error" }, [
+        createElement("div", { class: "public-ticket-body" }, [
+          createElement("h3", { class: "text-danger text-center font-bold" }, ["Entrada no disponible"]),
+          createElement("p", { class: "text-center" }, [state.errorMessage]),
+          createElement("p", { class: "text-center text-muted" }, [
+            "Verifica que el enlace sea correcto o comunícate con la organización del evento.",
           ]),
         ]),
       ]);
@@ -87,49 +90,49 @@ export function createPublicTicketView(initialState = {}) {
       return;
     }
 
-    const isPaid = ticket.estado_pago === 'Pagado';
-    const hasEntered = ticket.estado_checkin === 'Ingresó';
+    const isPaid = ticket.estado_pago === "Pagado";
+    const hasEntered = ticket.estado_checkin === "Ingresó";
 
     // Header with Event and Brand
-    const headerEl = createElement('div', { class: 'public-ticket-header' }, [
-      createElement('span', { class: 'public-ticket-brand-tag' }, ['Shirley Show • Entrada Digital']),
-      createElement('h2', { class: 'public-ticket-event-title' }, [ticket.nombre_evento || 'Evento']),
-      createElement('p', { class: 'public-ticket-event-meta' }, [
-        `${formatPublicDateTime(ticket.fecha_hora)} • ${ticket.lugar || ''}`,
+    const headerEl = createElement("div", { class: "public-ticket-header" }, [
+      createElement("span", { class: "public-ticket-brand-tag" }, ["Shirley Show • Entrada Digital"]),
+      createElement("h2", { class: "public-ticket-event-title" }, [ticket.nombre_evento || "Evento"]),
+      createElement("p", { class: "public-ticket-event-meta" }, [
+        `${formatPublicDateTime(ticket.fecha_hora)} • ${ticket.lugar || ""}`,
       ]),
     ]);
 
     // Attendee and Ticket Details
-    const buyerRow = createElement('div', { class: 'public-ticket-info-row' }, [
-      createElement('span', { class: 'public-ticket-info-label' }, ['Asistente:']),
-      createElement('strong', { class: 'public-ticket-info-value' }, [ticket.nombre_comprador || '']),
+    const buyerRow = createElement("div", { class: "public-ticket-info-row" }, [
+      createElement("span", { class: "public-ticket-info-label" }, ["Asistente:"]),
+      createElement("strong", { class: "public-ticket-info-value" }, [ticket.nombre_comprador || ""]),
     ]);
 
-    const typeRow = createElement('div', { class: 'public-ticket-info-row' }, [
-      createElement('span', { class: 'public-ticket-info-label' }, ['Tipo de Entrada:']),
-      createElement('strong', { class: 'public-ticket-info-value' }, [ticket.tipo_entrada || '']),
+    const typeRow = createElement("div", { class: "public-ticket-info-row" }, [
+      createElement("span", { class: "public-ticket-info-label" }, ["Tipo de Entrada:"]),
+      createElement("strong", { class: "public-ticket-info-value" }, [ticket.tipo_entrada || ""]),
     ]);
 
-    const priceRow = createElement('div', { class: 'public-ticket-info-row' }, [
-      createElement('span', { class: 'public-ticket-info-label' }, ['Precio:']),
-      createElement('span', { class: 'public-ticket-info-value' }, [
+    const priceRow = createElement("div", { class: "public-ticket-info-row" }, [
+      createElement("span", { class: "public-ticket-info-label" }, ["Precio:"]),
+      createElement("span", { class: "public-ticket-info-value" }, [
         `S/ ${Number(ticket.precio || 0).toFixed(2)}`,
       ]),
     ]);
 
     const statusBadge = createElement(
-      'span',
-      { class: `events-badge ${isPaid ? 'events-badge-success' : 'events-badge-warning'}` },
+      "span",
+      { class: `events-badge ${isPaid ? "events-badge-success" : "events-badge-warning"}` },
       [ticket.estado_pago]
     );
 
     const checkinBadge = createElement(
-      'span',
-      { class: `events-badge ${hasEntered ? 'events-badge-active' : 'events-badge-muted'}` },
-      [hasEntered ? 'Ya Ingresó' : 'No ingresó']
+      "span",
+      { class: `events-badge ${hasEntered ? "events-badge-active" : "events-badge-muted"}` },
+      [hasEntered ? "Ya Ingresó" : "No ingresó"]
     );
 
-    const badgesRow = createElement('div', { class: 'public-ticket-badges-row' }, [
+    const badgesRow = createElement("div", { class: "public-ticket-badges-row" }, [
       statusBadge,
       checkinBadge,
     ]);
@@ -138,57 +141,118 @@ export function createPublicTicketView(initialState = {}) {
     let credentialSection = null;
 
     if (isPaid) {
-      const qrWrapper = createElement('div', { class: 'public-ticket-qr-box' });
+      const qrWrapper = createElement("div", { class: "public-ticket-qr-box" });
       if (ticket.qr_svg) {
         qrWrapper.innerHTML = ticket.qr_svg;
       }
-      const instruction = createElement('p', { class: 'public-ticket-qr-instruction' }, [
+      const instruction = createElement("p", { class: "public-ticket-qr-instruction" }, [
         hasEntered
-          ? 'Esta entrada ya fue registrada en la puerta del evento.'
-          : 'Presenta este código QR en la puerta del evento para tu ingreso.',
+          ? "Esta entrada ya fue registrada en la puerta del evento."
+          : "Presenta este código QR en la puerta del evento para tu ingreso.",
       ]);
       qrWrapper.appendChild(instruction);
       credentialSection = qrWrapper;
     } else {
       // Pending status: NEVER render QR box or SVG
-      credentialSection = createElement('div', { class: 'public-ticket-pending-banner' }, [
-        createElement('h4', { class: 'public-ticket-pending-title' }, ['⚠️ Reserva Pendiente de Pago']),
-        createElement('p', { class: 'public-ticket-pending-msg' }, [
+      credentialSection = createElement("div", { class: "public-ticket-pending-banner" }, [
+        createElement("h4", { class: "public-ticket-pending-title" }, ["⚠️ Reserva Pendiente de Pago"]),
+        createElement("p", { class: "public-ticket-pending-msg" }, [
           `Esta entrada está reservada por S/ ${Number(ticket.precio || 0).toFixed(2)}. `,
-          'Para habilitar tu código QR de acceso, realiza el pago coordinado (Yape o Efectivo) ',
-          'con el organizador para su confirmación.',
+          "Para habilitar tu código QR de acceso, realiza el pago coordinado (Yape o Efectivo) ",
+          "con el organizador para su confirmación.",
         ]),
       ]);
     }
 
-    // Share Button
+    // WhatsApp Photo Card Button (primary, only if Pagado)
+    let sendPhotoBtn = null;
+    let noticeEl = null;
+
+    if (isPaid) {
+      noticeEl = createElement("p", { class: "ticket-photo-notice", style: "display: none;" });
+
+      sendPhotoBtn = createButton({
+        text: "Enviar foto por WhatsApp",
+        variant: "primary",
+        fullWidth: true,
+        onClick: async () => {
+          if (sendPhotoBtn) {
+            sendPhotoBtn.update({ text: "Creando foto…", disabled: true });
+          }
+          if (noticeEl) {
+            noticeEl.style.display = "none";
+            noticeEl.textContent = "";
+          }
+          try {
+            await compartirFotoEntrada(
+              ticket,
+              {
+                nombre: ticket.nombre_evento,
+                fecha_hora: ticket.fecha_hora,
+                lugar: ticket.lugar,
+              },
+              {
+                onNotice: (msg) => {
+                  if (noticeEl) {
+                    noticeEl.textContent = msg;
+                    noticeEl.style.display = "block";
+                  }
+                },
+              }
+            );
+          } catch (err) {
+            if (err && err.name === "AbortError") return;
+            console.error("Error al compartir foto de la entrada:", err);
+            if (noticeEl) {
+              noticeEl.textContent = "No se pudo crear o compartir la foto de la entrada.";
+              noticeEl.style.display = "block";
+            }
+          } finally {
+            if (sendPhotoBtn) {
+              sendPhotoBtn.update({ text: "Enviar foto por WhatsApp", disabled: false });
+            }
+          }
+        },
+      });
+    }
+
+    // Secondary link share action
     const shareBtn = createButton({
-      text: 'Compartir Entrada',
-      variant: 'secondary',
+      text: isPaid ? "Compartir enlace" : "Compartir Entrada",
+      variant: "secondary",
+      fullWidth: true,
       onClick: () => {
-        if (typeof navigator !== 'undefined' && navigator.share) {
+        if (typeof navigator !== "undefined" && navigator.share) {
           navigator.share({
             title: ticket.nombre_evento,
             text: `Entrada para ${ticket.nombre_evento} - ${ticket.nombre_comprador}`,
             url: window.location.href,
           }).catch(() => {});
-        } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        } else if (typeof navigator !== "undefined" && navigator.clipboard) {
           navigator.clipboard.writeText(window.location.href);
-          alert('Enlace copiado al portapapeles');
+          alert("Enlace copiado al portapapeles");
         }
       },
     });
 
-    const bodyEl = createElement('div', { class: 'public-ticket-body' }, [
+    const actionsChildren = [
+      sendPhotoBtn ? sendPhotoBtn.el : null,
+      shareBtn.el,
+      noticeEl,
+    ].filter(Boolean);
+
+    const actionsEl = createElement("div", { class: "public-ticket-actions" }, actionsChildren);
+
+    const bodyEl = createElement("div", { class: "public-ticket-body" }, [
       buyerRow,
       typeRow,
       priceRow,
       badgesRow,
       credentialSection,
-      createElement('div', { class: 'public-ticket-actions' }, [shareBtn.el]),
+      actionsEl,
     ]);
 
-    const cardEl = createElement('div', { class: 'public-ticket-card' }, [
+    const cardEl = createElement("div", { class: "public-ticket-card" }, [
       headerEl,
       bodyEl,
     ]);
@@ -204,7 +268,7 @@ export function createPublicTicketView(initialState = {}) {
   }
 
   function destroy() {
-    container.innerHTML = '';
+    container.innerHTML = "";
   }
 
   return { el: container, update, destroy };
@@ -215,8 +279,8 @@ export function createPublicTicketView(initialState = {}) {
  * @returns {{ el: HTMLElement }}
  */
 export function createPublicTopbar() {
-  const brandTitle = createElement('span', { class: 'public-topbar-title' }, ['Shirley Show']);
-  const el = createElement('header', { class: 'public-topbar' }, [brandTitle]);
+  const brandTitle = createElement("span", { class: "public-topbar-title" }, ["Shirley Show"]);
+  const el = createElement("header", { class: "public-topbar" }, [brandTitle]);
   return { el };
 }
 
@@ -237,7 +301,7 @@ export function createPublicTopbar() {
 export function createPublicTicketController(deps = {}) {
   const { scanToken, api = defaultApi, audioController } = deps;
 
-  if (audioController && typeof audioController.stop === 'function') {
+  if (audioController && typeof audioController.stop === "function") {
     audioController.stop();
   }
 
@@ -247,9 +311,13 @@ export function createPublicTicketController(deps = {}) {
   async function loadTicket() {
     try {
       const ticket = await api.getPublicTicket(scanToken);
-      view.update({ ticket, isLoading: false, errorMessage: null });
+      view.update({
+        ticket: { ...ticket, scan_token: scanToken },
+        isLoading: false,
+        errorMessage: null,
+      });
     } catch (err) {
-      const message = (err && err.message) || 'No se pudo cargar la entrada solicitada.';
+      const message = (err && err.message) || "No se pudo cargar la entrada solicitada.";
       view.update({ ticket: null, isLoading: false, errorMessage: message });
     }
   }
