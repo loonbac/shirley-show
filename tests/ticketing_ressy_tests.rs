@@ -136,10 +136,10 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
                 let required = params["required"]
                     .as_array()
                     .expect("vender_entradas required");
-                assert_eq!(required.len(), 7);
+                assert_eq!(required.len(), 6);
                 assert!(required.contains(&json!("evento_id")));
                 assert!(required.contains(&json!("nombre_comprador")));
-                assert!(required.contains(&json!("contacto")));
+                assert!(!required.contains(&json!("contacto")));
                 assert!(required.contains(&json!("tipo_entrada")));
                 assert!(required.contains(&json!("cantidad")));
                 assert!(required.contains(&json!("medio_pago")));
@@ -541,7 +541,6 @@ async fn test_dispatcher_eight_ticketing_tools_full_operational_lifecycle() {
         arguments: json!({
             "evento_id": event_id,
             "nombre_comprador": "Lucía Ramos",
-            "contacto": "987654321",
             "tipo_entrada": "VIP",
             "cantidad": 1,
             "medio_pago": "Efectivo",
@@ -552,6 +551,7 @@ async fn test_dispatcher_eight_ticketing_tools_full_operational_lifecycle() {
     let pending_res = dispatcher.dispatch(&sell_pending_call, &mut context).await;
     let pending_ticket = &pending_res["entradas"][0];
     assert_eq!(pending_ticket["estado_pago"], "Pendiente");
+    assert_eq!(pending_ticket["whatsapp_url"], serde_json::Value::Null);
     let pending_id = pending_ticket["id"].as_str().unwrap().to_string();
 
     // 5. confirmar_pago_entrada

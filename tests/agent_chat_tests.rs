@@ -1443,6 +1443,11 @@ fn test_system_prompt_interesado_promotora_y_ventas_por_persona() {
         "el prompt debe vender una llamada por persona ante varios nombres"
     );
     assert!(
+        SHIRLEY_SYSTEM_PROMPT.contains("contacto/teléfono es OPCIONAL")
+            && SHIRLEY_SYSTEM_PROMPT.contains("NO lo preguntes"),
+        "el prompt no debe exigir teléfono para vender entradas"
+    );
+    assert!(
         SHIRLEY_SYSTEM_PROMPT.contains("como promotora"),
         "el prompt debe manejar el rol de promotora"
     );
@@ -2470,7 +2475,7 @@ async fn test_agent_chat_fuzzy_matching_sesion_2_executes_sale_without_wasting_t
     let create_res = dispatcher.dispatch(&create_call, &mut setup_ctx).await;
     let event_id = create_res["id"].as_str().unwrap().to_string();
 
-    // Model attempts to call vender_entradas with substring "sesión 2" instead of UUID
+    // Model omits the optional phone and uses substring "sesión 2" instead of UUID.
     let provider = Arc::new(StubChatProvider::new(vec![
         Ok(CompletionResponse {
             content: None,
@@ -2480,7 +2485,6 @@ async fn test_agent_chat_fuzzy_matching_sesion_2_executes_sale_without_wasting_t
                 arguments: json!({
                     "evento_id": "sesión 2",
                     "nombre_comprador": "Pedro Ruiz",
-                    "contacto": "999111222",
                     "tipo_entrada": "General",
                     "cantidad": 1,
                     "medio_pago": "Yape",

@@ -199,7 +199,7 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "vender_entradas".to_string(),
-            description: "Vende entradas.".to_string(),
+            description: "Vende entradas. El contacto es opcional: omítelo si la usuaria no proporciona teléfono y no lo solicites solo para completar la venta.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -220,7 +220,6 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "required": [
                     "evento_id",
                     "nombre_comprador",
-                    "contacto",
                     "tipo_entrada",
                     "cantidad",
                     "medio_pago",

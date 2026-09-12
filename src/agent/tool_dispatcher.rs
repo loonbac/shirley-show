@@ -123,7 +123,8 @@ struct ListarEventosArgs {
 struct VenderEntradasArgs {
     evento_id: String,
     nombre_comprador: String,
-    contacto: String,
+    #[serde(default)]
+    contacto: Option<String>,
     tipo_entrada: String,
     cantidad: u32,
     medio_pago: String,
@@ -1583,7 +1584,12 @@ impl AgentToolDispatcher {
                     evento_id: evento_id.to_string(),
                     interesado_id: None,
                     nombre_comprador: args.nombre_comprador.trim().to_string(),
-                    contacto: args.contacto.trim().to_string(),
+                    contacto: args
+                        .contacto
+                        .as_deref()
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
                     tipo_entrada: args.tipo_entrada.trim().to_string(),
                     cantidad: args.cantidad,
                     medio_pago,
