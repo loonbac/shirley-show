@@ -82,6 +82,32 @@ impl AppError {
             message: message.into(),
         }
     }
+
+    pub fn code(&self) -> &str {
+        match self {
+            Self::BadRequest { code, .. } => code,
+            Self::Validation { code, .. } => code,
+            Self::NotFound { code, .. } => code,
+            Self::Conflict { code, .. } => code,
+            Self::PayloadTooLarge { code, .. } => code,
+            Self::UnsupportedMediaType { code, .. } => code,
+            Self::Database(_) => "database_error",
+            Self::Internal(_) => "internal_error",
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::BadRequest { message, .. } => message,
+            Self::Validation { message, .. } => message,
+            Self::NotFound { message, .. } => message,
+            Self::Conflict { message, .. } => message,
+            Self::PayloadTooLarge { message, .. } => message,
+            Self::UnsupportedMediaType { message, .. } => message,
+            Self::Database(msg) => msg,
+            Self::Internal(msg) => msg,
+        }
+    }
 }
 
 #[derive(Serialize)]

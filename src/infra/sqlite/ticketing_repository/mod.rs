@@ -4,6 +4,8 @@ pub mod interests;
 pub mod summary;
 pub mod tickets;
 
+pub use tickets::DEFAULT_TICKETS_LIMIT;
+
 use crate::infra::sqlite::connect::DbPool;
 
 #[derive(Clone)]

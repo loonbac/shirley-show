@@ -26,6 +26,9 @@ const { parseRoute } = await import(pathToFileURL(routerModulePath).href);
 const navigateModulePath = resolve(process.cwd(), 'frontend/js/router/navigate.js');
 const { toPresentations, toEvents, toEvent } = await import(pathToFileURL(navigateModulePath).href);
 
+const controllersModulePath = resolve(process.cwd(), 'frontend/js/modules/events/controllers.js');
+const { createEventsCatalogController, createEventDetailController } = await import(pathToFileURL(controllersModulePath).href);
+
 console.log('Running Events UI and Integration Tests...');
 
 // 1. App Topbar with Section Selector (Repertorios | Eventos)
@@ -423,6 +426,218 @@ console.log('Running Events UI and Integration Tests...');
 
   // Transition back to #/presentations
   assert.equal(parseRoute('#/presentations').view, 'presentations');
+}
+
+// 6. Controllers Integration with Real Axum Envelopes ({eventos}, {evento}, {resumen}, {entradas}, {interesados}, {gastos})
+{
+  const realEvent = {
+    id: 'evt-real-1',
+    nombre: 'Noche Real Criolla',
+    lugar: 'Barranco Bar',
+    fecha_hora: '2026-11-20T21:00:00Z',
+    finalizado: 0,
+    imagen: null,
+    tipos_de_entrada: [
+      { nombre: 'General', precio: 35.0, capacidad: 60 },
+    ],
+  };
+
+  const realSummaryEnvelope = {
+    resumen: {
+      cobrado: 350.0,
+      pendiente: 105.0,
+      total_proyectado: 455.0,
+      gastos: 200.0,
+      ganancia_neta: 150.0,
+      capacidad_total: 60,
+      entradas_emitidas: 13,
+      aforo_proyectado: 15,
+      desglose_metodos_pago: {
+        yape_cobrado: 350.0,
+        yape_pendiente: 0.0,
+        yape_entradas: 10,
+        efectivo_cobrado: 0.0,
+        efectivo_pendiente: 105.0,
+        efectivo_entradas: 3,
+        cortesia_entradas: 0,
+      },
+      desglose_gastos: {
+        local_alquiler: 120.0,
+        sonido_luces: 80.0,
+        musicos_personal: 0.0,
+        publicidad_marketing: 0.0,
+        bebidas_catering: 0.0,
+        transporte: 0.0,
+        otros: 0.0,
+      },
+    },
+  };
+
+  const realTicketsEnvelope = {
+    entradas: [
+      {
+        id: 't-real-1',
+        evento_id: 'evt-real-1',
+        nombre_comprador: 'Rosa Maria',
+        contacto: '988111222',
+        tipo_entrada: 'General',
+        precio: 35.0,
+        medio_pago: 'Yape',
+        estado_pago: 'Pagado',
+        scan_token: 'st_tok_1',
+        ticket_path: '#/ticket/st_tok_1',
+        estado_checkin: 'No ingresó',
+        hora_ingreso: null,
+        qr_svg: '<svg>qr</svg>',
+      },
+    ],
+  };
+
+  const realInterestsEnvelope = {
+    interesados: [
+      {
+        id: 'int-real-1',
+        evento_id: 'evt-real-1',
+        nombre: 'Carlos Perez',
+        contacto: '999111333',
+        canal: 'WhatsApp',
+        promotora: 'Shirley',
+        personas: 2,
+        estado: 'Pendiente',
+        convertido_at: null,
+      },
+    ],
+  };
+
+  const realExpensesEnvelope = {
+    gastos: [
+      {
+        id: 'exp-real-1',
+        evento_id: 'evt-real-1',
+        categoria: 'Sonido/Luces',
+        monto: 80.0,
+        descripcion: 'Microfonia',
+        fecha: '2026-11-19',
+      },
+    ],
+  };
+
+  globalThis.fetch = async (url, opts = {}) => {
+    const urlStr = String(url);
+    const method = (opts.method || 'GET').toUpperCase();
+
+    if (urlStr.includes('/api/eventos?incluir_finalizados=true')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ eventos: [realEvent] }),
+      };
+    }
+
+    if (urlStr.endsWith('/api/eventos/evt-real-1/resumen')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => realSummaryEnvelope,
+      };
+    }
+
+    if (urlStr.endsWith('/api/eventos/evt-real-1/entradas') && method === 'GET') {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => realTicketsEnvelope,
+      };
+    }
+
+    if (urlStr.endsWith('/api/eventos/evt-real-1/entradas') && method === 'POST') {
+      return {
+        ok: true,
+        status: 201,
+        headers: { get: () => 'application/json' },
+        json: async () => ({
+          entradas: [
+            {
+              id: 't-issued-1',
+              tipo_entrada: 'General',
+              precio: 35.0,
+              nombre_comprador: 'Nuevo Comprador',
+              contacto: '912345678',
+              scan_token: 'st_tok_new',
+              ticket_path: '#/ticket/st_tok_new',
+              medio_pago: 'Yape',
+              estado_pago: 'Pagado',
+            },
+          ],
+        }),
+      };
+    }
+
+    if (urlStr.endsWith('/api/eventos/evt-real-1/interesados')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => realInterestsEnvelope,
+      };
+    }
+
+    if (urlStr.endsWith('/api/eventos/evt-real-1/gastos')) {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => realExpensesEnvelope,
+      };
+    }
+
+    if (urlStr.endsWith('/api/eventos/evt-real-1') && method === 'GET') {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ evento: realEvent }),
+      };
+    }
+
+    return {
+      ok: false,
+      status: 404,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ error: 'not found' }),
+    };
+  };
+
+  // 6.a Test Events Catalog Controller with { eventos: [...] } envelope
+  const catalogCtrl = createEventsCatalogController();
+  await new Promise((r) => setTimeout(r, 50));
+
+  const catalogCards = catalogCtrl.viewEl.querySelectorAll('.events-card');
+  assert.equal(catalogCards.length, 1, 'Catalog must render 1 card from real { eventos: [...] } envelope');
+  assert.ok(catalogCards[0].textContent.includes('Noche Real Criolla'));
+  catalogCtrl.destroy();
+
+  // 6.b Test Event Detail Controller with real envelopes
+  const detailCtrl = createEventDetailController({ eventId: 'evt-real-1' });
+  await new Promise((r) => setTimeout(r, 50));
+
+  assert.ok(detailCtrl.topbarEl.textContent.includes('Noche Real Criolla'), 'Topbar receives event.nombre from real { evento } envelope');
+
+  // Verify 7 metrics rendered from normalized { resumen: ... }
+  assert.ok(detailCtrl.viewEl.textContent.includes('S/ 350.00'), 'Cobrado metric rendered from envelope');
+  assert.ok(detailCtrl.viewEl.textContent.includes('S/ 105.00'), 'Pendiente metric rendered from envelope');
+  assert.ok(detailCtrl.viewEl.textContent.includes('S/ 150.00'), 'Ganancia neta rendered from envelope');
+
+  // Verify breakdown tables populated from desglose_metodos_pago and desglose_gastos
+  assert.ok(detailCtrl.viewEl.textContent.includes('Desglose por Medio de Pago'));
+  assert.ok(detailCtrl.viewEl.textContent.includes('Desglose de Gastos por Categoría'));
+  assert.ok(detailCtrl.viewEl.textContent.includes('Yape'));
+  assert.ok(detailCtrl.viewEl.textContent.includes('Sonido/Luces'));
+
+  detailCtrl.destroy();
 }
 
 console.log('All Events UI and Integration Tests passed cleanly!');

@@ -54,7 +54,7 @@ async fn test_events_api_crud_lifecycle() {
         ))
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
     // 3. POST /api/eventos with valid payload -> 201 Created
     let req = Request::builder()
@@ -235,7 +235,7 @@ async fn test_expenses_and_resumen_api() {
         ))
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
     // 3. POST /api/eventos/{id}/gastos valid -> 201
     let req = Request::builder()
@@ -338,6 +338,46 @@ async fn test_tickets_and_checkin_api_endpoints() {
     assert_eq!(res.status(), StatusCode::CREATED);
     let event_json = body_to_json(res.into_body()).await;
     let event_id = event_json["evento"]["id"].as_str().unwrap();
+
+    // 2a. Reject sale with quantity 0 -> 400 Bad Request
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/entradas"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre_comprador": "Juan Perez",
+                "contacto": "987000111",
+                "tipo_entrada": "General",
+                "cantidad": 0,
+                "medio_pago": "Yape",
+                "estado_pago": "Pagado"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // 2b. Reject sale with capacity exceeded -> 400 Bad Request
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/eventos/{event_id}/entradas"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "nombre_comprador": "Juan Perez",
+                "contacto": "987000111",
+                "tipo_entrada": "General",
+                "cantidad": 100,
+                "medio_pago": "Yape",
+                "estado_pago": "Pagado"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
     // 2. POST /api/eventos/{id}/entradas -> sell 2 General paid tickets
     let req = Request::builder()

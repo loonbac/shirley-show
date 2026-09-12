@@ -1,9 +1,17 @@
 use tempfile::NamedTempFile;
 
-use shirley_show::domain::ticketing::{Event, Expense, ExpenseCategory, Money, TicketType};
-use shirley_show::infra::sqlite::ticketing_repository::SqliteTicketingRepository;
+use shirley_show::domain::ticketing::ticket::{PaymentMethod, PaymentStatus};
+use shirley_show::domain::ticketing::{
+    Event, Expense, ExpenseCategory, Money, QrSecret, ScanToken, TicketType,
+};
+use shirley_show::infra::sqlite::ticketing_repository::{
+    DEFAULT_TICKETS_LIMIT, SqliteTicketingRepository,
+};
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
-use shirley_show::ports::ticketing::{EventRepository, EventSummaryReader, ExpenseRepository};
+use shirley_show::ports::ticketing::{
+    EventRepository, EventSummaryReader, ExpenseRepository, GeneratedCredentials, SellTicketsInput,
+    TicketRepository, TicketingTransactions,
+};
 
 #[test]
 fn test_event_repository_crud_and_status_toggle() {
@@ -251,4 +259,127 @@ fn test_event_summary_reader() {
     assert_eq!(sum.categorias_gasto.local_alquiler.to_soles(), 500.0);
     assert_eq!(sum.categorias_gasto.sonido_luces.to_soles(), 300.0);
     assert_eq!(sum.categorias_gasto.transporte.to_soles(), 0.0);
+}
+
+#[test]
+fn test_list_tickets_is_bounded_by_default_limit() {
+    assert_eq!(DEFAULT_TICKETS_LIMIT, 500);
+
+    let temp_file = NamedTempFile::new().expect("temp file");
+    let pool = init_pool(temp_file.path().to_str().unwrap()).unwrap();
+    migrate_pool(&pool).unwrap();
+
+    let repo = SqliteTicketingRepository::new(pool);
+    let list = repo
+        .list_tickets("evt-non-existent", None, None, None)
+        .unwrap();
+    assert!(list.is_empty());
+}
+
+#[test]
+fn test_update_event_preserves_sold_types_and_capacity() {
+    let temp_file = NamedTempFile::new().expect("temp file");
+    let pool = init_pool(temp_file.path().to_str().unwrap()).unwrap();
+    migrate_pool(&pool).unwrap();
+
+    let repo = SqliteTicketingRepository::new(pool.clone());
+
+    // 1. Create event with General (cap 50) and VIP (cap 20)
+    let event = Event::new(
+        "evt-c4".to_string(),
+        "Concierto Invariante".to_string(),
+        "2026-10-15T21:00:00Z".to_string(),
+        "Teatro".to_string(),
+        vec![
+            TicketType::new("General", Money::from_soles(30.0).unwrap(), 50).unwrap(),
+            TicketType::new("VIP", Money::from_soles(60.0).unwrap(), 20).unwrap(),
+        ],
+        false,
+        None,
+        "2026-10-01T00:00:00Z".to_string(),
+        "2026-10-01T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    repo.create_event(&event).unwrap();
+
+    // 2. Issue 5 tickets of type "General"
+    let creds: Vec<_> = (0..5)
+        .map(|i| GeneratedCredentials {
+            id: format!("tix-c4-{i}"),
+            scan_token: ScanToken::new(format!("st_{:064x}", i + 1)).unwrap(),
+            qr_secret: QrSecret::new(format!("{:032x}", i + 1)).unwrap(),
+        })
+        .collect();
+
+    repo.issue_sale(
+        &SellTicketsInput {
+            evento_id: "evt-c4".to_string(),
+            interesado_id: None,
+            nombre_comprador: "Comprador C4".to_string(),
+            contacto: "999888777".to_string(),
+            tipo_entrada: "General".to_string(),
+            cantidad: 5,
+            medio_pago: PaymentMethod::Yape,
+            estado_pago: PaymentStatus::Pagado,
+        },
+        creds,
+    )
+    .expect("issue sale");
+
+    // 3. Attempt to update event removing "General" (only keeping VIP) -> MUST FAIL
+    let bad_update_remove = Event::new(
+        "evt-c4".to_string(),
+        "Concierto Invariante".to_string(),
+        "2026-10-15T21:00:00Z".to_string(),
+        "Teatro".to_string(),
+        vec![TicketType::new("VIP", Money::from_soles(60.0).unwrap(), 20).unwrap()],
+        false,
+        None,
+        "2026-10-01T00:00:00Z".to_string(),
+        "2026-10-02T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    let err_remove = repo.update_event(&bad_update_remove);
+    assert!(err_remove.is_err());
+    let err_val = err_remove.unwrap_err();
+    assert_eq!(err_val.code(), "cannot_remove_sold_ticket_type");
+
+    // 4. Attempt to update event reducing General capacity below emitted (cap 3 < 5) -> MUST FAIL
+    let bad_update_cap = Event::new(
+        "evt-c4".to_string(),
+        "Concierto Invariante".to_string(),
+        "2026-10-15T21:00:00Z".to_string(),
+        "Teatro".to_string(),
+        vec![
+            TicketType::new("General", Money::from_soles(30.0).unwrap(), 3).unwrap(),
+            TicketType::new("VIP", Money::from_soles(60.0).unwrap(), 20).unwrap(),
+        ],
+        false,
+        None,
+        "2026-10-01T00:00:00Z".to_string(),
+        "2026-10-02T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    let err_cap = repo.update_event(&bad_update_cap);
+    assert!(err_cap.is_err());
+    let err_val2 = err_cap.unwrap_err();
+    assert_eq!(err_val2.code(), "capacity_below_emitted");
+
+    // 5. Valid update preserving General with capacity >= 5 -> MUST SUCCEED
+    let good_update = Event::new(
+        "evt-c4".to_string(),
+        "Concierto Invariante Renombrado".to_string(),
+        "2026-10-15T21:00:00Z".to_string(),
+        "Teatro".to_string(),
+        vec![
+            TicketType::new("General", Money::from_soles(35.0).unwrap(), 55).unwrap(),
+            TicketType::new("VIP", Money::from_soles(70.0).unwrap(), 25).unwrap(),
+        ],
+        false,
+        None,
+        "2026-10-01T00:00:00Z".to_string(),
+        "2026-10-02T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    assert!(repo.update_event(&good_update).is_ok());
 }

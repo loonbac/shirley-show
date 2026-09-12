@@ -103,7 +103,13 @@ export function createChatState(initialState = {}, options = {}) {
   function setRouteContext(context) {
     state = {
       ...state,
-      activeContext: context ? { id: context.id, title: context.title } : null,
+      activeContext: context
+        ? {
+            id: context.id,
+            title: context.title,
+            ...(context.type ? { type: context.type } : {}),
+          }
+        : null,
     };
     notify();
   }

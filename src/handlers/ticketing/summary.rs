@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::handlers::ticketing::dto::{EventSummaryDto, EventSummaryResponse};
+use crate::handlers::ticketing::ticketing_error_response;
 use crate::state::AppState;
 
 pub async fn get_summary(State(state): State<AppState>, Path(id): Path<String>) -> Response {
@@ -15,6 +16,6 @@ pub async fn get_summary(State(state): State<AppState>, Path(id): Path<String>) 
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }

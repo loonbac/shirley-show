@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use serde_json::json;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 use shirley_show::agent::tool_dispatcher::AgentToolDispatcher;
@@ -58,7 +58,11 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
 
     for tool in &tools {
         let params = &tool.parameters;
-        assert_eq!(params["type"], "object", "Tool {} type must be object", tool.name);
+        assert_eq!(
+            params["type"], "object",
+            "Tool {} type must be object",
+            tool.name
+        );
         assert_eq!(
             params["additionalProperties"], false,
             "Tool {} must disallow additionalProperties",
@@ -67,7 +71,9 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
 
         match tool.name.as_str() {
             "crear_evento" => {
-                let required = params["required"].as_array().expect("crear_evento required");
+                let required = params["required"]
+                    .as_array()
+                    .expect("crear_evento required");
                 assert!(required.contains(&json!("nombre")));
                 assert!(required.contains(&json!("fecha_hora")));
                 assert!(required.contains(&json!("lugar")));
@@ -93,10 +99,16 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
             "listar_eventos" => {
                 let props = params["properties"].as_object().unwrap();
                 assert_eq!(props["incluir_finalizados"]["type"], "boolean");
-                assert!(params.get("required").is_none_or(|r| r.as_array().unwrap().is_empty()));
+                assert!(
+                    params
+                        .get("required")
+                        .is_none_or(|r| r.as_array().unwrap().is_empty())
+                );
             }
             "vender_entradas" => {
-                let required = params["required"].as_array().expect("vender_entradas required");
+                let required = params["required"]
+                    .as_array()
+                    .expect("vender_entradas required");
                 assert_eq!(required.len(), 7);
                 assert!(required.contains(&json!("evento_id")));
                 assert!(required.contains(&json!("nombre_comprador")));
@@ -120,14 +132,18 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
                 assert!(estado_enum.contains(&json!("Pendiente")));
             }
             "confirmar_pago_entrada" => {
-                let required = params["required"].as_array().expect("confirmar_pago required");
+                let required = params["required"]
+                    .as_array()
+                    .expect("confirmar_pago required");
                 assert_eq!(required.len(), 1);
                 assert!(required.contains(&json!("entrada_id")));
                 let props = params["properties"].as_object().unwrap();
                 assert_eq!(props["entrada_id"]["type"], "string");
             }
             "registrar_gasto" => {
-                let required = params["required"].as_array().expect("registrar_gasto required");
+                let required = params["required"]
+                    .as_array()
+                    .expect("registrar_gasto required");
                 assert!(required.contains(&json!("evento_id")));
                 assert!(required.contains(&json!("categoria")));
                 assert!(required.contains(&json!("monto")));
@@ -148,7 +164,9 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
                 assert!(cat_enum.contains(&json!("Otros")));
             }
             "resumen_evento" => {
-                let required = params["required"].as_array().expect("resumen_evento required");
+                let required = params["required"]
+                    .as_array()
+                    .expect("resumen_evento required");
                 assert_eq!(required.len(), 1);
                 assert!(required.contains(&json!("evento_id")));
                 let props = params["properties"].as_object().unwrap();
@@ -171,7 +189,9 @@ fn test_tool_schemas_strictly_sixteen_tools_with_exact_ticketing_schemas() {
                 assert_eq!(props["personas"]["minimum"], 1);
             }
             "checkin_entrada" => {
-                let required = params["required"].as_array().expect("checkin_entrada required");
+                let required = params["required"]
+                    .as_array()
+                    .expect("checkin_entrada required");
                 assert_eq!(required.len(), 2);
                 assert!(required.contains(&json!("evento_id")));
                 assert!(required.contains(&json!("codigo")));
@@ -299,7 +319,10 @@ async fn test_dispatcher_eight_ticketing_tools_full_operational_lifecycle() {
         .to_string(),
     };
     let create_res = dispatcher.dispatch(&create_call, &mut context).await;
-    assert!(create_res.get("id").is_some(), "crear_evento failed: {create_res}");
+    assert!(
+        create_res.get("id").is_some(),
+        "crear_evento failed: {create_res}"
+    );
     let event_id = create_res["id"].as_str().unwrap().to_string();
     assert_eq!(create_res["nombre"], "Shirley Acústico 2026");
     assert!(context.known_event_ids.contains(&event_id));
@@ -342,7 +365,11 @@ async fn test_dispatcher_eight_ticketing_tools_full_operational_lifecycle() {
         assert_eq!(ticket_url, format!("https://shirley.show/#/ticket/{token}"));
         let wa = entrada["whatsapp_url"].as_str().unwrap();
         assert!(wa.starts_with("https://wa.me/51998877665?text="));
-        assert!(context.known_ticket_ids.contains(entrada["id"].as_str().unwrap()));
+        assert!(
+            context
+                .known_ticket_ids
+                .contains(entrada["id"].as_str().unwrap())
+        );
     }
 
     // 4. vender_entradas (Pendiente) para luego confirmar
@@ -469,7 +496,9 @@ async fn test_dispatcher_eight_ticketing_tools_full_operational_lifecycle() {
         })
         .to_string(),
     };
-    let checkin_again_res = dispatcher.dispatch(&checkin_again_call, &mut context_turn2).await;
+    let checkin_again_res = dispatcher
+        .dispatch(&checkin_again_call, &mut context_turn2)
+        .await;
     assert_eq!(checkin_again_res["resultado"], "Ya Usada");
 
     // Invalid QR code returns Invalida
@@ -482,7 +511,9 @@ async fn test_dispatcher_eight_ticketing_tools_full_operational_lifecycle() {
         })
         .to_string(),
     };
-    let invalid_res = dispatcher.dispatch(&invalid_checkin_call, &mut context).await;
+    let invalid_res = dispatcher
+        .dispatch(&invalid_checkin_call, &mut context)
+        .await;
     assert_eq!(invalid_res["resultado"], "Invalida");
 }
 
@@ -534,9 +565,17 @@ async fn test_dispatcher_triangulate_deduplication_by_call_id() {
     // Verify DB only has 1 ticket
     let ticket_count: i64 = {
         let conn = state.pool.get().unwrap();
-        conn.query_row("SELECT COUNT(*) FROM entradas WHERE evento_id = ?1", [event_id], |r| r.get(0)).unwrap()
+        conn.query_row(
+            "SELECT COUNT(*) FROM entradas WHERE evento_id = ?1",
+            [event_id],
+            |r| r.get(0),
+        )
+        .unwrap()
     };
-    assert_eq!(ticket_count, 1, "Must NOT emit duplicate tickets on repeated call.id");
+    assert_eq!(
+        ticket_count, 1,
+        "Must NOT emit duplicate tickets on repeated call.id"
+    );
 
     // 2. Read tool: duplicate call.id returns cached value
     let list_call = ToolCall {
@@ -593,7 +632,10 @@ async fn test_dispatcher_triangulate_courtesy_forced_zero_price_and_pagado() {
 
     for e in entradas {
         assert_eq!(e["precio"], 0.0, "Cortesía price must be forced to 0.0");
-        assert_eq!(e["estado_pago"], "Pagado", "Cortesía status must be forced to Pagado");
+        assert_eq!(
+            e["estado_pago"], "Pagado",
+            "Cortesía status must be forced to Pagado"
+        );
         assert_eq!(e["medio_pago"], "Cortesía");
     }
 
@@ -650,7 +692,9 @@ async fn test_dispatcher_triangulate_ticket_url_formatting_with_public_base_url(
         })
         .to_string(),
     };
-    let res1 = dispatcher_with_url.dispatch(&sell_call_1, &mut context).await;
+    let res1 = dispatcher_with_url
+        .dispatch(&sell_call_1, &mut context)
+        .await;
     let token1 = res1["entradas"][0]["scan_token"].as_str().unwrap();
     assert_eq!(
         res1["entradas"][0]["ticket_url"],
@@ -674,7 +718,9 @@ async fn test_dispatcher_triangulate_ticket_url_formatting_with_public_base_url(
         })
         .to_string(),
     };
-    let res2 = dispatcher_with_trailing.dispatch(&sell_call_2, &mut context).await;
+    let res2 = dispatcher_with_trailing
+        .dispatch(&sell_call_2, &mut context)
+        .await;
     let token2 = res2["entradas"][0]["scan_token"].as_str().unwrap();
     assert_eq!(
         res2["entradas"][0]["ticket_url"],
@@ -682,8 +728,7 @@ async fn test_dispatcher_triangulate_ticket_url_formatting_with_public_base_url(
     );
 
     // 3. No base URL (dev fallback): relative path
-    let dispatcher_no_url = AgentToolDispatcher::new(state.clone())
-        .with_public_base_url(None);
+    let dispatcher_no_url = AgentToolDispatcher::new(state.clone()).with_public_base_url(None);
     let sell_call_3 = ToolCall {
         id: "call_url_sell_3".to_string(),
         name: "vender_entradas".to_string(),

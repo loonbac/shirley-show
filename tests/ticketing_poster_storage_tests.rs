@@ -166,3 +166,84 @@ fn test_poster_storage_path_traversal_resistance() {
         "Traversal delete must not touch files outside posters dir"
     );
 }
+
+#[test]
+fn test_poster_storage_reconciliation_part_trash_and_orphans() {
+    let temp_dir = tempdir().unwrap();
+    let posters_path = temp_dir.path().join("posters");
+    std::fs::create_dir_all(posters_path.join(".trash")).unwrap();
+
+    // Create a .part file in posters_dir
+    let part_file = posters_path.join("dangling_upload.jpg.part");
+    std::fs::write(&part_file, b"incomplete-data").unwrap();
+
+    // Create a file in .trash
+    let trash_file = posters_path.join(".trash").join("old_deleted.jpg");
+    std::fs::write(&trash_file, b"deleted-data").unwrap();
+
+    // Create an orphan image and an active image
+    let orphan_file = posters_path.join("evt_orphan_123.jpg");
+    std::fs::write(&orphan_file, b"orphan-data").unwrap();
+    let active_file = posters_path.join("evt_active_456.jpg");
+    std::fs::write(&active_file, b"active-data").unwrap();
+
+    let storage = LocalPosterStorage::new(posters_path.clone());
+    assert!(
+        !part_file.exists(),
+        ".part files must be cleaned at startup"
+    );
+    assert!(
+        !trash_file.exists(),
+        ".trash files must be cleaned at startup"
+    );
+    assert!(
+        orphan_file.exists(),
+        "orphan file exists before orphan reconciliation"
+    );
+    assert!(
+        active_file.exists(),
+        "active file exists before orphan reconciliation"
+    );
+
+    // Reconcile orphans
+    let active_list = vec!["evt_active_456.jpg".to_string()];
+    let cleaned = storage.reconcile_orphans(&active_list);
+    assert_eq!(cleaned, 1);
+    assert!(!orphan_file.exists(), "Orphan poster must be removed");
+    assert!(active_file.exists(), "Active poster must be preserved");
+}
+
+#[test]
+fn test_delete_event_returns_cleanup_pending_outcome() {
+    let temp_dir = tempdir().unwrap();
+    let posters_path = temp_dir.path().join("posters");
+    let storage = Arc::new(LocalPosterStorage::new(posters_path.clone()));
+
+    let db_path = temp_dir.path().join("test.sqlite3");
+    let pool = init_pool(db_path.to_str().unwrap()).unwrap();
+    migrate_pool(&pool).unwrap();
+    let repo = Arc::new(SqliteTicketingRepository::new(pool));
+
+    let create_event = CreateEvent::new(repo.clone());
+    let replace_poster = ReplaceEventPoster::new(repo.clone(), storage.clone());
+    let delete_event = DeleteEvent::new(repo.clone(), storage.clone());
+
+    let event = create_event
+        .execute(CreateEventInput {
+            nombre: "Evento Outcome".to_string(),
+            fecha_hora: "2026-12-01T20:00:00Z".to_string(),
+            lugar: "Miraflores".to_string(),
+            tipos_de_entrada: vec![
+                TicketType::new("General", Money::from_cents(2000), 10).unwrap(),
+            ],
+        })
+        .unwrap();
+
+    let poster_file = replace_poster.execute(&event.id, SAMPLE_WEBP).unwrap();
+    assert!(posters_path.join(&poster_file).exists());
+
+    let result = delete_event.execute(&event.id).unwrap();
+    assert!(result.deleted);
+    assert!(!result.cleanup_pending);
+    assert!(!posters_path.join(&poster_file).exists());
+}

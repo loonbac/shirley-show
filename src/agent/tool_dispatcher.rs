@@ -1,10 +1,8 @@
-use crate::domain::ticketing::{
-    ExpenseCategory, Money, PaymentMethod, PaymentStatus, TicketType,
-};
+use crate::domain::ticketing::{ExpenseCategory, Money, PaymentMethod, PaymentStatus, TicketType};
 use crate::ports::ticketing::{CheckInOutcome, SellTicketsInput};
-use crate::use_cases::ticketing::{CreateExpenseInput, CreateInterestInput};
 use crate::state::ticketing_services::TicketingServices;
 use crate::use_cases::ticketing::events::CreateEventInput;
+use crate::use_cases::ticketing::{CreateExpenseInput, CreateInterestInput};
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -704,10 +702,10 @@ impl AgentToolDispatcher {
                             })
                         }
                         Err(e) => {
-                                json!({
-                                    "error": e.code(),
-                                    "message": e.message()
-                                })
+                            json!({
+                                "error": e.code(),
+                                "message": e.message()
+                            })
                         }
                     }
                 } else {
@@ -839,10 +837,10 @@ impl AgentToolDispatcher {
                         res
                     }
                     Err(e) => {
-                            json!({
-                                "error": e.code(),
-                                "message": e.message()
-                            })
+                        json!({
+                            "error": e.code(),
+                            "message": e.message()
+                        })
                     }
                 }
             }
@@ -951,10 +949,10 @@ impl AgentToolDispatcher {
                         res
                     }
                     Err(e) => {
-                            json!({
-                                "error": e.code(),
-                                "message": e.message()
-                            })
+                        json!({
+                            "error": e.code(),
+                            "message": e.message()
+                        })
                     }
                 }
             }
@@ -1039,9 +1037,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 
@@ -1094,9 +1090,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 
@@ -1160,7 +1154,10 @@ impl AgentToolDispatcher {
                         let mut items = Vec::new();
                         for ticket in &tickets {
                             context.known_ticket_ids.insert(ticket.id.clone());
-                            let ticket_url = format_ticket_url(self.public_base_url.as_deref(), ticket.scan_token.as_str());
+                            let ticket_url = format_ticket_url(
+                                self.public_base_url.as_deref(),
+                                ticket.scan_token.as_str(),
+                            );
                             let whatsapp_url = format_whatsapp_url(
                                 &ticket.contacto,
                                 &ticket.nombre_comprador,
@@ -1204,9 +1201,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 
@@ -1260,9 +1255,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 
@@ -1345,9 +1338,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 
@@ -1398,9 +1389,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 
@@ -1468,9 +1457,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 
@@ -1500,13 +1487,23 @@ impl AgentToolDispatcher {
                     });
                 }
 
-                match ticketing.check_in_ticket.execute(evento_id, args.codigo.trim()) {
+                match ticketing
+                    .check_in_ticket
+                    .execute(evento_id, args.codigo.trim())
+                {
                     Ok(outcome) => {
                         let res = serde_json::to_value(&outcome).unwrap_or_default();
 
                         let summary = match &outcome {
-                            CheckInOutcome::Valida { nombre_comprador, tipo_entrada, .. } => {
-                                format!("Check-in VÁLIDO para «{}» ({})", nombre_comprador, tipo_entrada)
+                            CheckInOutcome::Valida {
+                                nombre_comprador,
+                                tipo_entrada,
+                                ..
+                            } => {
+                                format!(
+                                    "Check-in VÁLIDO para «{}» ({})",
+                                    nombre_comprador, tipo_entrada
+                                )
                             }
                             CheckInOutcome::YaUsada { hora_ingreso } => {
                                 format!("Entrada YA USADA (ingresó a las {})", hora_ingreso)
@@ -1529,9 +1526,7 @@ impl AgentToolDispatcher {
                         context.executed_signatures.insert(signature, res.clone());
                         res
                     }
-                    Err(e) => {
-                        app_error_to_json(&e)
-                    }
+                    Err(e) => app_error_to_json(&e),
                 }
             }
 

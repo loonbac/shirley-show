@@ -10,6 +10,8 @@ use crate::ports::ticketing::{
     CheckInOutcome, GeneratedCredentials, SellTicketsInput, TicketRepository, TicketingTransactions,
 };
 
+pub const DEFAULT_TICKETS_LIMIT: usize = 500;
+
 fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::Database(e.to_string())
 }
@@ -123,7 +125,9 @@ impl TicketRepository for SqliteTicketingRepository {
             }
         }
 
-        sql.push_str(" ORDER BY fecha_creacion DESC, id DESC");
+        sql.push_str(&format!(
+            " ORDER BY fecha_creacion DESC, id DESC LIMIT {DEFAULT_TICKETS_LIMIT}"
+        ));
 
         let mut stmt = conn.prepare(&sql).map_err(db_err)?;
         let rusqlite_params: Vec<&dyn rusqlite::types::ToSql> =

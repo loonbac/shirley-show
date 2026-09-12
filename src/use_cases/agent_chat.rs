@@ -244,7 +244,7 @@ impl AgentChat {
                         message,
                         actions_taken: turn_context.actions_taken,
                         active_presentation_id: turn_context.active_presentation_id,
-                    active_event_id: turn_context.active_event_id.clone(),
+                        active_event_id: turn_context.active_event_id.clone(),
                         staged_audio_id: turn_context.staged_audio_id,
                         notice: Some(notice),
                     };
@@ -263,7 +263,7 @@ impl AgentChat {
                         ),
                         actions_taken: committed.actions_taken.clone(),
                         active_presentation_id: committed.active_presentation_id.clone(),
-                    active_event_id: committed.active_event_id.clone(),
+                        active_event_id: committed.active_event_id.clone(),
                         staged_audio_id: committed.staged_audio_id.clone(),
                         notice: Some(AgentNotice {
                             code: "agent_timeout".to_string(),
@@ -320,7 +320,7 @@ impl AgentChat {
                             ),
                             actions_taken: committed.actions_taken.clone(),
                             active_presentation_id: committed.active_presentation_id.clone(),
-                    active_event_id: committed.active_event_id.clone(),
+                            active_event_id: committed.active_event_id.clone(),
                             staged_audio_id: committed.staged_audio_id.clone(),
                             notice: Some(AgentNotice {
                                 code: "agent_timeout".to_string(),
@@ -351,7 +351,7 @@ impl AgentChat {
                                 ),
                                 actions_taken: committed.actions_taken.clone(),
                                 active_presentation_id: committed.active_presentation_id.clone(),
-                    active_event_id: committed.active_event_id.clone(),
+                                active_event_id: committed.active_event_id.clone(),
                                 staged_audio_id: committed.staged_audio_id.clone(),
                                 notice: Some(AgentNotice {
                                     code: "agent_timeout".to_string(),
@@ -372,7 +372,7 @@ impl AgentChat {
                                 message: msg.to_string(),
                                 actions_taken: turn_context.actions_taken,
                                 active_presentation_id: turn_context.active_presentation_id,
-                    active_event_id: turn_context.active_event_id.clone(),
+                                active_event_id: turn_context.active_event_id.clone(),
                                 staged_audio_id: turn_context.staged_audio_id,
                                 notice: Some(AgentNotice {
                                     code: "wake_wait".to_string(),
@@ -385,7 +385,7 @@ impl AgentChat {
                                 message: msg.to_string(),
                                 actions_taken: turn_context.actions_taken,
                                 active_presentation_id: turn_context.active_presentation_id,
-                    active_event_id: turn_context.active_event_id.clone(),
+                                active_event_id: turn_context.active_event_id.clone(),
                                 staged_audio_id: turn_context.staged_audio_id,
                                 notice: Some(AgentNotice {
                                     code: "pc_wake_timeout".to_string(),
@@ -417,7 +417,7 @@ impl AgentChat {
                         message,
                         actions_taken: turn_context.actions_taken,
                         active_presentation_id: turn_context.active_presentation_id,
-                    active_event_id: turn_context.active_event_id.clone(),
+                        active_event_id: turn_context.active_event_id.clone(),
                         staged_audio_id: turn_context.staged_audio_id,
                         notice: Some(notice),
                     };
@@ -475,7 +475,7 @@ impl AgentChat {
             message,
             actions_taken: turn_context.actions_taken,
             active_presentation_id: turn_context.active_presentation_id,
-                    active_event_id: turn_context.active_event_id.clone(),
+            active_event_id: turn_context.active_event_id.clone(),
             staged_audio_id: turn_context.staged_audio_id,
             notice: None,
         }

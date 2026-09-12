@@ -9,6 +9,7 @@ use crate::error::{ErrorBody, ErrorResponse};
 use crate::handlers::ticketing::dto::{
     CreateExpenseRequest, ExpenseDto, ExpenseResponse, ListExpensesResponse, UpdateExpenseRequest,
 };
+use crate::handlers::ticketing::ticketing_error_response;
 use crate::state::AppState;
 use crate::use_cases::ticketing::expenses::{CreateExpenseInput, UpdateExpenseInput};
 
@@ -18,7 +19,7 @@ pub async fn list(State(state): State<AppState>, Path(evento_id): Path<String>) 
             let dtos = expenses.iter().map(ExpenseDto::from_domain).collect();
             (StatusCode::OK, Json(ListExpensesResponse { gastos: dtos })).into_response()
         }
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -46,12 +47,12 @@ pub async fn create(
 
     let categoria = match ExpenseCategory::parse(&request.categoria) {
         Ok(c) => c,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let monto = match Money::from_soles(request.monto) {
         Ok(m) => m,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let input = CreateExpenseInput {
@@ -70,7 +71,7 @@ pub async fn create(
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -98,12 +99,12 @@ pub async fn update(
 
     let categoria = match ExpenseCategory::parse(&request.categoria) {
         Ok(c) => c,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let monto = match Money::from_soles(request.monto) {
         Ok(m) => m,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let input = UpdateExpenseInput {
@@ -122,13 +123,13 @@ pub async fn update(
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
 pub async fn delete(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     match state.ticketing.delete_expense.execute(&id) {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }

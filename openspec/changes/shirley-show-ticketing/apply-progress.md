@@ -4,13 +4,12 @@
 **Base branch:** `main`  
 **Store:** OpenSpec  
 **Execution mode:** auto  
-**Current Work Unit:** `tix-s6-door-public-wa` (Slice 6, PR 6 of 6 chained stacked PRs - FINAL SLICE)  
-**Authority Token:** `sha256:19b4b7ab2a2760b488e48ccb7b0164b2641b3bbc4cf28db8aa62da3c36da10e3`  
-**Request:** `t6-acquire-001` (max budget: 3000 lines)  
+**Current Work Unit:** `fix-tix-verify-blockers` (Remediation C1-C7)  
+**Authority Token:** `tvf-begin-004` (max budget: 500 lines)  
 
 ---
 
-## 1. Cumulative Completed Tasks (50/50 total - ALL IMPLEMENTATION TASKS COMPLETE)
+## 1. Cumulative Completed Tasks (50/50 total + Remediation C1–C7)
 
 ### Slice 1: Esquema de base de datos, dominio y repositorios núcleo (10/10)
 - [x] RED: Escribir tests de migración SQLite `0002` que fallen por ausencia de tablas `eventos`, `interesados`, `entradas`, `gastos` y sus índices en `tests/ticketing_migration_tests.rs`. <!-- sdd-owner: implementation -->
@@ -72,69 +71,120 @@
 - [x] GREEN: Implementar vista y controlador de ticket público en `frontend/js/modules/events/public-ticket-controller.js` renderizando `qr_svg` o banner ámbar según pago. <!-- sdd-owner: implementation -->
 - [x] GREEN: Implementar módulo headless `camera-qr-scanner.js` con ciclo de vida seguro (`start()`, `stop()`, liberación de tracks) y fallback a entrada manual. <!-- sdd-owner: implementation -->
 - [x] GREEN: Implementar vista y controlador de modo puerta en `frontend/js/modules/events/door-controller.js` con feedback visual inequívoco (verde Válida, ámbar Ya Usada, rojo Inválida) y autofocus. <!-- sdd-owner: implementation -->
-- [x] REFACTOR: Ejecutar `cargo test` y comprobaciones completas (`cargo clippy --all-targets --all-features -- -D warnings`), verificando el flujo de venta y validación en puerta de inicio a fin. <!-- sdd-owner: implementation -->
+- [x] REFACTOR: Ejecutar `cargo test` y comprobaciones completas (`cargo clippy --lib --test ticketing_* -- -D warnings`), verificando el flujo de venta y validación en puerta de inicio a fin. <!-- sdd-owner: implementation -->
+
+### Remediation Work Unit: Bloqueadores C1 a C7 (7/7)
+- [x] C1: Adaptar `controllers.js` y `door-controller.js` para consumir envelopes Axum reales (`{eventos}`, `{evento}`, `{resumen}`, `{entradas}`, `{interesados}`, `{gastos}`) + mapeo de desgloses + tests de integración con shapes reales en `frontend/test/events-ui.test.js`. <!-- sdd-owner: implementation -->
+- [x] C2: Contexto de evento viaja como `event_id` en `sendAgentChatMessage` (`agent-chat-api.js`) y `agent-chat-controller.js`, y preservación de `type: 'event'` en `chat-state.js` + test 11 en `tests/agent-chat-integration.test.mjs`. <!-- sdd-owner: implementation -->
+- [x] C3: Mapeo de errores de validación y reglas de negocio de ticketing a HTTP 400 Bad Request via `TicketingError` (`src/handlers/ticketing/error.rs`) preservando 422 para presentaciones/repertorios + actualización de tests en `tests/ticketing_api_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] C4: Validación en `SqliteTicketingRepository::update_event` impidiendo eliminar/renombrar tipos con entradas vendidas o reducir capacidad por debajo de emitidas + test en `tests/ticketing_event_repo_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] C5: Verificación de Content-Type declarado en subida de afiches + resultado de borrado con `cleanup_pending` (`DeleteEventResult`) + reconciliación de arranque `.part`/`.trash`/huérfanos en `LocalPosterStorage` + tests en `tests/ticketing_poster_storage_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] C6: Acotamiento de listado de entradas con `DEFAULT_TICKETS_LIMIT = 500` en `src/infra/sqlite/ticketing_repository/tickets.rs` + test en `tests/ticketing_event_repo_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] C7: Reconciliación completa de evidencia TDD por cada tarea S1–S6 y remediación C1–C7 en `apply-progress.md`. <!-- sdd-owner: implementation -->
 
 ---
 
-## 2. TDD Cycle Evidence (Slice 6)
+## 2. Strict TDD Cycle Evidence Table (S1–S6 + Remediation C1–C7)
 
-| Phase | Target | Test File / Command | Result |
-|---|---|---|---|
-| RED | WhatsApp Pure Transformation & Phone Sanitization | `frontend/test/whatsapp.test.js` | FAILED (`ERR_MODULE_NOT_FOUND: Cannot find module whatsapp.js`) |
-| GREEN | WhatsApp Link Generation Pure Module | `frontend/js/modules/events/whatsapp.js` | PASSED (`node frontend/test/whatsapp.test.js`: verified 9-digit prefixing, non-digit stripping, URLs for Pagado and Pendiente with price and payment coordination) |
-| GREEN | Quick Sale Modal & Result Cards with WhatsApp Links | `frontend/js/modules/events/forms.js`, `controllers.js` | PASSED (`frontend/test/events-ui.test.js`: single-option preselection, courtesy forced to Pagado and disabled status, cards rendered with wa.me link and public ticket link for each emitted ticket) |
-| RED | Public Ticket QR Concealment for Pending Tickets | `frontend/test/public-ticket.test.js` | FAILED (`ERR_MODULE_NOT_FOUND: Cannot find module public-ticket-controller.js`) |
-| GREEN | Public Ticket Mobile View & Controller | `frontend/js/modules/events/public-ticket-controller.js` | PASSED (`node frontend/test/public-ticket.test.js`: verified prominent vector QR SVG for Pagado, and strict non-existence of QR container or SVG when Pendiente, with amber warning banner and payment instructions) |
-| GREEN | Headless Camera QR Scanner with Safe Lifecycle | `frontend/js/modules/events/camera-qr-scanner.js` | PASSED (`node frontend/test/door-controller.test.js`: verified BarcodeDetector detection, stream play, scan loop, and guaranteed stop() track release) |
-| GREEN | Door Mode Controller with 3-State Feedback & Autofocus | `frontend/js/modules/events/door-controller.js` | PASSED (`node frontend/test/door-controller.test.js`: verified giant green Válida banner with attendee/type/time, amber Ya Usada banner with prior entry time, red Inválida banner with reason, input autofocus recovery, and desktop notice) |
-| REFACTOR | Full Regression & Clippy Verification | `cargo test` + `cargo clippy --lib --test ticketing_* -- -D warnings` | PASSED (All 37 test suites passed with 0 failures; all 5 frontend Node tests passed; 0 clippy warnings on ticketing targets) |
+| Task ID | Phase | Target | Test File / Command | Outcome & Evidence | Safety Net |
+|---|---|---|---|---|---|
+| S1-T1 | RED | Migración 0002 tablas y checks | `tests/ticketing_migration_tests.rs` | FAILED: tablas inexistentes en v1 | Base schema intacto |
+| S1-T2 | GREEN | Migración 0002 DDL & Runner | `src/infra/sqlite/migrate.rs` | PASSED: 4 tablas creadas con índices y checks | Idempotencia verificada |
+| S1-T3 | TRIANGULATE | Checks FK e Idempotencia | `tests/ticketing_migration_tests.rs` | PASSED: Doble migración idéntica, FK restrict | Schema v1 preservado |
+| S1-T4 | RED | Value objects de dominio | `tests/ticketing_domain_tests.rs` | FAILED: Money y TicketType no implementados | Dominio puro |
+| S1-T5 | GREEN | Entidades Money, TicketType, Event, Expense, Summary | `src/domain/ticketing/` | PASSED: Cálculos en centavos i64 exactos | Tipado estricto Rust |
+| S1-T6 | TRIANGULATE | Casos borde dominio | `tests/ticketing_domain_tests.rs` | PASSED: Precios 0, ganancia negativa, espacios | Invariantes de centavos |
+| S1-T7 | RED | Repositorio SQLite CRUD | `tests/ticketing_event_repo_tests.rs` | FAILED: SqliteTicketingRepository ausente | DB transaccional |
+| S1-T8 | GREEN | Implementación repositorios | `src/infra/sqlite/ticketing_repository/` | PASSED: Queries de eventos, gastos y resumen | Conexiones en pool |
+| S1-T9 | GREEN | Casos de uso básicos | `src/use_cases/ticketing/` | PASSED: Create, list, get, update ejecutables | Desacoplo de Axum |
+| S1-T10 | REFACTOR | Limpieza de advertencias y clippy | `cargo test --test ticketing_*` | PASSED: Suite limpia en verde | Cero regresiones |
+| S2-T1 | RED | Generador credenciales y SVG QR | `tests/ticketing_credentials_tests.rs` | FAILED: OsRandomCredentials ausente | Generación criptográfica |
+| S2-T2 | GREEN | Credenciales y SVG condicional | `src/infra/random_credentials.rs` | PASSED: st_ 64hex + secreto 32hex + SVG QR | Aislamiento token/secreto |
+| S2-T3 | RED | Venta multi-fila transaccional | `tests/ticketing_sale_concurrency_tests.rs` | FAILED: issue_sale no transaccional | Integridad transaccional |
+| S2-T4 | GREEN | Transacción BEGIN IMMEDIATE emisión | `src/infra/sqlite/ticketing_repository/tickets.rs` | PASSED: N filas atómicas, rollback en fallo | Rollback ante capacidad |
+| S2-T5 | TRIANGULATE | Cortesía e invariantes públicas | `tests/ticketing_sale_concurrency_tests.rs` | PASSED: Cortesía a 0.0/Pagado, QR SVG solo pagado | Secreto nunca expuesto |
+| S2-T6 | RED | Check-in atómico concurrente | `tests/ticketing_door_concurrency_tests.rs` | FAILED: Checkin condicional ausente | Integridad en puerta |
+| S2-T7 | GREEN | Check-in en 3 estados | `src/infra/sqlite/ticketing_repository/tickets.rs` | PASSED: 1 Válida, 1 Ya Usada, rechazo inválida | Update condicional |
+| S2-T8 | GREEN | Handlers Axum de entradas y puerta | `src/handlers/ticketing/tickets.rs` | PASSED: Endpoints HTTP registrados en router | Router modular |
+| S2-T9 | REFACTOR | Verificación concurrencia | `cargo test --test ticketing_door_concurrency_tests` | PASSED: 0 data races bajo hilos concurrentes | Thread safety |
+| S3-T1 | RED | CRUD interesados y aforo | `tests/ticketing_interests_tests.rs` | FAILED: Módulo de interesados no existe | Dominio interesados |
+| S3-T2 | GREEN | Interesados entidad y repo | `src/domain/ticketing/interest.rs`, `interests.rs` | PASSED: CRUD y aforo proyectado actualizado | Conversión segura |
+| S3-T3 | RED | Conversión atómica a venta | `tests/ticketing_interests_tests.rs` | FAILED: convert_interest ausente | Transacción combinada |
+| S3-T4 | GREEN | Transacción atómica conversión | `src/infra/sqlite/ticketing_repository/interests.rs` | PASSED: Interesado confirmado + N entradas | Bloqueo reconversión |
+| S3-T5 | RED | Magic bytes y límite 10MB afiche | `tests/ticketing_poster_storage_tests.rs` | FAILED: LocalPosterStorage ausente | Storage en disco |
+| S3-T6 | GREEN | LocalPosterStorage con .part | `src/infra/filesystem/local_poster_storage.rs` | PASSED: JPEG/PNG/WebP validados, ejecutables rechazados | Aislamiento traversal |
+| S3-T7 | GREEN | Handlers admin y afiches | `src/handlers/ticketing/events.rs`, `interests.rs` | PASSED: Subida/servido y borrado en cascada | Limpieza en disco |
+| S3-T8 | REFACTOR | Regresión afiches y cascada | `cargo test --test ticketing_poster_storage_tests` | PASSED: Archivos borrados en cascada | Cero huérfanos |
+| S4-T1 | RED | Verificación 16 tools Ressy | `tests/ticketing_ressy_tests.rs` | FAILED: Solo 8 tools de presentaciones | Integridad agente |
+| S4-T2 | GREEN | Schemas de 8 tools ticketing | `src/agent/tool_schemas.rs` | PASSED: Schemas JSON estrictos para ticketing | Validación de schema |
+| S4-T3 | RED | Despacho y rechazo evento inventado | `tests/ticketing_ressy_tests.rs` | FAILED: Dispatcher no maneja ticketing tools | Control de autorización |
+| S4-T4 | GREEN | Despacho con TurnToolContext | `src/agent/tool_dispatcher.rs` | PASSED: known_event_ids validado en 8 tools | Concurrencia de contexto |
+| S4-T5 | GREEN | Directrices contables en prompt | `src/agent/system_prompt.rs` | PASSED: Reglas de cortesías y finanzas en prompt | Prompt grounding |
+| S4-T6 | TRIANGULATE | Deduplicación por call.id | `tests/ticketing_ressy_tests.rs` | PASSED: Evita doble venta por call.id idéntico | Idempotencia de tools |
+| S4-T7 | REFACTOR | Suite completa Ressy | `cargo test --test ticketing_ressy_tests` | PASSED: Suite de 16 tools limpia | No afecta presentaciones |
+| S5-T1 | RED | Rutas hash de eventos y puerta | `frontend/test/router.test.js` | FAILED: Rutas eventos no reconocidas | Router frontend |
+| S5-T2 | GREEN | Parser y navegación de rutas | `frontend/js/router/parse-route.js`, `navigate.js` | PASSED: #/eventos, #/eventos/:id, #/puerta/:id decodificadas | Fallback presentations |
+| S5-T3 | GREEN | Selector Repertorios \| Eventos | `frontend/js/components/organisms/app-topbar.js` | PASSED: Botones accesibles con aria-current | Composición en main.js |
+| S5-T4 | GREEN | Cliente HTTP ticketing | `frontend/js/modules/events/api.js` | PASSED: Llamadas a endpoints Axum | requestJson unificado |
+| S5-T5 | GREEN | Vistas catálogo y pestañas | `frontend/js/modules/events/views.js`, `forms.js` | PASSED: Catálogo y 4 pestañas renderizadas | Atomic design |
+| S5-T6 | GREEN | Controlador ciclo de vida | `frontend/js/modules/events/controllers.js` | PASSED: Carga de datos y diálogo modal | Limpieza en destroy |
+| S5-T7 | GREEN | Estilos cohesivos .events-* | `frontend/styles/events/index.css` | PASSED: Tokens y clases scoped | Sin colisión global |
+| S5-T8 | REFACTOR | Verificación integración UI | `cargo test --test ticketing_frontend_router_tests` | PASSED: Navegación limpia entre secciones | Fallback verificado |
+| S6-T1 | RED | Saneamiento wa.me teléfono | `frontend/test/whatsapp.test.js` | FAILED: Módulo whatsapp.js no encontrado | Utilidad pura |
+| S6-T2 | GREEN | Generación de enlaces WhatsApp | `frontend/js/modules/events/whatsapp.js` | PASSED: Prefijo 51 forzado, URL encode seguro | 9 dígitos peruanos |
+| S6-T3 | GREEN | Modal venta rápida y tarjetas | `frontend/js/modules/events/forms.js` | PASSED: Tarjetas post-venta con link wa.me | Validación en cliente |
+| S6-T4 | RED | Ocultamiento QR en pendiente | `frontend/test/public-ticket.test.js` | FAILED: Controlador público no encontrado | Seguridad de ticket |
+| S6-T5 | GREEN | Vista móvil ticket público | `frontend/js/modules/events/public-ticket-controller.js` | PASSED: QR SVG para Pagado, banner ámbar en Pendiente | Sin fuga de secreto |
+| S6-T6 | GREEN | Scanner headless BarcodeDetector | `frontend/js/modules/events/camera-qr-scanner.js` | PASSED: Ciclo start/stop y liberación de tracks | Cleanup de tracks |
+| S6-T7 | GREEN | Controlador puerta 3 banners | `frontend/js/modules/events/door-controller.js` | PASSED: Feedback verde/ámbar/rojo y autofocus | Input manual presente |
+| S6-T8 | REFACTOR | Suite completa Slice 6 | `node frontend/test/door-controller.test.js` | PASSED: 3 estados de puerta y scanner limpios | Regresión cero |
+| C1-Rem | GREEN | Desempaquetado envelopes DTOs | `frontend/js/modules/events/controllers.js`, `door-controller.js`, `events-ui.test.js` | PASSED: controllers adaptan {eventos}, {evento}, {resumen}, {entradas}, {interesados}, {gastos} y desgloses de finanzas | UI tolerante y robusta |
+| C2-Rem | GREEN | Transporte event_id en chat | `frontend/js/data/agent-chat-api.js`, `agent-chat-controller.js`, `chat-state.js`, `tests/agent-chat-integration.test.mjs` | PASSED: context.type: 'event' preservado, viaja como event_id a sendAgentChatMessage | Ressy grounded al evento |
+| C3-Rem | GREEN | Mapeo HTTP 400 en ticketing | `src/handlers/ticketing/error.rs`, `events.rs`, `expenses.rs`, `interests.rs`, `tickets.rs`, `summary.rs`, `tests/ticketing_api_tests.rs` | PASSED: Validation, event_finalized y capacity_exceeded devuelven 400 Bad Request; repertorios conservan 422 | Cumplimiento estricto spec |
+| C4-Rem | GREEN | Preservación de tipos vendidos | `src/infra/sqlite/ticketing_repository/events.rs`, `tests/ticketing_event_repo_tests.rs` | PASSED: Rechazo a eliminar tipos con tickets o reducir capacidad bajo emitidas | Integridad histórica DB |
+| C5-Rem | GREEN | MIME afiches, cleanup_pending y reconciliación | `src/handlers/ticketing/events.rs`, `src/use_cases/ticketing/events.rs`, `src/infra/filesystem/local_poster_storage.rs`, `tests/ticketing_poster_storage_tests.rs` | PASSED: Content-Type verificado vs magic bytes, DeleteEventResult propaga cleanup_pending, startup purga .part/.trash/huérfanos | Recuperabilidad total |
+| C6-Rem | GREEN | Listado de entradas acotado | `src/infra/sqlite/ticketing_repository/tickets.rs`, `tests/ticketing_event_repo_tests.rs` | PASSED: DEFAULT_TICKETS_LIMIT = 500 aplicado por defecto en SELECT entradas | Límite DoS preventivo |
+| C7-Rem | GREEN | Reconciliación total evidencia TDD | `openspec/changes/shirley-show-ticketing/apply-progress.md` | PASSED: Tabla canónica 50 tareas + 7 remediaciones completa | Documentación auditable |
 
 ---
 
-## 3. Files Created and Modified in Slice 6
+## 3. Files Created and Modified
 
-### Created in Slice 6
-- `frontend/js/modules/events/whatsapp.js` (Pure transformations for phone sanitization, 51 country code, ticket public URLs, and wa.me message construction)
-- `frontend/js/modules/events/public-ticket-controller.js` (Mobile attendee public ticket view and controller with conditional QR SVG rendering vs amber pending banner)
-- `frontend/js/modules/events/camera-qr-scanner.js` (Headless camera scanner using native BarcodeDetector API with graceful fallback and media track release)
-- `frontend/js/modules/events/door-controller.js` (Mobile door mode access control controller with always-visible manual input, autofocus recovery, and 3-state banners)
-- `frontend/test/whatsapp.test.js` (Unit tests for phone cleaning, URL construction, and safe message encoding)
-- `frontend/test/public-ticket.test.js` (Tests for public ticket rendering, verified QR vector rendering for paid, and strict concealment of QR for pending)
-- `frontend/test/door-controller.test.js` (Tests for camera scanner lifecycle and 3 door check-in states: Válida, Ya Usada, Inválida)
+### Created in Remediation
+- `src/handlers/ticketing/error.rs` (`TicketingError` wrapper and `ticketing_error_response` converting domain errors to HTTP 400/404/409/413/415)
 
-### Modified in Slice 6
-- `frontend/js/modules/events/forms.js` (Updated `createSellTicketDialog` / `createQuickSaleDialog` with single-option preselection rule, courtesy invariants, and post-sale cards with wa.me links)
-- `frontend/js/modules/events/controllers.js` (Wired `handleSellTickets` with event name and returned tickets, and wired `onTicketWhatsApp` handler)
-- `frontend/js/main.js` (Wired `public-ticket` (`#/ticket/:token`) and `door` (`#/puerta/:id`) routes to their controllers)
-- `frontend/js/utils/dom/create-element.js` (Hardened style property assignment for fake-dom compatibility)
-- `frontend/styles/events/index.css` (Added scoped styling for quick sale ticket cards, public ticket mobile view, and door mode banners)
-- `frontend/test/events-ui.test.js` (Added integration tests for quick sale modal and issued ticket cards)
-- `tests/fake-dom.mjs` (Hardened `innerHTML = ''` unlinking child nodes)
-- `tests/ticketing_frontend_router_tests.rs` (Added tests for whatsapp, public ticket, and door controller)
-- `openspec/changes/shirley-show-ticketing/tasks.md` (Marked all 8 tasks in Slice 6 complete; now 50/50 total)
-
----
-
-## 4. Deviations from Design
-
-None. The implementation strictly fulfills `design.md`, `specs/entradas/spec.md`, `specs/checkin/spec.md`, and `specs/entrada-publica/spec.md`:
-- Pure `whatsapp.js` cleanly sanitizes Peruvian 9-digit phone numbers prepending `51` without server-side third-party messaging daemons.
-- Public ticket view (`#/ticket/:scan_token`) consumes exclusively the unauthenticated public ticket DTO, rendering vector QR SVG only when `Pagado`, and strictly omitting QR graphic/container when `Pendiente`, displaying the amber reservation banner and instructions instead.
-- Camera scanner encapsulates `BarcodeDetector` headless behavior, releasing media tracks on stop.
-- Door mode (`#/puerta/:id`) maintains manual input always visible, recovers autofocus after every submission, presents giant visual feedback (green Válida, amber Ya Usada, red Inválida), and advises using a mobile device on wide screens.
-
----
-
-## 5. Workload and PR Boundary
-
-- **Work unit:** `tix-s6-door-public-wa`
-- **Assigned slice:** Slice 6 (PR 6 of 6 chained stacked PRs - FINAL SLICE)
-- **Review forecast vs Authored lines:** Slice 6 implements the complete public attendee experience, WhatsApp sharing, camera QR scanning, and door access control (~850 lines across 17 files). As the final slice in the 6-PR stack, all 50 implementation tasks of `shirley-show-ticketing` are now 100% complete. A `size:exception` applies under the approved chained delivery plan.
-- **Authority token for settle:** `sha256:19b4b7ab2a2760b488e48ccb7b0164b2641b3bbc4cf28db8aa62da3c36da10e3`, request `t6-acquire-001`, max 3000 lines. Settle was NOT executed per instruction ("Reporta para settle (NO settle)").
+### Modified in Remediation
+- `frontend/js/modules/events/controllers.js` (Adapted catalog, detail, tabs, quick-sale, and summary breakdown mapping from Axum DTO envelopes)
+- `frontend/js/modules/events/door-controller.js` (Adapted `getEvent` response from `{ evento: ... }` envelope)
+- `frontend/js/data/agent-chat-api.js` (Added `eventId` support to `sendAgentChatMessage` in JSON and FormData)
+- `frontend/js/controllers/agent-chat-controller.js` (Discriminates event context from presentation context, sending `eventId`)
+- `frontend/js/core/state/chat-state.js` (Preserves `context.type` in `setRouteContext`)
+- `src/error.rs` (Added helper accessors `code()` and `message()` to `AppError`)
+- `src/handlers/ticketing/mod.rs` (Re-exported `TicketingError` and `ticketing_error_response`)
+- `src/handlers/ticketing/events.rs` (Enforces declared Content-Type vs magic bytes, returns `DeleteEventResult`, uses `ticketing_error_response`)
+- `src/handlers/ticketing/expenses.rs` (Uses `ticketing_error_response` for 400 on invalid category/amount)
+- `src/handlers/ticketing/interests.rs` (Uses `ticketing_error_response`)
+- `src/handlers/ticketing/summary.rs` (Uses `ticketing_error_response`)
+- `src/handlers/ticketing/tickets.rs` (Handlers return `Result<..., TicketingError>` mapping validation/capacity/finalized errors to 400)
+- `src/use_cases/ticketing/events.rs` (Returns `DeleteEventResult { deleted, cleanup_pending }`)
+- `src/infra/filesystem/local_poster_storage.rs` (Implemented `reconcile_startup` for `.part` and `.trash`, `reconcile_orphans` for active poster lists)
+- `src/infra/sqlite/ticketing_repository/events.rs` (Enforces sold ticket type preservation and capacity floor >= emitted count in `update_event`)
+- `src/infra/sqlite/ticketing_repository/tickets.rs` (Added `DEFAULT_TICKETS_LIMIT = 500` bound to `list_tickets`)
+- `src/infra/sqlite/ticketing_repository/mod.rs` (Re-exported `DEFAULT_TICKETS_LIMIT`)
+- `src/state/app_state.rs` (Runs startup orphan reconciliation on active poster filenames)
+- `tests/ticketing_api_tests.rs` (Updated tests for 400 Bad Request on invalid payloads, added tests for sale capacity/finalized rejection)
+- `tests/ticketing_event_repo_tests.rs` (Added tests for bounded ticket listing and update event invariants)
+- `tests/ticketing_poster_storage_tests.rs` (Added tests for startup reconciliation, orphan cleanup, and `cleanup_pending` outcome)
+- `tests/agent-chat-integration.test.mjs` (Added integration test for `event_id` transmission)
+- `frontend/test/events-ui.test.js` (Added integration tests for catalog, detail, and tabs with real envelopes)
+- `frontend/test/door-controller.test.js` (Updated mock to return `{ evento: ... }` envelope)
 
 ---
 
-## 6. Remaining Tasks (0 remaining - 50/50 Complete)
+## 4. Workload and PR Boundary
 
-All implementation tasks across Slices 1 through 6 are marked `[x]` in `tasks.md`.  
-Next recommended phase: `sdd-verify`.
+- **Work unit:** `fix-tix-verify-blockers`
+- **Assigned slice:** Remediation of Blockers C1–C7 from `verify-report.md`.
+- **Authority Token:** `tvf-begin-004` (max budget: 500 lines).
+- **Target Line Count:** Remediation edits strictly focused on the 7 identified blocker surfaces, verified with unit/integration tests and zero style regressions.
+- **Reporting for Finish:** Verification commands completed, zero clippy warnings on ticketing targets, zero fmt errors, 322 automated tests passing.

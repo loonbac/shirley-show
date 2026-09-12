@@ -35,8 +35,7 @@ fn test_sqlite_pragmas_and_migration_tables() {
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
             .expect("prepare select");
-        stmt
-            .query_map([], |row| row.get(0))
+        stmt.query_map([], |row| row.get(0))
             .expect("query_map")
             .map(|r| r.expect("row"))
             .collect()

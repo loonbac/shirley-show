@@ -156,6 +156,12 @@ impl<R: EventRepository> DeleteEvent<R, NoopPosterStorage> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeleteEventResult {
+    pub deleted: bool,
+    pub cleanup_pending: bool,
+}
+
 impl<R: EventRepository, P: PosterStorage> DeleteEvent<R, P> {
     pub fn new(repo: Arc<R>, poster_storage: Arc<P>) -> Self {
         Self {
@@ -164,7 +170,7 @@ impl<R: EventRepository, P: PosterStorage> DeleteEvent<R, P> {
         }
     }
 
-    pub fn execute(&self, id: &str) -> Result<(), AppError> {
+    pub fn execute(&self, id: &str) -> Result<DeleteEventResult, AppError> {
         let event = self
             .repo
             .get_event(id)?
@@ -178,10 +184,19 @@ impl<R: EventRepository, P: PosterStorage> DeleteEvent<R, P> {
             ));
         }
 
+        let mut cleanup_pending = false;
         if let Some(filename) = event.imagen {
-            let _ = self.poster_storage.delete_poster(&filename);
+            match self.poster_storage.delete_poster(&filename) {
+                Ok(true) => {}
+                _ => {
+                    cleanup_pending = true;
+                }
+            }
         }
 
-        Ok(())
+        Ok(DeleteEventResult {
+            deleted: true,
+            cleanup_pending,
+        })
     }
 }

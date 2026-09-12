@@ -5,7 +5,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use serde::Deserialize;
 
 use crate::domain::ticketing::ticket::{PaymentMethod, PaymentStatus};
-use crate::error::AppError;
+use crate::handlers::ticketing::TicketingError;
 use crate::handlers::ticketing::dto::{
     CheckInRequest, ListTicketsResponse, SellTicketsRequest, SellTicketsResponse, TicketDto,
     TicketResponse, UpdateTicketContactRequest,
@@ -25,7 +25,7 @@ pub async fn list(
     State(state): State<AppState>,
     Path(evento_id): Path<String>,
     Query(query): Query<ListTicketsQuery>,
-) -> Result<Json<ListTicketsResponse>, AppError> {
+) -> Result<Json<ListTicketsResponse>, TicketingError> {
     let tickets = state.ticketing.list_tickets.execute(
         &evento_id,
         query.q.as_deref(),
@@ -45,7 +45,7 @@ pub async fn sell(
     State(state): State<AppState>,
     Path(evento_id): Path<String>,
     Json(payload): Json<SellTicketsRequest>,
-) -> Result<(StatusCode, Json<SellTicketsResponse>), AppError> {
+) -> Result<(StatusCode, Json<SellTicketsResponse>), TicketingError> {
     let medio_pago = PaymentMethod::parse(&payload.medio_pago)?;
     let estado_pago = PaymentStatus::parse(&payload.estado_pago)?;
 
@@ -72,7 +72,7 @@ pub async fn sell(
 pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<TicketResponse>, AppError> {
+) -> Result<Json<TicketResponse>, TicketingError> {
     let ticket = state.ticketing.get_ticket.execute(&id)?;
     Ok(Json(TicketResponse {
         entrada: TicketDto::from_domain(&ticket, true),
@@ -83,7 +83,7 @@ pub async fn update_contact(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateTicketContactRequest>,
-) -> Result<Json<TicketResponse>, AppError> {
+) -> Result<Json<TicketResponse>, TicketingError> {
     let ticket = state.ticketing.update_ticket_contact.execute(
         &id,
         &payload.nombre_comprador,
@@ -98,7 +98,7 @@ pub async fn update_contact(
 pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, AppError> {
+) -> Result<StatusCode, TicketingError> {
     state.ticketing.delete_ticket.execute(&id)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -106,7 +106,7 @@ pub async fn delete(
 pub async fn confirm_payment(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<TicketResponse>, AppError> {
+) -> Result<Json<TicketResponse>, TicketingError> {
     let ticket = state.ticketing.confirm_ticket_payment.execute(&id)?;
     Ok(Json(TicketResponse {
         entrada: TicketDto::from_domain(&ticket, true),
@@ -116,7 +116,7 @@ pub async fn confirm_payment(
 pub async fn check_in(
     State(state): State<AppState>,
     Json(payload): Json<CheckInRequest>,
-) -> Result<Json<CheckInOutcome>, AppError> {
+) -> Result<Json<CheckInOutcome>, TicketingError> {
     let outcome = state
         .ticketing
         .check_in_ticket
@@ -128,7 +128,7 @@ pub async fn check_in(
 pub async fn get_public_ticket(
     State(state): State<AppState>,
     Path(scan_token): Path<String>,
-) -> Result<(HeaderMap, Json<PublicTicketDto>), AppError> {
+) -> Result<(HeaderMap, Json<PublicTicketDto>), TicketingError> {
     let ticket = state.ticketing.get_public_ticket.execute(&scan_token)?;
 
     let mut headers = HeaderMap::new();

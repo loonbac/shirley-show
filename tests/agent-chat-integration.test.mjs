@@ -29,6 +29,9 @@ const { createAgentChatController } = await import(pathToFileURL(chatControllerM
 const chatPanelModulePath = resolve(process.cwd(), 'frontend/js/components/organisms/agent-chat-panel.js');
 const { createAgentChatPanel } = await import(pathToFileURL(chatPanelModulePath).href);
 
+const agentChatApiModulePath = resolve(process.cwd(), 'frontend/js/data/agent-chat-api.js');
+const { sendAgentChatMessage } = await import(pathToFileURL(agentChatApiModulePath).href);
+
 console.log('Running Agent Chat Route and Composition Integration Tests...');
 
 // 1. Catalog route publishing and reactive refresh subscription
@@ -526,6 +529,68 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   }
 
   console.log('✓ 10. GPU status probe integration in controller (offline -> espera; online -> genérico; local -> genérico)');
+}
+
+// 11. Event context travels as event_id, not as presentation_id, to sendAgentChatMessage
+{
+  activePresentationContextSignal.set({
+    id: 'evt-test-777',
+    title: 'Festival Criollo',
+    type: 'event',
+  });
+
+  const state = createChatState();
+
+  let capturedOptions = null;
+  const ctrl = createAgentChatController({
+    chatState: state,
+    sendAgentChatMessageFn: async (options) => {
+      capturedOptions = options;
+      return {
+        message: 'Respuesta de evento',
+        actions_taken: [],
+        active_presentation_id: null,
+        active_event_id: 'evt-test-777',
+        notice: null,
+      };
+    },
+  });
+
+  await ctrl.sendAndOpen('¿Cuántas entradas se han vendido?');
+
+  assert.ok(capturedOptions, 'sendAgentChatMessageFn must be invoked');
+  assert.equal(capturedOptions.eventId, 'evt-test-777', 'Event context id must travel as eventId');
+  assert.equal(capturedOptions.presentationId, null, 'Event context id must NOT travel as presentationId');
+
+  ctrl.destroy();
+
+  // Also test sendAgentChatMessage building JSON payload with event_id
+  let sentBody = null;
+  globalThis.fetch = async (url, opts) => {
+    sentBody = JSON.parse(opts.body);
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({
+        message: 'OK',
+        actions_taken: [],
+        active_presentation_id: null,
+        active_event_id: 'evt-test-777',
+        notice: null,
+      }),
+    };
+  };
+
+  await sendAgentChatMessage({
+    message: 'Hola Ressy',
+    eventId: 'evt-test-777',
+  });
+
+  assert.equal(sentBody.event_id, 'evt-test-777', 'event_id must be sent in JSON payload');
+  assert.equal(sentBody.presentation_id, null, 'presentation_id must be null for event context');
+
+  console.log('✓ 11. Event context travels as event_id (not presentation_id) to agent chat API');
 }
 
 console.log('All Agent Chat Route and Composition integration tests passed!');

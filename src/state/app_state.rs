@@ -16,6 +16,7 @@ use crate::infra::vocal::{
 };
 use crate::infra::youtube::{ProcessYoutubeDownloader, ProcessYoutubeDownloaderConfig};
 use crate::ports::chat_completion_provider::ChatCompletionProvider;
+use crate::ports::ticketing::EventRepository;
 use crate::ports::vocal_separator::VocalSeparator;
 use crate::ports::youtube_downloader::YoutubeDownloader;
 use crate::state::staged_audio_registry::StagedAudioRegistry;
@@ -184,6 +185,10 @@ impl AppState {
         let ticketing_repo = Arc::new(SqliteTicketingRepository::new(pool.clone()));
         let posters_dir = config.data_dir.join("posters");
         let poster_storage = Arc::new(LocalPosterStorage::new(posters_dir));
+        if let Ok(events) = ticketing_repo.list_events() {
+            let active_posters: Vec<String> = events.into_iter().filter_map(|e| e.imagen).collect();
+            poster_storage.reconcile_orphans(&active_posters);
+        }
         let ticketing = TicketingServices::new(ticketing_repo, poster_storage);
 
         let dispatcher = AgentToolDispatcher::from_components(

@@ -12,6 +12,7 @@ use crate::handlers::ticketing::dto::{
     ConvertInterestRequest, CreateInterestRequest, InterestDto, InterestResponse,
     ListInterestsResponse, SellTicketsResponse, TicketDto, UpdateInterestRequest,
 };
+use crate::handlers::ticketing::ticketing_error_response;
 use crate::state::AppState;
 use crate::use_cases::ticketing::interests::{
     ConvertInterestInput, CreateInterestInput, UpdateInterestInput,
@@ -40,7 +41,7 @@ pub async fn list(
             )
                 .into_response()
         }
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -83,7 +84,7 @@ pub async fn create(
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -96,7 +97,7 @@ pub async fn get(State(state): State<AppState>, Path(id): Path<String>) -> Respo
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -124,7 +125,7 @@ pub async fn update(
 
     let estado = match InterestStatus::parse(&request.estado) {
         Ok(st) => st,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let input = UpdateInterestInput {
@@ -145,14 +146,14 @@ pub async fn update(
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
 pub async fn delete(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     match state.ticketing.delete_interest.execute(&id) {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -180,19 +181,19 @@ pub async fn convert(
 
     let lead = match state.ticketing.get_interest.execute(&id) {
         Ok(l) => l,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let cantidad = request.cantidad.unwrap_or(lead.personas);
 
     let medio_pago = match PaymentMethod::parse(&request.medio_pago) {
         Ok(mp) => mp,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let estado_pago = match PaymentStatus::parse(&request.estado_pago) {
         Ok(ep) => ep,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let input = ConvertInterestInput {
@@ -215,6 +216,6 @@ pub async fn convert(
             )
                 .into_response()
         }
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }

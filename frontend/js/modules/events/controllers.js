@@ -110,7 +110,8 @@ export function createEventsCatalogController(deps = {}) {
     view.update({ isLoading: true, errorMessage: null });
 
     try {
-      events = await listEvents({ incluir_finalizados: true });
+      const res = await listEvents({ incluir_finalizados: true });
+      events = Array.isArray(res) ? res : ((res && res.eventos) || []);
       isLoading = false;
       view.update({ events, isLoading: false, errorMessage: null });
     } catch (err) {
@@ -269,11 +270,50 @@ export function createEventDetailController(deps) {
         listExpenses(eventId),
       ]);
 
-      event = evtData;
-      summary = sumData;
-      tickets = tixData || [];
-      interests = intData || [];
-      expenses = expData || [];
+      event = (evtData && evtData.evento) || evtData;
+
+      const rawSummary = (sumData && sumData.resumen) || sumData;
+      if (rawSummary) {
+        const por_medio_pago = rawSummary.por_medio_pago || (rawSummary.desglose_metodos_pago ? {
+          Yape: {
+            cobrado: rawSummary.desglose_metodos_pago.yape_cobrado || 0,
+            pendiente: rawSummary.desglose_metodos_pago.yape_pendiente || 0,
+            cantidad: rawSummary.desglose_metodos_pago.yape_entradas || 0,
+          },
+          Efectivo: {
+            cobrado: rawSummary.desglose_metodos_pago.efectivo_cobrado || 0,
+            pendiente: rawSummary.desglose_metodos_pago.efectivo_pendiente || 0,
+            cantidad: rawSummary.desglose_metodos_pago.efectivo_entradas || 0,
+          },
+          Cortesía: {
+            cobrado: 0,
+            pendiente: 0,
+            cantidad: rawSummary.desglose_metodos_pago.cortesia_entradas || 0,
+          },
+        } : {});
+
+        const gastos_por_categoria = rawSummary.gastos_por_categoria || (rawSummary.desglose_gastos ? {
+          'Local/Alquiler': rawSummary.desglose_gastos.local_alquiler || 0,
+          'Sonido/Luces': rawSummary.desglose_gastos.sonido_luces || 0,
+          'Músicos/Personal': rawSummary.desglose_gastos.musicos_personal || 0,
+          'Publicidad/Marketing': rawSummary.desglose_gastos.publicidad_marketing || 0,
+          'Bebidas/Catering': rawSummary.desglose_gastos.bebidas_catering || 0,
+          'Transporte': rawSummary.desglose_gastos.transporte || 0,
+          'Otros': rawSummary.desglose_gastos.otros || 0,
+        } : {});
+
+        summary = {
+          ...rawSummary,
+          por_medio_pago,
+          gastos_por_categoria,
+        };
+      } else {
+        summary = null;
+      }
+
+      tickets = Array.isArray(tixData) ? tixData : ((tixData && tixData.entradas) || []);
+      interests = Array.isArray(intData) ? intData : ((intData && intData.interesados) || []);
+      expenses = Array.isArray(expData) ? expData : ((expData && expData.gastos) || []);
 
       topbar.update({ title: event.nombre });
       activePresentationContextSignal.set({
@@ -372,9 +412,9 @@ export function createEventDetailController(deps) {
       eventName: (event && event.nombre) || '',
       ticketTypes: (event && event.tipos_de_entrada) || [],
       onSell: async (data) => {
-        const issued = await sellTickets(eventId, data);
+        const res = await sellTickets(eventId, data);
         await loadAllData();
-        return issued;
+        return Array.isArray(res) ? res : ((res && res.entradas) || []);
       },
       onCancel: closeActiveDialog,
     });

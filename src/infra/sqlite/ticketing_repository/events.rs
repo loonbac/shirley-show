@@ -5,6 +5,10 @@ use crate::error::AppError;
 use crate::infra::sqlite::ticketing_repository::SqliteTicketingRepository;
 use crate::ports::ticketing::EventRepository;
 
+fn db_err(e: impl std::fmt::Display) -> AppError {
+    AppError::Database(e.to_string())
+}
+
 impl EventRepository for SqliteTicketingRepository {
     fn create_event(&self, event: &Event) -> Result<(), AppError> {
         let conn = self.pool.get().map_err(|e| {
@@ -184,6 +188,53 @@ impl EventRepository for SqliteTicketingRepository {
         let conn = self.pool.get().map_err(|e| {
             AppError::Database(format!("Failed to get connection for update_event: {e}"))
         })?;
+
+        // Invariant C4: verify sold ticket types and ensure capacity is not lowered below emitted count
+        let mut stmt = conn
+            .prepare("SELECT tipo_entrada, COUNT(*) FROM entradas WHERE evento_id = ?1 GROUP BY tipo_entrada;")
+            .map_err(db_err)?;
+
+        let emitted_counts: Vec<(String, u32)> = stmt
+            .query_map(rusqlite::params![event.id], |row| {
+                let name: String = row.get(0)?;
+                let count: u32 = row.get(1)?;
+                Ok((name, count))
+            })
+            .map_err(db_err)?
+            .collect::<Result<_, _>>()
+            .map_err(db_err)?;
+
+        for (sold_tipo, count) in emitted_counts {
+            if count > 0 {
+                let matching_new_type = event
+                    .tipos_de_entrada
+                    .iter()
+                    .find(|t| t.nombre.eq_ignore_ascii_case(&sold_tipo));
+
+                match matching_new_type {
+                    None => {
+                        return Err(AppError::bad_request(
+                            "cannot_remove_sold_ticket_type",
+                            format!(
+                                "No se puede eliminar o renombrar el tipo de entrada '{}' porque ya tiene {} entrada(s) emitida(s)",
+                                sold_tipo, count
+                            ),
+                        ));
+                    }
+                    Some(new_type) => {
+                        if new_type.capacidad < count {
+                            return Err(AppError::bad_request(
+                                "capacity_below_emitted",
+                                format!(
+                                    "La capacidad del tipo de entrada '{}' ({}) no puede ser menor a las entradas ya emitidas ({})",
+                                    sold_tipo, new_type.capacidad, count
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
 
         let tipos_json = serde_json::to_string(&event.tipos_de_entrada).map_err(|e| {
             AppError::Internal(format!("Failed to serialize tipos_de_entrada: {e}"))

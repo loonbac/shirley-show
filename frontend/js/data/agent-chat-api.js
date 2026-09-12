@@ -48,6 +48,7 @@ export function validateAudioAttachment(file) {
  *   message: string,
  *   history?: Array<{ role: 'user' | 'assistant', content: string }>,
  *   presentationId?: string | null,
+ *   eventId?: string | null,
  *   stagedAudioId?: string | null,
  *   attachment?: File | null,
  *   signal?: AbortSignal,
@@ -56,6 +57,7 @@ export function validateAudioAttachment(file) {
  *   message: string,
  *   actions_taken: Array<any>,
  *   active_presentation_id: string | null,
+ *   active_event_id: string | null,
  *   notice: { code: string, retryable: boolean } | null,
  * }>}
  */
@@ -64,6 +66,7 @@ export async function sendAgentChatMessage(options) {
     message,
     history = [],
     presentationId = null,
+    eventId = null,
     stagedAudioId = null,
     attachment = null,
     signal,
@@ -80,6 +83,9 @@ export async function sendAgentChatMessage(options) {
     formData.append('history', JSON.stringify(history));
     if (presentationId) {
       formData.append('presentation_id', presentationId);
+    }
+    if (eventId) {
+      formData.append('event_id', eventId);
     }
     if (stagedAudioId) {
       formData.append('staged_audio_id', stagedAudioId);
@@ -101,6 +107,7 @@ export async function sendAgentChatMessage(options) {
     message: message || '',
     history,
     presentation_id: presentationId || null,
+    event_id: eventId || null,
     staged_audio_id: stagedAudioId || null,
   };
 

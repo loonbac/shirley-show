@@ -10,6 +10,8 @@ use crate::handlers::ticketing::dto::{
     CreateEventRequest, EventDto, EventResponse, ListEventsResponse, UpdateEventRequest,
     UploadPosterResponse,
 };
+use crate::handlers::ticketing::ticketing_error_response;
+use crate::ports::ticketing::ImageFormat;
 use crate::state::AppState;
 use crate::use_cases::ticketing::events::{CreateEventInput, UpdateEventInput};
 
@@ -19,7 +21,7 @@ pub async fn list(State(state): State<AppState>) -> Response {
             let dtos = events.iter().map(EventDto::from_domain).collect();
             (StatusCode::OK, Json(ListEventsResponse { eventos: dtos })).into_response()
         }
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -52,7 +54,7 @@ pub async fn create(
 
     let tipos_de_entrada = match tipos_result {
         Ok(t) => t,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let input = CreateEventInput {
@@ -70,7 +72,7 @@ pub async fn create(
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -83,7 +85,7 @@ pub async fn get(State(state): State<AppState>, Path(id): Path<String>) -> Respo
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -117,7 +119,7 @@ pub async fn update(
 
     let tipos_de_entrada = match tipos_result {
         Ok(t) => t,
-        Err(err) => return err.into_response(),
+        Err(err) => return ticketing_error_response(err),
     };
 
     let input = UpdateEventInput {
@@ -136,28 +138,28 @@ pub async fn update(
             }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
 pub async fn finalize(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     match state.ticketing.finalize_event.execute(&id) {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
 pub async fn reopen(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     match state.ticketing.reopen_event.execute(&id) {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
 pub async fn delete(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     match state.ticketing.delete_event.execute(&id) {
-        Ok(()) => StatusCode::OK.into_response(),
-        Err(err) => err.into_response(),
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -167,10 +169,12 @@ pub async fn upload_poster(
     mut multipart: Multipart,
 ) -> Response {
     let mut image_data: Option<Vec<u8>> = None;
+    let mut declared_content_type: Option<String> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "imagen" || name == "file" || name == "poster" {
+            declared_content_type = field.content_type().map(|ct| ct.to_string());
             let data = match field.bytes().await {
                 Ok(b) => b,
                 Err(e) => {
@@ -201,13 +205,43 @@ pub async fn upload_poster(
         }
     };
 
+    let content_type = match declared_content_type {
+        Some(ct) => ct.to_lowercase(),
+        None => {
+            return AppError::bad_request(
+                "missing_content_type",
+                "Se requiere el encabezado Content-Type para el archivo de afiche",
+            )
+            .into_response();
+        }
+    };
+
+    let detected_format = match ImageFormat::detect(&data) {
+        Ok(fmt) => fmt,
+        Err(err) => return ticketing_error_response(err),
+    };
+
+    let content_type_matches = match detected_format {
+        ImageFormat::Jpeg => content_type == "image/jpeg" || content_type == "image/jpg",
+        ImageFormat::Png => content_type == "image/png",
+        ImageFormat::Webp => content_type == "image/webp",
+    };
+
+    if !content_type_matches {
+        return AppError::unsupported_media_type(
+            "unsupported_media_type",
+            "El Content-Type declarado no coincide con el formato real de la imagen",
+        )
+        .into_response();
+    }
+
     match state.ticketing.replace_poster.execute(&id, &data) {
         Ok(filename) => (
             StatusCode::OK,
             Json(UploadPosterResponse { imagen: filename }),
         )
             .into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }
 
@@ -229,6 +263,6 @@ pub async fn get_poster(State(state): State<AppState>, Path(id): Path<String>) -
             )
                 .into_response()
         }
-        Err(err) => err.into_response(),
+        Err(err) => ticketing_error_response(err),
     }
 }

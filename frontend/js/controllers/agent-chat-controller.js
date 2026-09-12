@@ -41,6 +41,12 @@ export function createAgentChatController(deps) {
     sendAgentChatMessageFn = sendAgentChatMessage,
   } = deps;
 
+  // Initialize with current route context if present
+  const initialRouteContext = activePresentationContextSignal.get();
+  if (initialRouteContext) {
+    chatState.setRouteContext(initialRouteContext);
+  }
+
   // Sync route context changes into chat state
   const unsubscribeContext = activePresentationContextSignal.subscribe((context) => {
     chatState.setRouteContext(context);
@@ -127,13 +133,16 @@ export function createAgentChatController(deps) {
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({ role: m.role, content: m.content }));
 
-    const presentationId = priorState.activeContext ? priorState.activeContext.id : null;
+    const isEventContext = priorState.activeContext && priorState.activeContext.type === 'event';
+    const presentationId = priorState.activeContext && !isEventContext ? priorState.activeContext.id : null;
+    const eventId = isEventContext ? priorState.activeContext.id : null;
 
     try {
       const response = await sendAgentChatMessageFn({
         message: userMessage,
         history,
         presentationId,
+        eventId,
         stagedAudioId,
         attachment,
         signal: turn.abortController.signal,

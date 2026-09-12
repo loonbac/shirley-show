@@ -263,8 +263,9 @@ export function createDoorController(deps = {}) {
 
   async function loadEvent() {
     try {
-      eventData = await api.getEvent(eventId);
-      view.update({ eventName: eventData.nombre });
+      const raw = await api.getEvent(eventId);
+      eventData = (raw && raw.evento) || raw;
+      view.update({ eventName: eventData ? eventData.nombre : 'Evento' });
     } catch {
       view.update({ eventName: 'Evento' });
     }

@@ -138,8 +138,10 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
 
   const mockApi = {
     getEvent: async (id) => ({
-      id,
-      nombre: 'Gran Festival 2026',
+      evento: {
+        id,
+        nombre: 'Gran Festival 2026',
+      },
     }),
     checkInTicket: async (eventId, codigo) => {
       checkedEventId = eventId;

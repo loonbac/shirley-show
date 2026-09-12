@@ -128,7 +128,11 @@ fn setup_test_state() -> (AppState, TempDir) {
 #[test]
 fn test_tool_schemas_strictly_eight_tools_with_exact_signatures() {
     let tools = get_tool_definitions();
-    assert_eq!(tools.len(), 16, "Must expose exactly 16 tools (8 presentations + 8 ticketing)");
+    assert_eq!(
+        tools.len(),
+        16,
+        "Must expose exactly 16 tools (8 presentations + 8 ticketing)"
+    );
 
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"create_presentation"));

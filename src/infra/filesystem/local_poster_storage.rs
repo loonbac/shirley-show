@@ -19,10 +19,70 @@ impl LocalPosterStorage {
         let _ = fs::create_dir_all(&posters_dir);
         let _ = fs::create_dir_all(&trash_dir);
 
-        Self {
+        let storage = Self {
             posters_dir,
             trash_dir,
+        };
+        storage.reconcile_startup();
+        storage
+    }
+
+    pub fn reconcile_startup(&self) -> usize {
+        let mut cleaned = 0;
+        // 1. Clean .trash dir
+        if let Ok(entries) = fs::read_dir(&self.trash_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && fs::remove_file(&path).is_ok() {
+                    cleaned += 1;
+                }
+            }
         }
+
+        // 2. Clean .part files in posters_dir
+        if let Ok(entries) = fs::read_dir(&self.posters_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let is_part = path.is_file()
+                    && path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|name| name.ends_with(".part"));
+                if is_part && fs::remove_file(&path).is_ok() {
+                    cleaned += 1;
+                }
+            }
+        }
+        cleaned
+    }
+
+    pub fn reconcile_orphans(&self, active_posters: &[String]) -> usize {
+        let mut cleaned = 0;
+        let active_set: std::collections::HashSet<&str> =
+            active_posters.iter().map(|s| s.as_str()).collect();
+
+        if let Ok(entries) = fs::read_dir(&self.posters_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if name.starts_with('.') || name.ends_with(".part") {
+                    continue;
+                }
+                let is_image = name.ends_with(".jpg")
+                    || name.ends_with(".jpeg")
+                    || name.ends_with(".png")
+                    || name.ends_with(".webp");
+                if is_image && !active_set.contains(name) && fs::remove_file(&path).is_ok() {
+                    cleaned += 1;
+                }
+            }
+        }
+        cleaned
     }
 
     fn is_safe_filename(filename: &str) -> bool {
