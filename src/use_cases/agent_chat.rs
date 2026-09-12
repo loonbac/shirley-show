@@ -167,6 +167,9 @@ impl AgentChat {
         let staged_filename = input.staged_filename.clone();
         let initial_presentation_id = input.presentation_id.clone();
         let initial_event_id = input.event_id.clone();
+        let has_confirmed_destination = initial_presentation_id
+            .as_deref()
+            .is_some_and(|id| !id.trim().is_empty());
         let user_message = input.message.trim().to_string();
         let confirmation_reply = ConfirmationReply::classify(&user_message);
 
@@ -317,45 +320,6 @@ impl AgentChat {
             };
         }
 
-        // Once an audio has been staged, a brief destination reply is not an
-        // open-ended AI request. Resolve it through the application's own
-        // presentation lookup so phrases such as "a la de setiembre" work
-        // even when the chat was opened outside a presentation page.
-        if has_staged_audio_id
-            && let Some(destination) = staged_audio_destination_query(&user_message)
-        {
-            let call = ToolCall {
-                id: format!("call_staged_audio_{}", uuid::Uuid::new_v4().simple()),
-                name: "add_track_from_staged".to_string(),
-                arguments: serde_json::json!({
-                    "presentation_id": destination,
-                    "title": "Audio temporal",
-                    "staged_audio_id": turn_context.staged_audio_id,
-                })
-                .to_string(),
-            };
-            let _ = self.dispatcher.dispatch(&call, &mut turn_context).await;
-            if turn_context
-                .actions_taken
-                .last()
-                .is_some_and(|action| action.status == "success")
-            {
-                return AgentChatOutput {
-                    message: compose_grounded_message(
-                        &turn_context.actions_taken,
-                        None,
-                        turn_context.staged_audio_id.as_deref(),
-                    ),
-                    actions_taken: turn_context.actions_taken,
-                    active_presentation_id: turn_context.active_presentation_id,
-                    active_event_id: turn_context.active_event_id.clone(),
-                    staged_audio_id: turn_context.staged_audio_id,
-                    notice: None,
-                    conversation_id,
-                };
-            }
-        }
-
         let mut effective_budget = if self.remote_vocal_enabled {
             self.limits.separation_timeout
         } else {
@@ -401,7 +365,11 @@ impl AgentChat {
                     .filter(|tool| {
                         matches!(
                             tool.name.as_str(),
-                            "download_youtube_track" | "add_track_from_staged" | "separate_vocals"
+                            "list_presentations"
+                                | "get_presentation"
+                                | "download_youtube_track"
+                                | "add_track_from_staged"
+                                | "separate_vocals"
                         )
                     })
                     .collect()
@@ -411,9 +379,13 @@ impl AgentChat {
 
             let system_prompt = if is_audio_operation {
                 if has_staged_audio_id {
-                    "Hay un audio temporal disponible y el destino está confirmado. Ejecuta add_track_from_staged o separate_vocals según la petición. Responde solo con llamadas de herramienta.".to_string()
+                    format!(
+                        "Continúa la solicitud de audio usando el historial completo. Hay un audio temporal disponible. Destino confirmado: {has_confirmed_destination}. Si no está confirmado, llama a list_presentations, identifica por el nombre escrito por la usuaria una única presentación y llama a get_presentation con su ID antes de modificarla. Después ejecuta add_track_from_staged o separate_vocals según la intención original. No pidas IDs que puedas obtener con las herramientas. Responde con llamadas de herramienta cuando debas actuar."
+                    )
                 } else {
-                    "Ejecuta la solicitud de audio usando las herramientas disponibles. Para un enlace de YouTube llama primero download_youtube_track. El destino ya está confirmado. Responde solo con llamadas de herramienta cuando la petición sea operativa.".to_string()
+                    format!(
+                        "Interpreta la solicitud completa de audio. Para un enlace de YouTube llama primero a download_youtube_track. Destino confirmado: {has_confirmed_destination}. Si todavía no hay destino, prepara el audio y permite que la usuaria indique la presentación. No inventes IDs ni afirmes acciones sin herramientas."
+                    )
                 }
             } else {
                 full_system_prompt.clone()
@@ -429,44 +401,6 @@ impl AgentChat {
             let response = match tokio::time::timeout(remaining, provider.complete(req)).await {
                 Ok(Ok(resp)) => resp,
                 Ok(Err(err)) => {
-                    // A short destination reply such as "a la de setiembre" is
-                    // deterministic once a staged audio capability exists. Some
-                    // thinking providers emit an empty completion for that tiny
-                    // tool-only turn, so complete the safe add operation directly.
-                    if has_staged_audio_id
-                        && let Some(destination) = staged_audio_destination_query(&user_message)
-                    {
-                        let call = ToolCall {
-                            id: format!("call_staged_audio_{}", uuid::Uuid::new_v4().simple()),
-                            name: "add_track_from_staged".to_string(),
-                            arguments: serde_json::json!({
-                                "presentation_id": destination,
-                                "title": "Audio temporal",
-                                "staged_audio_id": turn_context.staged_audio_id,
-                            })
-                            .to_string(),
-                        };
-                        let _ = self.dispatcher.dispatch(&call, &mut turn_context).await;
-                        if turn_context
-                            .actions_taken
-                            .last()
-                            .is_some_and(|action| action.status == "success")
-                        {
-                            return AgentChatOutput {
-                                message: compose_grounded_message(
-                                    &turn_context.actions_taken,
-                                    None,
-                                    turn_context.staged_audio_id.as_deref(),
-                                ),
-                                actions_taken: turn_context.actions_taken,
-                                active_presentation_id: turn_context.active_presentation_id,
-                                active_event_id: turn_context.active_event_id.clone(),
-                                staged_audio_id: turn_context.staged_audio_id,
-                                notice: None,
-                                conversation_id: conversation_id.clone(),
-                            };
-                        }
-                    }
                     let notice = AgentNotice {
                         code: err.code().to_string(),
                         retryable: err.retryable(),
@@ -767,51 +701,6 @@ impl AgentChat {
             notice: None,
             conversation_id,
         }
-    }
-}
-
-fn staged_audio_destination_query(message: &str) -> Option<&str> {
-    let trimmed = message.trim();
-    let lower = trimmed.to_lowercase();
-    for prefix in [
-        "ponlo en ",
-        "ponla en ",
-        "agregalo en ",
-        "agrégalo en ",
-        "agregala en ",
-        "agrégala en ",
-        "a la de ",
-        "a la ",
-        "al de ",
-        "al ",
-        "en ",
-        "para ",
-        "a ",
-    ] {
-        if lower.starts_with(prefix) {
-            let destination = trimmed[prefix.len()..].trim();
-            if !destination.is_empty() {
-                return Some(destination);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod destination_query_tests {
-    use super::staged_audio_destination_query;
-
-    #[test]
-    fn extracts_common_staged_audio_destination_replies() {
-        assert_eq!(
-            staged_audio_destination_query("a la de setiembre"),
-            Some("setiembre")
-        );
-        assert_eq!(
-            staged_audio_destination_query("en eventos 13 setiembre"),
-            Some("eventos 13 setiembre")
-        );
     }
 }
 

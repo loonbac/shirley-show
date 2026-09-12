@@ -9,7 +9,6 @@ where
     Ok(opt.unwrap_or_default())
 }
 
-
 #[derive(Debug, Serialize)]
 pub struct GroqChatCompletionRequest {
     pub model: String,

@@ -1,17 +1,26 @@
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
+use axum::http::{HeaderValue, header};
 use axum::routing::{get, patch, post};
+use tower::ServiceBuilder;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::handlers::{agent, audio, items, presentations, static_assets, ticketing};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
     let frontend_dir = state.frontend_dir.clone();
+    let frontend_service = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+        ))
+        .service(ServeDir::new(frontend_dir));
 
     Router::new()
         .route("/", get(static_assets::serve_index))
-        .nest_service("/assets", ServeDir::new(frontend_dir))
+        .nest_service("/assets", frontend_service)
         .route("/api/presentations", get(presentations::list::list))
         .route("/api/presentations", post(presentations::create::create))
         .route("/api/presentations/{id}", get(presentations::get::get))

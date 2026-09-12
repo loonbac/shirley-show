@@ -144,7 +144,11 @@ fn test_legacy_ticket_schema_is_upgraded_to_allow_empty_contact() {
     .expect("an empty ticket contact is accepted after migration");
 
     let existing: String = conn
-        .query_row("SELECT contacto FROM entradas WHERE id = 'existing'", [], |row| row.get(0))
+        .query_row(
+            "SELECT contacto FROM entradas WHERE id = 'existing'",
+            [],
+            |row| row.get(0),
+        )
         .expect("existing ticket preserved");
     assert_eq!(existing, "999");
 }

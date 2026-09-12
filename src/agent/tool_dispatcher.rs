@@ -337,7 +337,9 @@ fn matches_fuzzy_substring(name: &str, query: &str) -> bool {
         return true;
     }
 
-    let ignored = ["a", "al", "de", "del", "el", "en", "la", "las", "los", "para"];
+    let ignored = [
+        "a", "al", "de", "del", "el", "en", "la", "las", "los", "para",
+    ];
     let name_tokens: Vec<&str> = name_norm
         .split(|c: char| !c.is_alphanumeric())
         .filter(|token| !token.is_empty() && !ignored.contains(token))
@@ -347,10 +349,7 @@ fn matches_fuzzy_substring(name: &str, query: &str) -> bool {
         .filter(|token| !token.is_empty() && !ignored.contains(token))
         .collect();
 
-    !query_tokens.is_empty()
-        && query_tokens
-            .iter()
-            .all(|token| name_tokens.contains(token))
+    !query_tokens.is_empty() && query_tokens.iter().all(|token| name_tokens.contains(token))
 }
 
 #[cfg(test)]

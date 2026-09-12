@@ -18,7 +18,10 @@ use crate::ports::chat_completion_provider::{ChatCompletionProvider, CompletionR
 pub const DEFAULT_GROQ_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_GROQ_RETRIES: u32 = 3;
 pub const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
-pub const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 800;
+// Thinking models spend part of this budget on internal reasoning before they
+// can emit a tool call. A budget of 800 frequently ended with no content and
+// no tool calls even though the upstream request itself succeeded.
+pub const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4_096;
 pub const USER_AGENT_SHIRLEY: &str = "shirley-show/1.0";
 pub const HEADER_OPENCODE_SESSION: &str = "x-opencode-session";
 
@@ -229,12 +232,10 @@ impl ChatCompletionProvider for GroqClient {
                 match status {
                     StatusCode::OK => {
                         let raw_body = response.text().await.map_err(|_| {
-                            ProviderError::MalformedResponse(
-                                "Invalid response body".to_string(),
-                            )
+                            ProviderError::MalformedResponse("Invalid response body".to_string())
                         })?;
-                        let parsed: GroqChatCompletionResponse =
-                            serde_json::from_str(&raw_body).map_err(|error| {
+                        let parsed: GroqChatCompletionResponse = serde_json::from_str(&raw_body)
+                            .map_err(|error| {
                                 eprintln!(
                                     "OpenCode response schema error: {error}; body: {}",
                                     raw_body.chars().take(2_000).collect::<String>()
@@ -248,6 +249,7 @@ impl ChatCompletionProvider for GroqClient {
                             ProviderError::MalformedResponse("Choices array is empty".to_string())
                         })?;
 
+                        let finish_reason = choice.finish_reason.clone();
                         let mut tool_calls = Vec::new();
                         for tc in choice.message.tool_calls {
                             if tc.id.is_empty() || tc.function.name.is_empty() {
@@ -273,7 +275,9 @@ impl ChatCompletionProvider for GroqClient {
                             .filter(|c| !c.is_empty());
 
                         if content.is_none() && tool_calls.is_empty() {
-                            eprintln!("OpenCode response contained neither text nor tool calls");
+                            eprintln!(
+                                "OpenCode response contained neither text nor tool calls; finish_reason={finish_reason:?}"
+                            );
                             return Err(ProviderError::MalformedResponse(
                                 "Response contains neither content nor tool calls".to_string(),
                             ));
