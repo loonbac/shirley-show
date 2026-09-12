@@ -404,9 +404,15 @@ console.log('Running Events UI and Integration Tests...');
     const cards = quickSale.el.querySelectorAll('.events-quick-ticket-card');
     assert.equal(cards.length, 2, 'Must render 2 ticket cards');
 
-    const waLink = cards[0].querySelector('.events-quick-ticket-wa-btn');
-    assert.ok(waLink, 'Card must have WhatsApp sharing link');
-    assert.ok(waLink.getAttribute('href').startsWith('https://wa.me/51987654321?text='), 'WhatsApp link targets cleaned phone with 51');
+    assert.equal(
+      cards[0].querySelector('.events-quick-ticket-wa-btn'),
+      null,
+      'The issued ticket card must not open WhatsApp with a link'
+    );
+    assert.ok(
+      cards[0].querySelector('.events-quick-ticket-copy-btn'),
+      'The issued ticket card must offer copying the PNG image'
+    );
 
     quickSale.destroy();
   }

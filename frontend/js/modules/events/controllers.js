@@ -420,6 +420,7 @@ export function createEventDetailController(deps) {
     closeActiveDialog();
     activeDialog = createSellTicketDialog({
       eventName: (event && event.nombre) || '',
+      event,
       ticketTypes: (event && event.tipos_de_entrada) || [],
       onSell: async (data) => {
         const res = await sellTickets(eventId, data);

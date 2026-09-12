@@ -681,6 +681,11 @@
   align-items: center;
 }
 
+.events-quick-ticket-copy-status:not(:empty) {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
 /* --- Public Ticket Mobile View --- */
 .public-ticket-container {
   max-width: 480px;

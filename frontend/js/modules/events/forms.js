@@ -4,7 +4,8 @@ import { createTextInput } from '../../components/atoms/text-input.js';
 import { bindDialogDismiss } from '../../behaviors/bind-dialog-dismiss.js';
 import { bindFormSubmit } from '../../behaviors/bind-form-submit.js';
 import { trimRequired } from '../../utils/validation/trim-required.js';
-import { buildWhatsAppTicketLink, buildTicketPublicUrl } from './whatsapp.js';
+import { buildTicketPublicUrl } from './whatsapp.js';
+import { generarFotoEntrada, descargarBlob } from './ticket-photo.js';
 
 /**
  * Creates an accessible modal dialog for creating or editing an event.
@@ -671,6 +672,7 @@ export function createConvertInterestDialog(props) {
  *
  * @param {{
  *   eventName?: string,
+ *   event?: { nombre?: string, fecha_hora?: string, lugar?: string } | null,
  *   ticketTypes: Array<{ nombre: string, precio: number, capacidad: number }>,
  *   onSell: (data: {
  *     nombre_comprador: string,
@@ -685,7 +687,7 @@ export function createConvertInterestDialog(props) {
  * @returns {{ el: HTMLElement, destroy: () => void }}
  */
 export function createSellTicketDialog(props) {
-  const { eventName = '', ticketTypes = [], onSell, onCancel } = props;
+  const { eventName = '', event = null, ticketTypes = [], onSell, onCancel } = props;
 
   const titleEl = createElement('h3', { class: 'events-dialog-title' }, ['Venta Rápida de Entradas']);
 
@@ -814,11 +816,6 @@ export function createSellTicketDialog(props) {
     ]);
 
     const cards = issuedTickets.map((ticket, idx) => {
-      const waLink = buildWhatsAppTicketLink({
-        ticket,
-        eventName,
-      });
-
       const isPaid = ticket.estado_pago === 'Pagado';
       const badgeClass = isPaid ? 'events-badge-success' : 'events-badge-warning';
 
@@ -831,12 +828,44 @@ export function createSellTicketDialog(props) {
         createElement('span', {}, [`Precio: S/ ${Number(ticket.precio).toFixed(2)}`]),
       ]);
 
-      const waBtn = createElement('a', {
-        href: waLink,
-        target: '_blank',
-        rel: 'noopener noreferrer',
-        class: 'btn btn-primary btn-sm events-quick-ticket-wa-btn',
-      }, ['Compartir por WhatsApp']);
+      const copyStatus = createElement('span', {
+        class: 'events-quick-ticket-copy-status',
+        role: 'status',
+        'aria-live': 'polite',
+      });
+
+      const copyBtn = createButton({
+        text: 'Copiar imagen',
+        variant: 'primary',
+        type: 'button',
+        onClick: async () => {
+          copyBtn.el.setAttribute('disabled', 'true');
+          copyStatus.textContent = 'Preparando imagen…';
+          try {
+            const imagePromise = generarFotoEntrada(ticket, event || { nombre: eventName });
+            if (
+              typeof navigator !== 'undefined' &&
+              navigator.clipboard &&
+              typeof navigator.clipboard.write === 'function' &&
+              typeof ClipboardItem !== 'undefined'
+            ) {
+              await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': imagePromise }),
+              ]);
+              copyStatus.textContent = 'Imagen copiada. Ya puedes pegarla en el chat.';
+            } else {
+              const blob = await imagePromise;
+              descargarBlob(blob, `entrada-${ticket.nombre_comprador || 'ticket'}.png`);
+              copyStatus.textContent = 'El navegador no permite copiar imágenes; se descargó el PNG.';
+            }
+          } catch (err) {
+            copyStatus.textContent = (err && err.message) || 'No se pudo copiar la imagen.';
+          } finally {
+            copyBtn.el.removeAttribute('disabled');
+          }
+        },
+      });
+      copyBtn.el.classList.add('events-quick-ticket-copy-btn');
 
       const publicTicketUrl = buildTicketPublicUrl(ticket.scan_token);
       const publicBtn = createElement('a', {
@@ -846,7 +875,7 @@ export function createSellTicketDialog(props) {
       }, ['Ver Ticket']);
 
       const cardActions = createElement('div', { class: 'events-quick-ticket-card-actions' }, [
-        waBtn,
+        copyBtn.el,
         publicBtn,
       ]);
 
@@ -854,6 +883,7 @@ export function createSellTicketDialog(props) {
         header,
         details,
         cardActions,
+        copyStatus,
       ]);
     });
 
