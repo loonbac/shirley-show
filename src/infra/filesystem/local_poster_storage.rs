@@ -165,8 +165,11 @@ impl PosterStorage for LocalPosterStorage {
             .trash_dir
             .join(format!("{}_{}", Uuid::new_v4(), filename));
         if fs::rename(&path, &trash_target).is_ok() {
-            let _ = fs::remove_file(&trash_target);
-            Ok(true)
+            fs::remove_file(&trash_target).map(|_| true).map_err(|e| {
+                AppError::Internal(format!(
+                    "Error eliminando afiche {filename} de papelera: {e}"
+                ))
+            })
         } else {
             fs::remove_file(&path)
                 .map(|_| true)

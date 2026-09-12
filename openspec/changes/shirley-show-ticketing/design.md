@@ -282,7 +282,7 @@ Flujo de reemplazo:
 4. El archivo se promueve por rename a `{evento_id}_{uuid}.{jpg|png|webp}` y se actualiza `eventos.imagen`.
 5. Si falla SQLite, se elimina el nuevo asset. Tras commit, el anterior se mueve a `.trash/` y se elimina.
 
-El filesystem y SQLite no ofrecen una transacción distribuida. Para hacer recuperable esa brecha, reemplazo/eliminación usan renames atómicos dentro del mismo filesystem y una reconciliación de arranque elimina `.part`, `.trash` y basenames no referenciados. La DB nunca guarda paths aportados por cliente. El borrado de evento confirma primero la cascada en DB y después retira el afiche; una limpieza pendiente se reporta y queda recuperable, sin restaurar datos ya eliminados.
+El filesystem y SQLite no ofrecen una transacción distribuida. Para hacer robusta esa brecha, reemplazo/eliminación usan renames atómicos dentro del mismo filesystem y una reconciliación de arranque elimina `.part`, `.trash` y basenames no referenciados (`reconcile_orphans`). La DB nunca guarda paths aportados por cliente. El borrado de evento ejecuta primero la eliminación del afiche en el filesystem (si falla FS, aborta inmediatamente con 500 y la DB queda intacta); una vez asegurado el retiro del afiche, ejecuta la cascada en SQLite. Cualquier archivo huérfano eventual queda saneado por la reconciliación existente.
 
 `GET /api/eventos/{id}/imagen` resuelve solo la clave validada, detecta el tipo persistido, devuelve bytes con `Content-Type`, `ETag` y `Cache-Control: public, max-age=300, must-revalidate`. Ticket público usa `Cache-Control: no-store` para no conservar estados de pago o check-in obsoletos.
 

@@ -176,6 +176,20 @@ impl<R: EventRepository, P: PosterStorage> DeleteEvent<R, P> {
             .get_event(id)?
             .ok_or_else(|| AppError::not_found("event_not_found", "Evento no encontrado"))?;
 
+        // 1. Filesystem first: delete poster file before touching database.
+        // If filesystem deletion fails, abort immediately with 500 error, leaving DB intact.
+        if let Some(ref filename) = event.imagen {
+            match self.poster_storage.delete_poster(filename) {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(AppError::Internal(format!(
+                        "Error eliminando afiche de disco para evento {id}: {e}"
+                    )));
+                }
+            }
+        }
+
+        // 2. Database cascade second: delete event and cascade child records in SQLite.
         let deleted = self.repo.delete_event(id)?;
         if !deleted {
             return Err(AppError::not_found(
@@ -184,19 +198,9 @@ impl<R: EventRepository, P: PosterStorage> DeleteEvent<R, P> {
             ));
         }
 
-        let mut cleanup_pending = false;
-        if let Some(filename) = event.imagen {
-            match self.poster_storage.delete_poster(&filename) {
-                Ok(true) => {}
-                _ => {
-                    cleanup_pending = true;
-                }
-            }
-        }
-
         Ok(DeleteEventResult {
             deleted: true,
-            cleanup_pending,
+            cleanup_pending: false,
         })
     }
 }

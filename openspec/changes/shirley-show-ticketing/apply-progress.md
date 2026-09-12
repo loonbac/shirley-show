@@ -4,12 +4,12 @@
 **Base branch:** `main`  
 **Store:** OpenSpec  
 **Execution mode:** auto  
-**Current Work Unit:** `fix-tix-5-blockers` (Remediation 5 Blockers)  
-**Authority Token:** `tvf2-begin-003` (max budget: 500 lines)  
+**Current Work Unit:** `fix-tix-2-blockers` (Remediation 2 Final Blockers)
+**Authority Token:** `tvf3-begin-003` (max budget: 500 lines)
 
 ---
 
-## 1. Cumulative Completed Tasks (50/50 total + Remediation C1–C7)
+## 1. Cumulative Completed Tasks (50/50 total + Remediation C1–C7 + Remediation B1–B2)
 
 ### Slice 1: Esquema de base de datos, dominio y repositorios núcleo (10/10)
 - [x] RED: Escribir tests de migración SQLite `0002` que fallen por ausencia de tablas `eventos`, `interesados`, `entradas`, `gastos` y sus índices en `tests/ticketing_migration_tests.rs`. <!-- sdd-owner: implementation -->
@@ -82,6 +82,10 @@
 - [x] C6: Acotamiento riguroso de listado de entradas con `DEFAULT_TICKETS_LIMIT = 500` con prueba que inserta 520 filas en DB y comprueba truncamiento exacto a 500 en `tests/ticketing_event_repo_tests.rs`. <!-- sdd-owner: implementation -->
 - [x] C7: Reconciliación completa de evidencia TDD con schema protocolario de 8 columnas (`Task`, `Test File`, `Layer`, `Safety Net`, `RED`, `GREEN`, `TRIANGULATE`, `REFACTOR`) por cada una de las 50 tareas y 7 remediaciones en `apply-progress.md`. <!-- sdd-owner: implementation -->
 
+### Final Remediation Work Unit: 2 Bloqueadores del Verify Report (2/2)
+- [x] Rem2-B1: Borrado de evento en orden FS-primero (elimina afiche de disco; si falla FS -> aborta 500 dejando DB completamente intacta), luego cascada DB en SQLite; huérfanos gestionados vía `reconcile_orphans`; propagación de errores de borrado de `.trash` en `LocalPosterStorage::delete_poster`; actualización de contrato en `specs/eventos/spec.md` y `design.md` + tests en `tests/ticketing_poster_storage_tests.rs`. <!-- sdd-owner: implementation -->
+- [x] Rem2-B2: Test concurrente C4 (`test_update_event_concurrency_with_sales_in_immediate_tx`) refactorizado con `Barrier` para forzar entrelazado de hilos, afirmación incondicional de invariante universal (`general_cap >= emitted`), afirmación exhaustiva de ambos órdenes válidos sin ramas que omitan aserciones, y nuevo test secuencial determinístico del segundo orden (`test_update_event_lowered_capacity_first_then_sale_exceeds_fails`) en `tests/ticketing_event_repo_tests.rs`. <!-- sdd-owner: implementation -->
+
 ---
 
 ## 2. Strict TDD Cycle Evidence Table (S1–S6 + Remediation C1–C7)
@@ -145,10 +149,12 @@
 | C5-Rem | `tests/ticketing_poster_storage_tests.rs` | Integration | ✅ 6/6 passing | ✅ Written (reject image/jpg, cleanup_pending=true, compensation) | ✅ Passed (415 on image/jpg, cleanup_pending=true, revert on old fail) | ✅ 4 cases (image/jpg 415, discordant MIME 415, cleanup true, revert) | ✅ Clean (posters.rs & local_poster_storage) |
 | C6-Rem | `tests/ticketing_event_repo_tests.rs` | Integration | ✅ 5/5 passing | ✅ Written (test_list_tickets bounds 520 rows in DB) | ✅ Passed (520 rows inserted, query returns exactly 500) | ✅ 2 cases (empty list, 520 rows truncated to 500) | ✅ Clean (tickets.rs limit constant) |
 | C7-Rem | `cargo test` | Integration | ✅ 326/326 passing | ✅ Written (reconcile full 57-row strict-TDD table) | ✅ Passed (all 50 tasks + 7 remediations verified) | ➖ Single (complete protocol audit) | ✅ Clean (full documentation green) |
+| Rem2-B1 | `tests/ticketing_poster_storage_tests.rs` | Integration | ✅ 8/8 passing | ✅ Written (aborts with 500 & preserves DB on FS fail) | ✅ Passed (FS-first order, aborts on FS fail, cascaded on success) | ✅ 3 cases (FS error -> 500 + DB intact, success, safe check) | ✅ Clean (propagates .trash removal, clippy clean) |
+| Rem2-B2 | `tests/ticketing_event_repo_tests.rs` | Integration | ✅ 6/6 passing | ✅ Written (Barrier race + 0 omitted branches + seq order 2) | ✅ Passed (exactly one succeeds, general_cap >= emitted, both orders asserted) | ✅ 3 cases (concurrent Barrier race, seq Order 1, seq Order 2) | ✅ Clean (Barrier sync, clippy clean) |
 
 ### Test Summary
-- **Total tests written / updated**: 57 (50 implementation tasks + 7 remediation cycles)
-- **Total tests passing**: 329 automated tests in `cargo test` (0 failed, 1 ignored) + 7 Node test suites green
+- **Total tests written / updated**: 59 (50 implementation tasks + 7 first-remediation cycles + 2 final-remediation cycles)
+- **Total tests passing**: 330 automated tests in `cargo test` (0 failed, 1 ignored) + 7 Node test suites green
 - **Layers used**: Unit (21), Integration (36)
 - **Approval tests**: None — no refactoring tasks
 - **Pure functions created**: 9 (`Money` arithmetic, `TicketType::new`, `Event::new`, `ImageFormat::detect`, `formatBytes`, `parseRoute`, `generateWhatsAppLink`, `camera-qr-scanner`, `resolveTurn active_event_id`)
@@ -174,11 +180,20 @@
 - `tests/ticketing_poster_storage_tests.rs` (Added test verifying `cleanup_pending == true` when storage delete fails; added test verifying replacement compensation when deleting old poster fails)
 - `openspec/changes/shirley-show-ticketing/apply-progress.md` (Completely rewritten with 8-column strict TDD evidence table for all 57 tasks)
 
+### Modified in 2-Blocker Remediation (Work-Unit fix-tix-2-blockers)
+- `src/use_cases/ticketing/events.rs`: Inverted deletion sequence to filesystem-first. Deletes on-disk poster first; if storage returns an error, aborts immediately with `AppError::Internal` (HTTP 500) leaving the database record completely intact. Runs SQLite cascade deletion only after poster asset is removed. Fixed clippy collapsible-if.
+- `src/infra/filesystem/local_poster_storage.rs`: Propagates errors when removing files from `.trash` rather than swallowing the result of `fs::remove_file(&trash_target)`.
+- `src/use_cases/ticketing/posters.rs`: Fixed clippy collapsible-if warning in `ReplaceEventPoster`.
+- `tests/ticketing_poster_storage_tests.rs`: Replaced test asserting non-atomic deletion with `test_delete_event_aborts_with_error_and_preserves_db_when_fs_deletion_fails`, proving that filesystem failure aborts with 500 and leaves the event record in SQLite completely intact.
+- `tests/ticketing_event_repo_tests.rs`: Refactored `test_update_event_concurrency_with_sales_in_immediate_tx` to use `std::sync::Barrier` to force thread interleaving, asserting `res1.is_ok() ^ res2.is_ok()`, invariant `general_cap >= emitted`, and exhaustive matching across both outcomes with zero omitted branches. Added `test_update_event_lowered_capacity_first_then_sale_exceeds_fails` testing the second order deterministically.
+- `openspec/changes/shirley-show-ticketing/specs/eventos/spec.md`: Updated Requirement "Event Deletion with Cascade and Asset Cleanup" to specify filesystem-first order, HTTP 500 abort with database intact on FS failure, SQLite cascade on success, and orphan reconciliation backup.
+- `openspec/changes/shirley-show-ticketing/design.md`: Updated architecture section 7 to document the filesystem-first deletion order with orphan reconciliation.
+
 ---
 
 ## 4. Workload and Delivery Boundary
 
-- **Work unit:** `fix-tix-5-blockers`
-- **Assigned slice:** Remediation of 5 blockers identified in `verify-report.md`.
-- **Authority Token:** `tvf2-begin-003` (max budget: 500 lines).
-- **Reporting for Finish:** Verification commands completed, zero clippy warnings on ticketing targets, zero fmt errors (`cargo fmt --check` clean), 329 automated Rust tests passing, all Node integration suites passing, zero E2E vivo, zero `.run/` or `:3100` touching.
+- **Work unit:** `fix-tix-2-blockers`
+- **Assigned slice:** Remediation of 2 final blockers identified in `verify-report.md`.
+- **Authority Token:** `tvf3-begin-003` (max budget: 500 lines).
+- **Reporting for Finish:** Verification commands completed, zero clippy warnings on ticketing targets and library, zero fmt errors (`cargo fmt --check` clean), 330 automated Rust tests passing, all Node integration suites passing, zero E2E vivo, zero `.run/` or `:3100` touching. Report for finish (NO settle).

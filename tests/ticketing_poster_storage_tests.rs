@@ -269,7 +269,7 @@ impl PosterStorage for FailingDeletePosterStorage {
 }
 
 #[test]
-fn test_delete_event_returns_cleanup_pending_true_when_file_deletion_fails() {
+fn test_delete_event_aborts_with_error_and_preserves_db_when_fs_deletion_fails() {
     let temp_dir = tempdir().unwrap();
     let posters_path = temp_dir.path().join("posters");
     let inner_storage = Arc::new(LocalPosterStorage::new(posters_path.clone()));
@@ -296,19 +296,32 @@ fn test_delete_event_returns_cleanup_pending_true_when_file_deletion_fails() {
     let poster_file = replace_poster.execute(&event.id, SAMPLE_WEBP).unwrap();
     assert!(posters_path.join(&poster_file).exists());
 
-    // When storage delete fails, delete_event MUST succeed in deleting DB record but flag cleanup_pending = true
+    // When storage delete fails, delete_event MUST abort with error and preserve DB record intact
     let failing_storage = Arc::new(FailingDeletePosterStorage {
         inner: inner_storage.clone(),
     });
     let delete_event = DeleteEvent::new(repo.clone(), failing_storage);
 
-    let result = delete_event.execute(&event.id).unwrap();
-    assert!(result.deleted, "Event record should be deleted");
+    let result = delete_event.execute(&event.id);
     assert!(
-        result.cleanup_pending,
-        "cleanup_pending MUST be true when file deletion fails"
+        result.is_err(),
+        "Event deletion MUST abort with error when filesystem poster deletion fails"
     );
-    // File remains on disk because delete failed
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, AppError::Internal(_)),
+        "Error MUST be AppError::Internal (HTTP 500): {err}"
+    );
+
+    // Database record MUST remain intact!
+    let preserved_event = repo.get_event(&event.id).unwrap();
+    assert!(
+        preserved_event.is_some(),
+        "Event record in SQLite MUST be preserved intact when filesystem deletion fails"
+    );
+    assert_eq!(preserved_event.unwrap().id, event.id);
+
+    // Poster file remains on disk because storage deletion failed
     assert!(posters_path.join(&poster_file).exists());
 }
 

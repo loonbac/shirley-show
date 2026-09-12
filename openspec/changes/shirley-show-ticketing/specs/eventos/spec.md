@@ -93,21 +93,28 @@ The system MUST store and serve an optional promotional poster image per event, 
 
 ### Requirement: Event Deletion with Cascade and Asset Cleanup
 
-The system MUST atomically delete an event, its associated database records (tickets, leads, expenses), and its on-disk poster file.
+The system MUST delete an event, its associated database records (tickets, leads, expenses), and its on-disk poster file using a filesystem-first order with database cascade and reconciliation backup.
 
-1. Deletion of an event MUST remove all associated rows in `entradas`, `interesados`, and `gastos` via foreign key cascade or transactional cleanup.
-2. If the event has an associated poster on disk, the system MUST delete the file from the filesystem upon successful event deletion.
-3. If the event does not exist, the system MUST return HTTP 404 Not Found.
+1. If the event has an associated poster file on disk, the system MUST attempt to delete the poster file from the filesystem first.
+2. If filesystem poster deletion fails due to an I/O error, the system MUST abort the deletion operation immediately, return HTTP 500 Internal Server Error, and leave all database records (event, tickets, leads, expenses) completely intact.
+3. Upon successful deletion of the poster asset (or if the event has no associated poster), the system MUST delete the event from SQLite and cascade-delete all associated rows in `entradas`, `interesados`, and `gastos`.
+4. Any orphan poster files resulting from interrupted operations or external inconsistencies MUST be purged by background/startup poster storage reconciliation (`reconcile_orphans`).
+5. If the event does not exist, the system MUST return HTTP 404 Not Found without modifying any records or files.
 
 #### Scenario: Delete event with existing tickets, expenses, and poster asset
 - GIVEN an event with 10 sold tickets, 3 expenses, 2 leads, and a poster file on disk
 - WHEN the client confirms deletion of the event
-- THEN the system MUST delete the event, cascade delete all 10 tickets, 3 expenses, and 2 leads in SQLite, and remove the poster file from `data/posters/`.
+- THEN the system MUST remove the poster file from `data/posters/` first, delete the event and cascade delete all 10 tickets, 3 expenses, and 2 leads in SQLite, and return HTTP 200.
 
 #### Scenario: Delete non-existent event
 - GIVEN an event ID "inexistente-123" that does not exist in SQLite
 - WHEN the client requests deletion of that event ID
 - THEN the system MUST return HTTP 404 Not Found without modifying any records or files.
+
+#### Scenario: Abort event deletion and keep database intact when filesystem poster deletion fails
+- GIVEN an event with an associated poster file where filesystem deletion fails due to an I/O error
+- WHEN the client requests deletion of the event
+- THEN the system MUST abort the deletion, return HTTP 500 Internal Server Error, and keep the event and all associated database records intact.
 
 ---
 

@@ -499,6 +499,10 @@ fn test_update_event_concurrency_with_sales_in_immediate_tx() {
     let repo1 = repo.clone();
     let repo2 = repo.clone();
 
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let b1 = barrier.clone();
+    let b2 = barrier.clone();
+
     // Thread 1: Sells 6 tickets
     let h1 = std::thread::spawn(move || {
         let creds: Vec<_> = (0..6)
@@ -509,6 +513,7 @@ fn test_update_event_concurrency_with_sales_in_immediate_tx() {
             })
             .collect();
 
+        b1.wait();
         repo1.issue_sale(
             &SellTicketsInput {
                 evento_id: "evt-conc".to_string(),
@@ -539,18 +544,135 @@ fn test_update_event_concurrency_with_sales_in_immediate_tx() {
         )
         .unwrap();
 
+        b2.wait();
         repo2.update_event(&lowered_event)
     });
 
     let res1 = h1.join().unwrap();
     let res2 = h2.join().unwrap();
 
-    // Verify invariants:
-    // If sale succeeded (6 tickets emitted), update to capacity 4 MUST have failed!
-    if res1.is_ok() {
-        assert!(
-            res2.is_err(),
-            "Capacity lowering to 4 must fail when 6 tickets were sold"
-        );
+    // UNCONDITIONAL INVARIANTS:
+    // 1. Exactly one operation must succeed (either sale first or update first)
+    assert!(
+        res1.is_ok() ^ res2.is_ok(),
+        "Concurrency race: exactly one operation must succeed; res1={:?}, res2={:?}",
+        res1.is_ok(),
+        res2.is_ok()
+    );
+
+    // 2. Fetch current persisted state
+    let current_event = repo.get_event("evt-conc").unwrap().expect("event exists");
+    let general_cap = current_event
+        .tipos_de_entrada
+        .iter()
+        .find(|t| t.nombre == "General")
+        .expect("General type exists")
+        .capacidad;
+    let tickets = repo.list_tickets("evt-conc", None, None, None).unwrap();
+    let emitted = tickets.len() as u32;
+
+    // 3. Universal invariant: capacity MUST ALWAYS be >= emitted count
+    assert!(
+        general_cap >= emitted,
+        "Invariant violated: capacity ({general_cap}) must be >= emitted tickets ({emitted})"
+    );
+
+    // 4. Assert both valid outcomes explicitly with zero omitted branches
+    match (res1, res2) {
+        (Ok(_), Err(update_err)) => {
+            // Order 1: Sale won race -> 6 tickets emitted, update failed
+            assert_eq!(emitted, 6, "All 6 tickets must have been emitted");
+            assert_eq!(general_cap, 10, "Capacity must remain original 10");
+            assert_eq!(
+                update_err.code(),
+                "capacity_below_emitted",
+                "Update must fail with capacity_below_emitted"
+            );
+        }
+        (Err(sale_err), Ok(_)) => {
+            // Order 2: Capacity update won race -> lowered to 4, sale of 6 failed
+            assert_eq!(emitted, 0, "Zero tickets must have been emitted");
+            assert_eq!(general_cap, 4, "Capacity must have been lowered to 4");
+            assert_eq!(
+                sale_err.code(),
+                "capacity_exceeded",
+                "Sale must fail with capacity_exceeded"
+            );
+        }
+        (Ok(_), Ok(_)) => {
+            panic!("Forbidden: both sale and capacity reduction succeeded simultaneously");
+        }
+        (Err(e1), Err(e2)) => {
+            panic!("Forbidden: both operations failed unexpectedly: sale={e1}, update={e2}");
+        }
     }
+}
+
+#[test]
+fn test_update_event_lowered_capacity_first_then_sale_exceeds_fails() {
+    let temp_file = NamedTempFile::new().expect("temp file");
+    let pool = init_pool(temp_file.path().to_str().unwrap()).unwrap();
+    migrate_pool(&pool).unwrap();
+
+    let repo = Arc::new(SqliteTicketingRepository::new(pool));
+
+    let event = Event::new(
+        "evt-seq-cap".to_string(),
+        "Concierto Capacidad Reducida".to_string(),
+        "2026-11-20T21:00:00Z".to_string(),
+        "Auditorio".to_string(),
+        vec![TicketType::new("General", Money::from_soles(25.0).unwrap(), 10).unwrap()],
+        false,
+        None,
+        "2026-11-01T00:00:00Z".to_string(),
+        "2026-11-01T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    repo.create_event(&event).unwrap();
+
+    // Step 1: Lower capacity to 4 before any sale
+    let lowered_event = Event::new(
+        "evt-seq-cap".to_string(),
+        "Concierto Capacidad Reducida".to_string(),
+        "2026-11-20T21:00:00Z".to_string(),
+        "Auditorio".to_string(),
+        vec![TicketType::new("General", Money::from_soles(25.0).unwrap(), 4).unwrap()],
+        false,
+        None,
+        "2026-11-01T00:00:00Z".to_string(),
+        "2026-11-02T00:00:00Z".to_string(),
+    )
+    .unwrap();
+    assert!(repo.update_event(&lowered_event).is_ok());
+
+    // Step 2: Attempt to sell 6 tickets -> MUST fail with capacity_exceeded
+    let creds: Vec<_> = (0..6)
+        .map(|i| GeneratedCredentials {
+            id: format!("tix-seq-{i}"),
+            scan_token: ScanToken::new(format!("st_{:064x}", i + 200)).unwrap(),
+            qr_secret: QrSecret::new(format!("{:032x}", i + 200)).unwrap(),
+        })
+        .collect();
+
+    let sale_res = repo.issue_sale(
+        &SellTicketsInput {
+            evento_id: "evt-seq-cap".to_string(),
+            interesado_id: None,
+            nombre_comprador: "Comprador Seq".to_string(),
+            contacto: "987333444".to_string(),
+            tipo_entrada: "General".to_string(),
+            cantidad: 6,
+            medio_pago: PaymentMethod::Yape,
+            estado_pago: PaymentStatus::Pagado,
+        },
+        creds,
+    );
+    assert!(sale_res.is_err());
+    assert_eq!(sale_res.unwrap_err().code(), "capacity_exceeded");
+
+    // Verify invariant: capacity 4, emitted 0
+    let evt = repo.get_event("evt-seq-cap").unwrap().unwrap();
+    assert_eq!(evt.tipos_de_entrada[0].capacidad, 4);
+    let tickets = repo.list_tickets("evt-seq-cap", None, None, None).unwrap();
+    assert_eq!(tickets.len(), 0);
 }

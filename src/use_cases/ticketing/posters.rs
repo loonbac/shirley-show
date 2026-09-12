@@ -54,12 +54,15 @@ impl<E: EventRepository, P: PosterStorage> ReplaceEventPoster<E, P> {
         }
 
         if let Some(ref old_filename) = event.imagen {
-            if let Err(e) = self.poster_storage.delete_poster(old_filename) {
-                let _ = self.event_repo.update_event(&event);
-                let _ = self.poster_storage.delete_poster(&new_filename);
-                return Err(AppError::Internal(format!(
-                    "Fallo al retirar afiche anterior '{old_filename}', reemplazo revertido: {e}"
-                )));
+            match self.poster_storage.delete_poster(old_filename) {
+                Ok(_) => {}
+                Err(e) => {
+                    let _ = self.event_repo.update_event(&event);
+                    let _ = self.poster_storage.delete_poster(&new_filename);
+                    return Err(AppError::Internal(format!(
+                        "Fallo al retirar afiche anterior '{old_filename}', reemplazo revertido: {e}"
+                    )));
+                }
             }
         }
 
