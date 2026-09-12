@@ -236,7 +236,11 @@ impl ChatCompletionProvider for GroqClient {
                             )
                         })?;
                         let parsed: GroqChatCompletionResponse =
-                            serde_json::from_str(&raw_body).map_err(|_| {
+                            serde_json::from_str(&raw_body).map_err(|error| {
+                                eprintln!(
+                                    "OpenCode response schema error: {error}; body: {}",
+                                    raw_body.chars().take(2_000).collect::<String>()
+                                );
                                 ProviderError::MalformedResponse(
                                     "Invalid response JSON schema".to_string(),
                                 )
@@ -281,6 +285,12 @@ impl ChatCompletionProvider for GroqClient {
                     StatusCode::TOO_MANY_REQUESTS => return Err(ProviderError::RateLimited),
                     s if s.is_server_error() => return Err(ProviderError::Unavailable),
                     _ => {
+                        let body = response.text().await.unwrap_or_default();
+                        eprintln!(
+                            "OpenCode returned HTTP {}: {}",
+                            status.as_u16(),
+                            body.chars().take(2_000).collect::<String>()
+                        );
                         return Err(ProviderError::Rejected(format!(
                             "Provider returned HTTP {}",
                             status.as_u16()
