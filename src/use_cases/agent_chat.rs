@@ -564,6 +564,31 @@ impl AgentChat {
                         }
                     }
 
+                    // The configured OpenCode provider can return an empty completion after a
+                    // successful tool result. Audio operations are intentionally one action per
+                    // user turn (download first, then add or separate the staged file), so a
+                    // second provider round-trip is neither needed nor safe here.
+                    if is_audio_operation
+                        && turn_context
+                            .actions_taken
+                            .last()
+                            .is_some_and(|action| action.status == "success")
+                    {
+                        return AgentChatOutput {
+                            message: compose_grounded_message(
+                                &turn_context.actions_taken,
+                                None,
+                                turn_context.staged_audio_id.as_deref(),
+                            ),
+                            actions_taken: turn_context.actions_taken,
+                            active_presentation_id: turn_context.active_presentation_id,
+                            active_event_id: turn_context.active_event_id.clone(),
+                            staged_audio_id: turn_context.staged_audio_id,
+                            notice: None,
+                            conversation_id: conversation_id.clone(),
+                        };
+                    }
+
                     conversation_messages.push(AgentMessage::Tool {
                         tool_call_id: tc.id,
                         content: res.to_string(),
