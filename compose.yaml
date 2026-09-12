@@ -33,7 +33,7 @@ services:
     volumes:
       - shirley-data:/app/data
       # SSH private key (ed25519, chmod 600, owned by UID 1000). Never commit it.
-      - ${SSH_KEY_HOST_PATH:-./secrets/id_ed25519}:/home/shirley/.ssh/id_ed25519:ro
+      - ${SSH_KEY_HOST_PATH:-/opt/shirley/secrets/id_ed25519}:/home/shirley/.ssh/id_ed25519:ro
 
 volumes:
   shirley-data:

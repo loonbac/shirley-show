@@ -24,7 +24,7 @@ WORKDIR /app
 COPY --from=builder /build/target/release/shirley-show /app/shirley-show
 COPY --from=builder /build/frontend /app/frontend
 COPY --from=builder /build/migrations /app/migrations
-RUN mkdir -p /app/data && chown -R shirley:shirley /app
+RUN mkdir -p /app/data /home/shirley/.ssh && chown -R shirley:shirley /app /home/shirley
 USER shirley
 
 ENV SHIRLEY_BIND=0.0.0.0:3001 \
