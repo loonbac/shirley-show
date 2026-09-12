@@ -1,7 +1,6 @@
 import { createAppTopbar } from '../components/organisms/app-topbar.js';
 import { createButton } from '../components/atoms/button.js';
 import { createIcon } from '../components/atoms/icon.js';
-import { createAgentChatTrigger } from '../components/molecules/agent-chat-trigger.js';
 import { createPresentationDetailView } from '../components/views/presentation-detail-view.js';
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createAddItemDialog } from '../components/organisms/add-item-dialog.js';
@@ -36,7 +35,6 @@ import { playbackSignal } from '../state/playback-state.js';
  *     seek: (time: number) => void,
  *     stop: () => void,
  *   },
- *   onOpenAgent?: () => void,
  * }} deps 
  * @returns {{
  *   topbarEl: HTMLElement,
@@ -45,7 +43,7 @@ import { playbackSignal } from '../state/playback-state.js';
  * }}
  */
 export function createPresentationDetailController(deps) {
-  const { presentationId, audioController, onOpenAgent } = deps;
+  const { presentationId, audioController } = deps;
 
   let presentation = null;
   let items = [];
@@ -126,15 +124,6 @@ export function createPresentationDetailController(deps) {
     stageModeView = null;
   }
 
-  // Agent Chat Trigger button in topbar
-  const agentChatTrigger = createAgentChatTrigger({
-    onClick: () => {
-      if (typeof onOpenAgent === 'function') {
-        onOpenAgent();
-      }
-    },
-  });
-
   const stageBtn = createButton({
     text: 'Modo Escenario',
     variant: 'secondary',
@@ -162,7 +151,7 @@ export function createPresentationDetailController(deps) {
         toEvents();
       }
     },
-    actions: [agentChatTrigger.el, stageBtn.el, addItemBtn.el],
+    actions: [stageBtn.el, addItemBtn.el],
   });
 
   const view = createPresentationDetailView({

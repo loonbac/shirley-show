@@ -3,7 +3,6 @@ import { createAppTopbar } from '../components/organisms/app-topbar.js';
 import { createPresentationsView } from '../components/views/presentations-view.js';
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
-import { createAgentChatTrigger } from '../components/molecules/agent-chat-trigger.js';
 import { getActiveAgentChatController } from './agent-chat-controller.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
 import { onAgentRefresh } from '../core/state/agent-refresh.js';
@@ -21,7 +20,6 @@ import { toPresentation, toEvents } from '../router/navigate.js';
  *
  * @param {{
  *   audioController: { stop: () => void },
- *   onOpenAgent?: (initialMessage?: string) => void,
  * }} deps 
  * @returns {{
  *   topbarEl: HTMLElement,
@@ -30,7 +28,7 @@ import { toPresentation, toEvents } from '../router/navigate.js';
  * }}
  */
 export function createPresentationsController(deps) {
-  const { audioController, onOpenAgent } = deps;
+  const { audioController } = deps;
 
   // Enforce exclusive playback: stop audio when on catalog view
   if (audioController) {
@@ -56,30 +54,7 @@ export function createPresentationsController(deps) {
     const agentController = getActiveAgentChatController();
     if (agentController && typeof agentController.sendAndOpen === 'function') {
       agentController.sendAndOpen(message);
-    } else if (typeof onOpenAgent === 'function') {
-      onOpenAgent(message);
     }
-  }
-
-  // Agent Chat Trigger button in topbar
-  const agentChatTrigger = createAgentChatTrigger({
-    onClick: () => {
-      const agentController = getActiveAgentChatController();
-      if (agentController && typeof agentController.toggle === 'function') {
-        agentController.toggle();
-      } else if (typeof onOpenAgent === 'function') {
-        onOpenAgent();
-      }
-    },
-  });
-
-  // Keep topbar trigger active state synced with the chat panel
-  const agentController = getActiveAgentChatController();
-  let unsubscribeChat = null;
-  if (agentController && typeof agentController.subscribe === 'function') {
-    unsubscribeChat = agentController.subscribe((chatState) => {
-      agentChatTrigger.update({ isOpen: chatState.isOpen });
-    });
   }
 
   const topbar = createAppTopbar({
@@ -90,7 +65,7 @@ export function createPresentationsController(deps) {
         toEvents();
       }
     },
-    actions: [agentChatTrigger.el],
+    actions: [],
   });
 
   const view = createPresentationsView({
@@ -205,9 +180,6 @@ export function createPresentationsController(deps) {
   loadData();
 
   function destroy() {
-    if (unsubscribeChat) {
-      unsubscribeChat();
-    }
     unsubscribeRefresh();
     closeActiveDialog();
   }

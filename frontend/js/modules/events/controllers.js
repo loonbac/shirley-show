@@ -1,7 +1,5 @@
 import { createAppTopbar } from '../../components/organisms/app-topbar.js';
-import { createAgentChatTrigger } from '../../components/molecules/agent-chat-trigger.js';
 import { createConfirmationDialog } from '../../components/molecules/confirmation-dialog.js';
-import { getActiveAgentChatController } from '../../controllers/agent-chat-controller.js';
 import { activePresentationContextSignal } from '../../core/state/active-presentation-context.js';
 import { onAgentRefresh } from '../../core/state/agent-refresh.js';
 import { toPresentations, toEvent, toEvents, toDoor } from '../../router/navigate.js';
@@ -47,7 +45,6 @@ import {
  *
  * @param {{
  *   audioController?: { stop: () => void },
- *   onOpenAgent?: (initialMessage?: string) => void,
  * }} deps 
  * @returns {{
  *   topbarEl: HTMLElement,
@@ -56,7 +53,7 @@ import {
  * }}
  */
 export function createEventsCatalogController(deps = {}) {
-  const { audioController, onOpenAgent } = deps;
+  const { audioController } = deps;
 
   if (audioController && typeof audioController.stop === 'function') {
     audioController.stop();
@@ -76,33 +73,13 @@ export function createEventsCatalogController(deps = {}) {
     }
   }
 
-  // Agent chat trigger in topbar
-  const agentChatTrigger = createAgentChatTrigger({
-    onClick: () => {
-      const agentController = getActiveAgentChatController();
-      if (agentController && typeof agentController.toggle === 'function') {
-        agentController.toggle();
-      } else if (typeof onOpenAgent === 'function') {
-        onOpenAgent();
-      }
-    },
-  });
-
-  const agentController = getActiveAgentChatController();
-  let unsubscribeChat = null;
-  if (agentController && typeof agentController.subscribe === 'function') {
-    unsubscribeChat = agentController.subscribe((chatState) => {
-      agentChatTrigger.update({ isOpen: chatState.isOpen });
-    });
-  }
-
   const topbar = createAppTopbar({
     title: 'Eventos',
     activeSection: 'events',
     onSectionChange: (sec) => {
       if (sec === 'presentations') toPresentations();
     },
-    actions: [agentChatTrigger.el],
+    actions: [],
   });
 
   async function loadData() {
@@ -186,10 +163,6 @@ export function createEventsCatalogController(deps = {}) {
 
   function destroy() {
     closeActiveDialog();
-    if (typeof unsubscribeChat === 'function') {
-      unsubscribeChat();
-      unsubscribeChat = null;
-    }
     if (typeof unsubscribeRefresh === 'function') {
       unsubscribeRefresh();
     }
@@ -210,7 +183,6 @@ export function createEventsCatalogController(deps = {}) {
  * @param {{
  *   eventId: string,
  *   audioController?: { stop: () => void },
- *   onOpenAgent?: (initialMessage?: string) => void,
  * }} deps 
  * @returns {{
  *   topbarEl: HTMLElement,
@@ -219,7 +191,7 @@ export function createEventsCatalogController(deps = {}) {
  * }}
  */
 export function createEventDetailController(deps) {
-  const { eventId, audioController, onOpenAgent } = deps;
+  const { eventId, audioController } = deps;
 
   if (audioController && typeof audioController.stop === 'function') {
     audioController.stop();
@@ -240,26 +212,6 @@ export function createEventDetailController(deps) {
     }
   }
 
-  // Agent chat trigger in topbar
-  const agentChatTrigger = createAgentChatTrigger({
-    onClick: () => {
-      const agentController = getActiveAgentChatController();
-      if (agentController && typeof agentController.toggle === 'function') {
-        agentController.toggle();
-      } else if (typeof onOpenAgent === 'function') {
-        onOpenAgent();
-      }
-    },
-  });
-
-  const agentController = getActiveAgentChatController();
-  let unsubscribeChat = null;
-  if (agentController && typeof agentController.subscribe === 'function') {
-    unsubscribeChat = agentController.subscribe((chatState) => {
-      agentChatTrigger.update({ isOpen: chatState.isOpen });
-    });
-  }
-
   const topbar = createAppTopbar({
     title: 'Cargando evento...',
     onBack: () => toEvents(),
@@ -267,7 +219,7 @@ export function createEventDetailController(deps) {
     onSectionChange: (sec) => {
       if (sec === 'presentations') toPresentations();
     },
-    actions: [agentChatTrigger.el],
+    actions: [],
   });
 
   async function loadAllData() {
@@ -608,10 +560,6 @@ export function createEventDetailController(deps) {
 
   function destroy() {
     closeActiveDialog();
-    if (typeof unsubscribeChat === 'function') {
-      unsubscribeChat();
-      unsubscribeChat = null;
-    }
     if (typeof unsubscribeRefresh === 'function') {
       unsubscribeRefresh();
     }
