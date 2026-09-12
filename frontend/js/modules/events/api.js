@@ -189,9 +189,10 @@ export async function sellTickets(eventId, data) {
  * @returns {Promise<any>}
  */
 export async function getTicket(ticketId) {
-  return requestJson(`/api/entradas/${encodeURIComponent(ticketId)}`, {
+  const res = await requestJson(`/api/entradas/${encodeURIComponent(ticketId)}`, {
     method: 'GET',
   });
+  return (res && res.entrada) ? res.entrada : res;
 }
 
 /**

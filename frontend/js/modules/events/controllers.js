@@ -16,6 +16,7 @@ import {
   uploadEventPoster,
   getEventSummary,
   listTickets,
+  getTicket,
   getPublicTicket,
   sellTickets,
   confirmTicketPayment,
@@ -360,18 +361,58 @@ export function createEventDetailController(deps) {
 
   // Tickets actions
   async function handleTicketPhoto(ticket) {
+    if (!ticket) return;
+
+    if (ticket.estado_pago && ticket.estado_pago !== 'Pagado') {
+      alert('Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.');
+      return;
+    }
+
     try {
+      let entradaConQr = ticket;
+
+      if (!entradaConQr.qr_svg) {
+        let detalle = null;
+        if (ticket.id) {
+          try {
+            const res = await getTicket(ticket.id);
+            detalle = (res && res.entrada) ? res.entrada : res;
+          } catch (err) {
+            console.warn('Fallo al obtener detalle de entrada por ID:', err);
+          }
+        }
+        if ((!detalle || !detalle.qr_svg) && ticket.scan_token) {
+          try {
+            detalle = await getPublicTicket(ticket.scan_token);
+          } catch (err) {
+            console.warn('Fallo al obtener ticket público por scan_token:', err);
+          }
+        }
+        if (detalle) {
+          entradaConQr = { ...ticket, ...detalle };
+          if (detalle.qr_svg) {
+            ticket.qr_svg = detalle.qr_svg;
+          }
+        }
+      }
+
+      if (entradaConQr.estado_pago && entradaConQr.estado_pago !== 'Pagado') {
+        alert('Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.');
+        return;
+      }
+
       const blob = await generarFotoEntrada(
-        ticket,
+        entradaConQr,
         {
-          nombre: (event && event.nombre) || '',
-          fecha_hora: (event && event.fecha_hora) || '',
-          lugar: (event && event.lugar) || '',
+          nombre: (event && event.nombre) || entradaConQr.nombre_evento || '',
+          fecha_hora: (event && event.fecha_hora) || entradaConQr.fecha_hora || '',
+          lugar: (event && event.lugar) || entradaConQr.lugar || '',
         }
       );
       descargarBlob(blob, `entrada-${ticket.nombre_comprador || 'ticket'}.png`);
     } catch (err) {
       console.error('Error al crear la imagen de la entrada:', err);
+      alert((err && err.message) || 'Error al generar la imagen de la entrada.');
     }
   }
 

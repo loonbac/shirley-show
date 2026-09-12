@@ -579,14 +579,23 @@ export function createEventDetailView(props) {
           }).el
         : null;
 
-      const photoBtn = isPaid && typeof onTicketPhoto === 'function'
-        ? createButton({
-            text: 'Imagen',
-            variant: 'ghost',
-            size: 'sm',
-            onClick: () => onTicketPhoto(t),
-          }).el
-        : null;
+      let photoBtn = null;
+      if (isPaid && typeof onTicketPhoto === 'function') {
+        const btn = createButton({
+          text: 'Imagen',
+          variant: 'ghost',
+          size: 'sm',
+          onClick: async () => {
+            btn.update({ text: 'Creando…', disabled: true });
+            try {
+              await onTicketPhoto(t);
+            } finally {
+              btn.update({ text: 'Imagen', disabled: false });
+            }
+          },
+        });
+        photoBtn = btn.el;
+      }
 
       const delBtn = !hasEntered
         ? createButton({

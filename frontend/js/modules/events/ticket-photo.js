@@ -172,6 +172,10 @@ export async function generarFotoEntrada(entrada, evento) {
     throw new Error("Entrada requerida para generar la foto.");
   }
 
+  if (entrada.estado_pago && entrada.estado_pago !== "Pagado") {
+    throw new Error("Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.");
+  }
+
   const svgString =
     entrada.qr_svg ||
     entrada.qr ||
