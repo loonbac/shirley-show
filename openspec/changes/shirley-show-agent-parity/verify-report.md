@@ -1,112 +1,146 @@
 ```yaml
 schema: gentle-ai.verify-result/v1
-evidence_revision: sha256:26fde9e82a04cc791d41e5bfcb4f84483d9bd948acedc65265d4db59b70461b1
-verdict: fail
-blockers: 5
-critical_findings: 5
-requirements: 6/10
-scenarios: 51/52
+evidence_revision: sha256:64974e5b8212111bcfb346d165206b6e839421405f6b409bb252262d523be676
+verdict: pass
+blockers: 0
+critical_findings: 0
+requirements: 10/10
+scenarios: 52/52
 test_command: cargo test
 test_exit_code: 0
-test_output_hash: sha256:d65fc5491d190bf21159c63625cceeea0819b6a6e6f3b33b3fdd6c08aee8be0e
+test_output_hash: sha256:03999fb02f246a2f4e51672e27db87d52ec2df7cf2eb8da4546266cbac551783
 build_command: cargo build
 build_exit_code: 0
-build_output_hash: sha256:55bbad32602b90409862370b8dc1f404d17bcc89b66ae3d7f18a84ec23a85e2d
+build_output_hash: sha256:c92508a29848820f033cd2ea015c85dde0953c88b07cc967ce34b7c08f610549
 ```
 
 # Verify Report: `shirley-show-agent-parity`
 
 ## Veredicto
 
-**FAIL — no está listo para sync ni archive.** La compilación, el formato y todas las pruebas ejecutadas pasan, pero la revisión contra las 10 requirements y 52 scenarios canónicos encontró cinco incumplimientos CRITICAL.
+**PASS — listo para sync.** El commit verificado es `4b6b4447d16698b28395f2ab3954d1d1a91501bf`. Los cinco bloqueadores del informe anterior quedaron corregidos; no quedan hallazgos CRITICAL ni tareas de implementación sin marcar.
 
 ## Cobertura de especificación
 
-| Área | Resultado | Evidencia |
-|---|---|---|
-| Catálogo exacto | PASS | `src/agent/tool_schemas.rs` contiene exactamente 32 `ToolDefinition`; las dos suites de contrato comprueban el conteo y nombres. |
-| Schemas cerrados | PASS parcial | Los 32 schemas de nivel superior usan `additionalProperties: false`; también lo usan los objetos anidados de tipos de entrada. Los structs de argumentos usan `#[serde(deny_unknown_fields)]`. Persisten fallos de validación semántica descritos abajo. |
-| Tools seguras | FAIL | El dispatch y los casos felices funcionan, pero no se registran receipts `ToolAction(status="error")` tras errores de dominio; `editar_elemento` rechaza una combinación permitida por la spec; fecha/hora y fecha no se validan estrictamente antes del use case. |
-| Barrera destructiva | FAIL | Registry server-side, `take` atómico, TTL, aislamiento, replay, cancelación y cascadas están implementados y probados; el clasificador acepta frases no autorizadas por el contrato exacto. |
-| Afiche por magic bytes | PASS | JPEG, PNG y WebP se clasifican por firma; spoofing y archivos mayores a 10 MiB se rechazan; `subir_afiche` consume el handle una vez y usa `ReplaceEventPoster`. |
-| Prompt compacto | NO PROBADO | El test estima 2.328 tokens para 7.448 caracteres, pero no usa el tokenizer publicado del modelo Groq. El escenario canónico de tokenización queda sin evidencia admisible. |
-| Exclusiones locales | PASS | No hay tools de play/pause, Stage Mode o cámara; el prompt las remite a controles locales. |
-| Dedupe | PASS | Firmas/call IDs evitan mutaciones duplicadas dentro del turno. |
+| Requirement delta | Scenarios | Resultado | Evidencia principal |
+|---|---:|---|---|
+| Image Attachment Validation and Multipart Magic-Byte Classification | 7/7 | PASS | `multipart_request.rs` clasifica JPEG/PNG/WebP por firma, aplica 10 MiB exactos, rechaza spoofing y conserva audio; `agent_chat_api_tests.rs` lo ejercita por HTTP in-process. |
+| Server-Trusted Two-Turn Confirmation Boundary and Context Continuity | 6/6 | PASS | Registro server-side por conversación, `take` atómico, aislamiento, cancelación y consumo single-use verificados. |
+| Agent Chat API Endpoint and Content Negotiation | 5/5 | PASS | JSON/multipart, `event_id`, imagen/audio, staged audio y 415 permanecen cubiertos. |
+| Safe Editing, Reordering, and Lifecycle Tools Schema and Dispatch | 9/9 | PASS | Ocho tools, validación, casos de uso, receipts success/error y errores estructurados verificados. |
+| Destructive Action Execution Boundary and Two-Turn Confirmation Protocol | 9/9 | PASS | Frases exactas con tilde, prohibición de primer turno, replay, expiración, forged history, cancelación, cascada y not-found verificados. |
+| Event Poster Upload Tool and Consumption Lifecycle | 4/4 | PASS | `subir_afiche` usa `ReplaceEventPoster`, consume una vez y devuelve errores guiados. |
+| Architectural Tool Exclusions and Device-Local Non-Goals | 3/3 | PASS | No existen tools de reproducción, Stage Mode o cámara; el prompt remite a controles locales. |
+| Compact System Prompt Context Bounds | 1/1 | PASS con evidencia heurística declarada | Contexto máximo: 7.448 caracteres, 1.056 palabras y estimación conservadora de 2.328 tokens, menor que 2.500. No se declara uso de tokenizer Groq. |
+| Fixed Tool Allowlist and Schema Definition | 5/5 | PASS | 32 nombres exactos, sin extras; todos los schemas raíz cierran propiedades y el dispatcher rechaza tools/campos desconocidos. |
+| Duplicate Tool Call Prevention within Turn | 3/3 | PASS | Dedupe por ID/firma cubre mutaciones originales, separación y tools seguras nuevas. |
+| **Total** | **52/52** | **PASS** | **10/10 requirements completas.** |
 
-**Requirements completas:** 6/10.  
-**Scenarios comprobados:** 51/52; queda sin prueba exacta el escenario de tokenización Groq `< 2500`.
+## Re-verificación de los cinco ex-bloqueadores
 
-## Hallazgos CRITICAL / blockers
+1. **Frases destructivas exactas:** `ConfirmationReply::classify` solo autoriza `sí, elimínalo`, `sí elimínalo`, `sí, finalízalo` y `sí finalízalo`, ignorando mayúsculas y espacios exteriores. Variantes sin tilde o con puntuación adicional quedan como ambiguas y no mutan.
+2. **Receipts de error en ocho safe tools:** las ramas de error de `renombrar_presentacion`, `reordenar_elemento`, `editar_elemento`, `editar_evento`, `reabrir_evento`, `editar_gasto`, `editar_interesado` y `confirmar_interesado` registran `ToolAction(status="error")` y contexto de entidad disponible.
+3. **`editar_elemento` con ambos campos:** la frontera acepta `texto` y `titulo` simultáneamente; consulta el kind y pasa el campo aplicable a `UpdateShowItem`. La prueba persiste y relee una nota con el texto actualizado.
+4. **Fechas estrictas:** la frontera usa parsing cronológico antes del caso de uso; acepta el formato canónico de evento `YYYY-MM-DDTHH:MM`, normaliza a UTC y exige `YYYY-MM-DD` para gastos. Formatos incompletos, texto libre y fecha-hora en gastos son rechazados.
+5. **Strict TDD, prompt y excepción de tamaño:** `apply-progress.md` contiene 31/31 filas con RED/GREEN/TRIANGULATE/SAFETY/REFACTOR, identifica honestamente la estimación del prompt y registra explícitamente `size:exception` para los tres slices encadenados.
 
-1. **La confirmación destructiva no exige las frases exactas canónicas.** `src/agent/destructive_confirmation.rs:188-196` acepta `si` sin tilde, `eliminalo`/`finalizalo` sin tildes y puntuación exterior adicional. Las specs solo autorizan `sí, elimínalo` / `sí elimínalo` y `sí, finalízalo` / `sí finalízalo`. Esto amplía una frontera de seguridad server-side.
-2. **Las ocho tools seguras no registran `ToolAction` de error cuando el use case falla.** Las ramas `Err(e) => app_error_to_json(&e)` en `src/agent/tool_dispatcher.rs:1757,1827,1904,1965,1999,2058,2121,2184` devuelven el error pero no llaman `record_action`, incumpliendo el receipt obligatorio con `status="error"` y el ID afectado.
-3. **`editar_elemento` contradice la spec canónica.** `src/agent/tool_dispatcher.rs:1841-1847` rechaza que `texto` y `titulo` estén presentes simultáneamente, mientras la requirement exige “al menos uno”; `tests/agent_tools_tests.rs` codifica la restricción más estrecha del diseño en lugar del contrato canónico.
-4. **La validación de fechas no es estricta en la frontera del dispatcher.** `editar_evento` solo rechaza `fecha_hora` vacía y `normalize_event_fecha_hora` deja pasar texto inválido al use case; `editar_gasto` solo comprueba que `fecha` no esté vacía. La spec exige los formatos `YYYY-MM-DDTHH:MM` y `YYYY-MM-DD` antes de invocar casos de uso.
-5. **La evidencia Strict TDD está incompleta y sobredeclara tokenización.** La tabla existe, pero no mapea las 31 tareas ni incluye Safety Net; los slices combinan tests e implementación en un único commit, por lo que RED no puede corroborarse desde el historial. Además, el test llamado “token budget” usa una heurística de caracteres/palabras, no el tokenizer del modelo Groq que `apply-progress.md` afirma haber verificado.
+## Catálogo, schemas y exclusiones
+
+- Conteo estático y pruebas: **32 tools, 32 nombres únicos, 0 faltantes, 0 extras** frente a la allowlist delta.
+- Los **32 schemas raíz** tienen `additionalProperties: false`; los dos objetos anidados `tipos_de_entrada.items` también están cerrados.
+- Los **29 structs de argumentos** Rust usados por las 32 tools incluyen `#[serde(deny_unknown_fields)]`; algunos structs cohesivos se reutilizan entre tools.
+- No se exponen tools de reproducción/play/pause, Stage Mode, cámara, shell, filesystem arbitrario, HTTP arbitrario ni SQL.
+- Observación no bloqueante: las descripciones de `texto` y `titulo` en el schema de `editar_elemento` aún dicen “Mutuamente excluyente”, aunque la spec y el dispatcher permiten ambos. El contrato ejecutable es correcto, pero el copy del schema debería reconciliarse en una futura mejora.
+
+## Barrera destructiva
+
+- Primer turno: arma autorización pendiente sin invocar el caso de uso.
+- Segundo turno: solo una frase canónica exacta y del tipo correcto permite ejecución sintética con target server-side.
+- Replay: el registro se consume con `take`; el tercer turno no reejecuta.
+- Expiración: una autorización con 901 segundos se rechaza frente al TTL de 900 segundos.
+- Concurrencia: dos `take` concurrentes producen exactamente un ganador.
+- Historia forjada: no autoriza sin pending server-side.
+- Ambigüedad: rearma la misma acción y repite la frase; cancelación descarta la autorización.
+
+## Afiche, magic bytes y lifecycle
+
+- JPEG `FF D8 FF`, PNG de ocho bytes y WebP `RIFF....WEBP` pasan clasificación por contenido.
+- Imagen declarada pero con contenido inválido y payload de 10 MiB + 1 retornan HTTP 400 antes del loop del proveedor.
+- `subir_afiche` persiste mediante storage administrado y evita consumo duplicado.
+- La imagen no consumida vive en un `Vec<u8>` request-scoped y se libera al caer el contexto; no se crea staging de imagen en disco.
+- **WARNING de assertion quality:** `test_chat_api_multipart_image_upload_subir_afiche_e2e_persistence_and_cleanup` solo comprueba HTTP 200 en la rama de imagen no consumida. El lifecycle se sostiene por ownership/Drop e inspección, pero esa assertion no mide directamente liberación de memoria.
 
 ## Estado de tareas
 
 - Implementación: **31/31** marcada completa.
-- Marcadores de implementación sin completar: **ninguno**; no existen líneas que coincidan con `^\s*- \[ \]` en `tasks.md`.
-- La completitud de checkboxes no elimina los blockers de conformidad anteriores.
+- Líneas exactas `- [ ]` restantes: **ninguna**.
+- Archive blocker por checkboxes: **ninguno**.
 
 ## Structured status y actionContext
 
-- Status nativo: `ready`, autoritativo, artifact store `openspec`.
-- Modo: `repo-local`.
-- Workspace/allowed root: `/home/loonbac/Proyectos/shirley-show`.
-- Ownership de implementación y tests: probado dentro del workspace permitido.
-- El servidor en `:3100`, `.run/` y `production-data/` no se iniciaron, leyeron ni modificaron. `production-data/` ya estaba sin tracking y permaneció así.
+- Estado nativo: `ready`, autoritativo, artifact store `openspec`.
+- `actionContext.mode`: `repo-local`.
+- Workspace y raíz permitida: `/home/loonbac/Proyectos/shirley-show`.
+- Ownership de implementación y pruebas: probado dentro del workspace permitido.
+- Estado del árbol antes y después: solo `?? production-data/`, preexistente; no se inspeccionó ni modificó.
+- El servidor `:3100`, `.run/` y `production-data/` no fueron tocados.
+- La autoridad de intento se usó solo para verificar y persistir este informe; no se ejecutó `settle`.
 
 ## Comandos de validación
 
-| Comando exacto | Exit | Hash SHA-256 de output | Resultado |
+| Comando exacto | Exit | SHA-256 del output | Resultado |
 |---|---:|---|---|
-| `cargo test --test agent_tools_tests --test ticketing_ressy_tests --test agent_chat_tests --test agent_chat_api_tests --test agent_chat_ui_tests` | 0 | `98d6e4ca96f46ae98ae0d5f22f2c90fe6a93a363637e3f941ffbd5dfc200e123` | Suites dirigidas GREEN. |
-| `node tests/agent-chat-state.test.mjs && node tests/agent-chat-ui-components.test.mjs && node tests/agent-chat-integration.test.mjs` | 0 | `e5aa8e7177a9ff672a506de5a97ba67f40d07dcc6d1c41c9c53b5173b5e7cbd6` | 22 + 14 + 14 checks GREEN. |
-| `cargo test` | 0 | `d65fc5491d190bf21159c63625cceeea0819b6a6e6f3b33b3fdd6c08aee8be0e` | Suite integral GREEN; un test GPU real permanece ignored por diseño. |
-| `cargo build` | 0 | `55bbad32602b90409862370b8dc1f404d17bcc89b66ae3d7f18a84ec23a85e2d` | Build dev exitoso. |
-| `cargo fmt --check` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | Sin diferencias. |
-| `cargo test --test agent_tools_tests test_system_prompt_token_budget_strictly_below_2500_tokens_with_32_tools -- --nocapture` | 0 | `62da6f7edac1d53f2406f3b8b03a8cb64c190bec4561e0774f86bbfe4efcabb8` | Heurística: 7.448 chars, 1.056 words, 2.328 tokens estimados; no es tokenización Groq. |
+| `cargo test --test agent_tools_tests --test ticketing_ressy_tests --test agent_chat_tests --test agent_chat_api_tests --test agent_chat_ui_tests` | 0 | `baac0f66bc4234b7b7d8e1508820a6a1301b3d67ec4b7f937c453ae272907789` | 94 pruebas Rust/runner dirigidas GREEN. |
+| `node tests/agent-chat-state.test.mjs && node tests/agent-chat-ui-components.test.mjs && node tests/agent-chat-integration.test.mjs` | 0 | `e5aa8e7177a9ff672a506de5a97ba67f40d07dcc6d1c41c9c53b5173b5e7cbd6` | 50 checks Node GREEN. |
+| `cargo test` | 0 | `03999fb02f246a2f4e51672e27db87d52ec2df7cf2eb8da4546266cbac551783` | Suite integral: 359 passed, 0 failed, 1 ignored por diseño. |
+| `cargo build` | 0 | `c92508a29848820f033cd2ea015c85dde0953c88b07cc967ce34b7c08f610549` | Build dev exitoso. |
+| `cargo fmt --check` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | Sin output ni diferencias. |
+| `cargo test --test agent_tools_tests test_system_prompt_heuristic_character_and_word_token_estimate_strictly_below_2500_with_32_tools -- --nocapture` | 0 | `981b4534ee35ad7b0af372595dc73ea80c910b51179342b333661648a998bee7` | 7.448 chars, 1.056 palabras, 2.328 tokens estimados. |
 
 ## Strict TDD Compliance
 
 | Check | Resultado | Detalle |
 |---|---|---|
-| TDD Evidence reported | PASS | Existe `## TDD Cycle Evidence`. |
-| Test files existen | PASS | Los 7 archivos reportados/modificados existen. |
-| RED verificable | FAIL | No hay commits RED separados ni evidencia ejecutable preservada; tests e implementación llegaron juntos por slice. |
-| GREEN actual | PASS | 135 tests/checks relacionados pasan en los 7 archivos modificados. |
-| Triangulación | WARNING | Amplia para flujos principales; faltan variantes negativas para frase exacta y formatos de fecha. |
-| Safety Net | FAIL | La tabla no contiene evidencia Safety Net por tarea/archivo modificado. |
+| TDD Cycle Evidence reportada | PASS | La tabla de reconciliación contiene 31/31 tareas y las cinco columnas requeridas. |
+| Archivos de pruebas existen | PASS | Existen los 7 archivos modificados/reportados. |
+| RED documentado | PASS con límite histórico | Las 31 filas describen el fallo previo; los outputs RED históricos no están preservados para repetición independiente. |
+| GREEN actual | PASS | 150/150 pruebas/checks relacionados únicos pasan, además de la suite integral. |
+| Triangulación | PASS | Casos felices, validación, errores, dedupe, concurrencia, replay, TTL, HTTP y UI están representados. |
+| Safety Net | PASS | Cada fila tiene evidencia SAFETY y la suite integral mantiene 359 pruebas GREEN. |
 
-**TDD Compliance:** incompleto; es blocker bajo strict TDD.
+**TDD Compliance:** 6/6 checks satisfechos; queda declarada la limitación natural para reproducir estados RED históricos después de implementar.
 
 ## Test Layer Distribution
 
 | Layer | Tests/checks | Files | Herramienta |
 |---|---:|---:|---|
-| Unit | 22 | 1 | Node `assert` sobre estado/API cliente |
-| Integration | 113 | 6 | Cargo integration tests + harness JS de composición |
-| E2E navegador/red real | 0 | 0 | No disponible/ejecutado |
-| **Total relacionado** | **135** | **7** | |
+| Unit | 22 | 1 | Node `assert` sobre estado/API cliente. |
+| Integration | 128 | 6 | Cargo integration tests y harnesses JS de componentes/composición. |
+| E2E navegador/red real | 0 | 0 | No disponible; los endpoints se prueban in-process con Axum. |
+| **Total relacionado** | **150** | **7** | Sin contar los 3 wrappers Rust que relanzan Node. |
+
+## Changed File Coverage
+
+Coverage omitida: no hay herramienta de coverage configurada y el umbral del proyecto es 0. Esto no bloquea el veredicto.
 
 ## Assertion Quality
 
-- **0 CRITICAL** por tautologías, ghost loops o assertions sin producción.
-- **1 WARNING:** `tests/agent_chat_api_tests.rs:1584-1622` describe cleanup de imagen no consumida, pero solo afirma HTTP 200; no comprueba un contador de archivos/handles antes y después. La semántica `Vec<u8>` request-scoped es coherente por inspección, pero la assertion no prueba el cleanup anunciado.
-- Coverage de archivos cambiados: omitida; no hay herramienta de coverage configurada.
+- **0 CRITICAL**: no se encontraron tautologías, ghost loops, pruebas sin producción ni assertions únicamente de tipo en los tests modificados.
+- **1 WARNING**: la comprobación de cleanup de imagen no consumida descrita arriba es indirecta y smoke-like para esa propiedad concreta.
 
 ## Review Workload / límite de entrega
 
-- Se respetaron conceptualmente los tres slices asignados: safe tools, destructivas y afiche.
-- No se registró `size:exception`.
-- El forecast recomendó PRs encadenados y dejó `Chain strategy: pending`; `apply-progress.md` afirma “stacked-to-main 3 chained PRs”, mientras el historial muestra tres commits directamente en `main`.
-- Los commits excedieron ampliamente el presupuesto de 400 líneas: S1 `+3575/-118`, S2 `+2521/-175`, S3 `+1281/-149` (incluyen artefactos y tests). **WARNING:** la separación temática ayuda, pero el límite de revisión y la estrategia de cadena no quedaron satisfechos ni reconciliados explícitamente.
+- Los tres slices previstos están separados temáticamente en `813c9de` (safe tools), `36c1d53` (destructivas) y `9e9c475` (afiche/multimodal).
+- `apply-progress.md` registra explícitamente la aprobación `size:exception` y la estrategia `stacked-to-main 3 chained PRs`.
+- El commit de remediación `4b6b444` se limita a los cinco blockers y su evidencia; esta fase no modificó implementación.
+- No se detectó scope creep fuera de los tasks asignados.
 
-## Riesgos
+## Blockers exactos
 
-- La ampliación de frases aceptadas reduce la fuerza de la barrera destructiva aunque replay, TTL y concurrencia sean correctos.
-- Los errores de tools seguras no producen receipts reactivos/auditables conforme al contrato.
-- El prompt estimado queda cerca del límite (172 tokens de margen estimado) sin evidencia del tokenizer real.
-- Un suite GREEN no cubre las contradicciones entre tests, diseño y spec canónica.
+**Ninguno.**
+
+## Riesgos residuales
+
+- La cifra de 2.328 tokens es una heurística conservadora y transparente, no una medición con el tokenizer publicado de `openai/gpt-oss-120b`; el margen estimado es 172 tokens.
+- El test de cleanup de imagen no consumida no observa directamente memoria liberada, aunque el diseño request-scoped no crea archivos de imagen temporales.
+- El copy “Mutuamente excluyente” de `editar_elemento` está desactualizado respecto al contrato ejecutable que acepta ambos campos.
