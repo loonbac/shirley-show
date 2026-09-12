@@ -943,8 +943,7 @@ async fn test_dispatcher_separate_vocals_success_and_chained_with_add_track_from
         id: "call_sep_1".to_string(),
         name: "separate_vocals".to_string(),
         arguments: json!({
-            "mode": "chorus",
-            "staged_audio_id": reg_entry.staged_audio_id
+            "mode": "chorus"
         })
         .to_string(),
     };

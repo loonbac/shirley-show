@@ -1260,7 +1260,7 @@ exit 0
 }
 
 #[tokio::test]
-async fn test_ssh_vocal_separator_shutdown_c_sudo_denied_fails_fast() {
+async fn test_ssh_vocal_separator_shutdown_c_sudo_denied_does_not_block_processing() {
     let temp_dir = tempfile::tempdir().unwrap();
     let bin_dir = temp_dir.path().join("bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
@@ -1290,7 +1290,24 @@ esac
         log_file.display()
     );
     create_executable_script(&ssh_bin, &ssh_script);
-    create_executable_script(&scp_bin, "#!/bin/sh\nexit 0\n");
+    create_executable_script(
+        &scp_bin,
+        r#"#!/bin/sh
+dest=""
+for arg in "$@"; do
+    dest="$arg"
+done
+case "$dest" in
+    *:*) ;;
+    *)
+        if [ -n "$dest" ] && [ ! -d "$dest" ]; then
+            printf '%2048s' 'x' > "$dest"
+        fi
+        ;;
+esac
+exit 0
+"#,
+    );
     create_executable_script(
         &ffprobe_bin,
         r#"#!/bin/sh
@@ -1300,11 +1317,13 @@ cat <<'EOF'
     {
       "codec_type": "audio",
       "codec_name": "mp3",
-      "duration": "120.0"
+      "duration": "120.0",
+      "bit_rate": "320000"
     }
   ],
   "format": {
-    "duration": "120.0"
+    "duration": "120.0",
+    "bit_rate": "320000"
   }
 }
 EOF
@@ -1337,16 +1356,21 @@ exit 0
     };
 
     let result = separator.separate(request).await;
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert_eq!(err.code(), "remote_sudo_denied");
+    assert!(
+        result.is_ok(),
+        "optional shutdown permissions must not block audio processing: {:?}",
+        result.err()
+    );
 
     let log = std::fs::read_to_string(&log_file).unwrap();
     assert!(
-        !log.contains("mkdir"),
-        "mkdir must NOT be executed after sudo denial"
+        log.contains("mkdir"),
+        "the unprivileged pipeline must continue after sudo denial"
     );
-    assert!(!log.contains("+60"), "shutdown +60 must NOT be executed");
+    assert!(
+        log.contains("+60"),
+        "the best-effort shutdown scheduling must still be attempted"
+    );
 }
 
 #[tokio::test]

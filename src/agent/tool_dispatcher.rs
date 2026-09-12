@@ -1315,8 +1315,14 @@ impl AgentToolDispatcher {
                     });
                 }
 
+                // Opaque staging IDs are server-owned workflow state. The model may omit
+                // them (or repeat the original URL); prefer the current staged audio so the
+                // same file is processed without another download.
+                let contextual_staged_audio_id = args
+                    .staged_audio_id
+                    .or_else(|| context.staged_audio_id.clone());
                 let source = match VocalAudioSource::resolve(
-                    args.staged_audio_id,
+                    contextual_staged_audio_id,
                     args.track_id,
                     args.youtube_url,
                 ) {

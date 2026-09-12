@@ -524,7 +524,11 @@ impl VocalSeparator for SshVocalSeparator {
                 .checked_sub(start.elapsed())
                 .ok_or(VocalSeparationError::SeparationTimeout)?;
             let cancel_step = remaining.min(Duration::from_secs(10));
-            this.cancel_remote_shutdown(cancel_step).await?;
+            if let Err(err) = this.cancel_remote_shutdown(cancel_step).await {
+                // Energy management is optional. A host without passwordless shutdown
+                // permissions can still execute the unprivileged separation pipeline.
+                eprintln!("Aviso: no se pudo cancelar el apagado remoto: {err}");
+            }
 
             // 6. Setup guard and create remote op dir
             let mut guard = RemoteDirectoryGuard::new(
