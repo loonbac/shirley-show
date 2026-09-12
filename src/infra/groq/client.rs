@@ -116,6 +116,10 @@ impl ChatCompletionProvider for GroqClient {
                     uuid::Uuid::new_v4().to_string()
                 });
 
+            let force_first_tool = !request
+                .messages
+                .iter()
+                .any(|message| matches!(message, AgentMessage::Tool { .. }));
             let mut wire_messages = Vec::with_capacity(request.messages.len() + 1);
             wire_messages.push(GroqMessage::System {
                 content: request.system_prompt,
@@ -183,7 +187,14 @@ impl ChatCompletionProvider for GroqClient {
                 .collect();
 
             let tool_choice = if !wire_tools.is_empty() {
-                Some("auto".to_string())
+                Some(
+                    if force_first_tool && wire_tools.len() <= 3 {
+                        "required"
+                    } else {
+                        "auto"
+                    }
+                    .to_string(),
+                )
             } else {
                 None
             };
