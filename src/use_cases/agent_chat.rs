@@ -349,12 +349,12 @@ impl AgentChat {
                 };
             }
 
-            let tools = if user_message.contains("youtu")
+            let is_audio_operation = user_message.contains("youtu")
                 || user_message.contains("voz")
                 || user_message.contains("vocal")
                 || user_message.contains("coros")
-                || user_message.contains("instrument")
-            {
+                || user_message.contains("instrument");
+            let tools = if is_audio_operation {
                 get_tool_definitions()
                     .into_iter()
                     .filter(|tool| {
@@ -368,9 +368,14 @@ impl AgentChat {
                 get_tool_definitions()
             };
 
+            let system_prompt = if is_audio_operation {
+                "Ejecuta la solicitud de audio usando las herramientas disponibles. Para un enlace de YouTube llama primero download_youtube_track. El destino ya está confirmado. Responde solo con llamadas de herramienta cuando la petición sea operativa.".to_string()
+            } else {
+                full_system_prompt.clone()
+            };
             let req = CompletionRequest {
                 model: self.model.clone(),
-                system_prompt: full_system_prompt.clone(),
+                system_prompt,
                 messages: conversation_messages.clone(),
                 tools,
             };
