@@ -183,14 +183,7 @@ impl ChatCompletionProvider for GroqClient {
                 .collect();
 
             let tool_choice = if !wire_tools.is_empty() {
-                Some(
-                    if wire_tools.len() <= 3 {
-                        "required"
-                    } else {
-                        "auto"
-                    }
-                    .to_string(),
-                )
+                Some("auto".to_string())
             } else {
                 None
             };
