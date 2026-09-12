@@ -15,7 +15,9 @@ use crate::infra::groq::dto::{
 use crate::infra::groq::error::ProviderError;
 use crate::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
 
-pub const DEFAULT_GROQ_TIMEOUT: Duration = Duration::from_secs(30);
+// Tool orchestration with a thinking model can require more than 30 seconds,
+// especially after feeding a tool result back for the next decision.
+pub const DEFAULT_GROQ_TIMEOUT: Duration = Duration::from_secs(90);
 pub const MAX_GROQ_RETRIES: u32 = 3;
 pub const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 // Thinking models spend part of this budget on internal reasoning before they
