@@ -6,3 +6,6 @@ target/
 .run/
 .env
 data/
+production-data/
+secrets/*
+!secrets/.gitkeep
