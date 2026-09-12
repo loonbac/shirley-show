@@ -390,6 +390,44 @@ impl AgentChat {
             let response = match tokio::time::timeout(remaining, provider.complete(req)).await {
                 Ok(Ok(resp)) => resp,
                 Ok(Err(err)) => {
+                    // A short destination reply such as "a la de setiembre" is
+                    // deterministic once a staged audio capability exists. Some
+                    // thinking providers emit an empty completion for that tiny
+                    // tool-only turn, so complete the safe add operation directly.
+                    if has_staged_audio_id
+                        && let Some(destination) = staged_audio_destination_query(&user_message)
+                    {
+                        let call = ToolCall {
+                            id: format!("call_staged_audio_{}", uuid::Uuid::new_v4().simple()),
+                            name: "add_track_from_staged".to_string(),
+                            arguments: serde_json::json!({
+                                "presentation_id": destination,
+                                "title": "Audio temporal",
+                                "staged_audio_id": turn_context.staged_audio_id,
+                            })
+                            .to_string(),
+                        };
+                        let _ = self.dispatcher.dispatch(&call, &mut turn_context).await;
+                        if turn_context
+                            .actions_taken
+                            .last()
+                            .is_some_and(|action| action.status == "success")
+                        {
+                            return AgentChatOutput {
+                                message: compose_grounded_message(
+                                    &turn_context.actions_taken,
+                                    None,
+                                    turn_context.staged_audio_id.as_deref(),
+                                ),
+                                actions_taken: turn_context.actions_taken,
+                                active_presentation_id: turn_context.active_presentation_id,
+                                active_event_id: turn_context.active_event_id.clone(),
+                                staged_audio_id: turn_context.staged_audio_id,
+                                notice: None,
+                                conversation_id: conversation_id.clone(),
+                            };
+                        }
+                    }
                     let notice = AgentNotice {
                         code: err.code().to_string(),
                         retryable: err.retryable(),
@@ -691,6 +729,20 @@ impl AgentChat {
             conversation_id,
         }
     }
+}
+
+fn staged_audio_destination_query(message: &str) -> Option<&str> {
+    let trimmed = message.trim();
+    let lower = trimmed.to_lowercase();
+    for prefix in ["a la de ", "a la ", "al de ", "al ", "a "] {
+        if lower.starts_with(prefix) {
+            let destination = trimmed[prefix.len()..].trim();
+            if !destination.is_empty() {
+                return Some(destination);
+            }
+        }
+    }
+    None
 }
 
 fn prune_history(history: Vec<HistoryMessage>) -> (Vec<AgentMessage>, bool) {
