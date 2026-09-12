@@ -3,8 +3,7 @@ import { createConfirmationDialog } from '../../components/molecules/confirmatio
 import { activePresentationContextSignal } from '../../core/state/active-presentation-context.js';
 import { onAgentRefresh } from '../../core/state/agent-refresh.js';
 import { toPresentations, toEvent, toEvents, toDoor } from '../../router/navigate.js';
-import { buildWhatsAppTicketLink } from './whatsapp.js';
-import { compartirFotoEntrada, ensureTicketPhotoStyles } from './ticket-photo.js';
+import { generarFotoEntrada, descargarBlob, ensureTicketPhotoStyles } from './ticket-photo.js';
 
 import {
   listEvents,
@@ -360,13 +359,19 @@ export function createEventDetailController(deps) {
   }
 
   // Tickets actions
-  function handleTicketWhatsApp(ticket) {
-    const link = buildWhatsAppTicketLink({
-      ticket,
-      eventName: (event && event.nombre) || '',
-    });
-    if (typeof window !== 'undefined' && window.open) {
-      window.open(link, '_blank', 'noopener,noreferrer');
+  async function handleTicketPhoto(ticket) {
+    try {
+      const blob = await generarFotoEntrada(
+        ticket,
+        {
+          nombre: (event && event.nombre) || '',
+          fecha_hora: (event && event.fecha_hora) || '',
+          lugar: (event && event.lugar) || '',
+        }
+      );
+      descargarBlob(blob, `entrada-${ticket.nombre_comprador || 'ticket'}.png`);
+    } catch (err) {
+      console.error('Error al crear la imagen de la entrada:', err);
     }
   }
 
@@ -535,7 +540,7 @@ export function createEventDetailController(deps) {
     onDeleteEvent: handleDeleteEvent,
     onSellTickets: handleSellTickets,
     onConfirmPayment: handleConfirmPayment,
-    onTicketWhatsApp: handleTicketWhatsApp,
+    onTicketPhoto: handleTicketPhoto,
     onDeleteTicket: handleDeleteTicket,
     onCreateInterest: handleCreateInterest,
     onEditInterest: handleEditInterest,

@@ -6,7 +6,7 @@
 
 import { createElement } from "../../utils/dom/create-element.js";
 import { createButton } from "../../components/atoms/button.js";
-import { compartirFotoEntrada, ensureTicketPhotoStyles } from "./ticket-photo.js";
+import { generarFotoEntrada, descargarBlob, ensureTicketPhotoStyles } from "./ticket-photo.js";
 import * as defaultApi from "./api.js";
 
 /**
@@ -164,80 +164,52 @@ export function createPublicTicketView(initialState = {}) {
       ]);
     }
 
-    // WhatsApp Photo Card Button (primary, only if Pagado)
-    let sendPhotoBtn = null;
+    // Botón único: descargar la imagen (solo si Pagado)
+    let downloadBtn = null;
     let noticeEl = null;
 
     if (isPaid) {
       noticeEl = createElement("p", { class: "ticket-photo-notice", style: "display: none;" });
 
-      sendPhotoBtn = createButton({
-        text: "Enviar foto por WhatsApp",
+      downloadBtn = createButton({
+        text: "Descargar imagen",
         variant: "primary",
         fullWidth: true,
         onClick: async () => {
-          if (sendPhotoBtn) {
-            sendPhotoBtn.update({ text: "Creando foto…", disabled: true });
+          if (downloadBtn) {
+            downloadBtn.update({ text: "Creando imagen…", disabled: true });
           }
           if (noticeEl) {
             noticeEl.style.display = "none";
             noticeEl.textContent = "";
           }
           try {
-            await compartirFotoEntrada(
+            const blob = await generarFotoEntrada(
               ticket,
               {
                 nombre: ticket.nombre_evento,
                 fecha_hora: ticket.fecha_hora,
                 lugar: ticket.lugar,
-              },
-              {
-                onNotice: (msg) => {
-                  if (noticeEl) {
-                    noticeEl.textContent = msg;
-                    noticeEl.style.display = "block";
-                  }
-                },
               }
             );
+            descargarBlob(blob, `entrada-${ticket.nombre_comprador || "ticket"}.png`);
           } catch (err) {
-            if (err && err.name === "AbortError") return;
-            console.error("Error al compartir foto de la entrada:", err);
+            console.error("Error al crear la imagen de la entrada:", err);
             if (noticeEl) {
-              noticeEl.textContent = "No se pudo crear o compartir la foto de la entrada.";
+              noticeEl.textContent = "No se pudo crear la imagen de la entrada.";
               noticeEl.style.display = "block";
             }
           } finally {
-            if (sendPhotoBtn) {
-              sendPhotoBtn.update({ text: "Enviar foto por WhatsApp", disabled: false });
+            if (downloadBtn) {
+              downloadBtn.update({ text: "Descargar imagen", disabled: false });
             }
           }
         },
       });
     }
 
-    // Secondary link share action
-    const shareBtn = createButton({
-      text: isPaid ? "Compartir enlace" : "Compartir Entrada",
-      variant: "secondary",
-      fullWidth: true,
-      onClick: () => {
-        if (typeof navigator !== "undefined" && navigator.share) {
-          navigator.share({
-            title: ticket.nombre_evento,
-            text: `Entrada para ${ticket.nombre_evento} - ${ticket.nombre_comprador}`,
-            url: window.location.href,
-          }).catch(() => {});
-        } else if (typeof navigator !== "undefined" && navigator.clipboard) {
-          navigator.clipboard.writeText(window.location.href);
-          alert("Enlace copiado al portapapeles");
-        }
-      },
-    });
-
     const actionsChildren = [
-      sendPhotoBtn ? sendPhotoBtn.el : null,
-      shareBtn.el,
+      downloadBtn ? downloadBtn.el : null,
       noticeEl,
     ].filter(Boolean);
 
