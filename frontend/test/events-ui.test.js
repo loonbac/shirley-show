@@ -378,13 +378,15 @@ console.log('Running Events UI and Integration Tests...');
     const form = quickSale.el.querySelector('form');
     const inputs = quickSale.el.querySelectorAll('input');
     inputs[0].value = 'Ana Silva';
-    inputs[1].value = '987654321';
+    assert.equal(inputs[1].getAttribute('required'), null, 'Phone must be optional for a quick ticket sale');
+    inputs[1].value = '';
     inputs[2].value = '2';
 
     form.dispatchEvent(new Event('submit'));
     await new Promise((r) => setTimeout(r, 10));
 
     assert.equal(soldData.nombre_comprador, 'Ana Silva');
+    assert.equal(soldData.contacto, '', 'An empty phone must be sent to the API');
     assert.equal(soldData.cantidad, 2);
 
     const cardsList = quickSale.el.querySelector('.events-quick-tickets-list');

@@ -697,10 +697,10 @@ export function createSellTicketDialog(props) {
   });
 
   const contactoInput = createTextInput({
-    label: 'Teléfono / WhatsApp',
+    label: 'Teléfono / WhatsApp (opcional)',
     name: 'contacto',
     placeholder: 'ej. 987654321',
-    required: true,
+    required: false,
   });
 
   // Preselection rule: preselect ONLY if there is exactly one valid ticket type option
@@ -808,8 +808,9 @@ export function createSellTicketDialog(props) {
   function showIssuedTicketsView(issuedTickets, metadata) {
     titleEl.textContent = `¡Venta Realizada! (${issuedTickets.length} ${issuedTickets.length === 1 ? 'entrada emitida' : 'entradas emitidas'})`;
 
+    const contactText = metadata.contacto ? ` (${metadata.contacto})` : '';
     const subtitle = createElement('p', { class: 'events-dialog-subtitle' }, [
-      `Comprador: ${metadata.nombre_comprador} (${metadata.contacto}) - ${metadata.medio_pago} [${metadata.estado_pago}]`
+      `Comprador: ${metadata.nombre_comprador}${contactText} - ${metadata.medio_pago} [${metadata.estado_pago}]`
     ]);
 
     const cards = issuedTickets.map((ticket, idx) => {

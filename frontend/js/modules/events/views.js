@@ -611,7 +611,7 @@ export function createEventDetailView(props) {
           createElement('strong', {}, [t.nombre_comprador]),
           t.contacto
             ? createElement('div', { class: 'events-table-subtext' }, [t.contacto])
-            : createElement('div', { class: 'events-table-subtext' }, ['Sin teléfono']),
+            : null,
         ]),
         createElement('td', {}, [t.tipo_entrada]),
         createElement('td', {}, [`S/ ${Number(t.precio).toFixed(2)}`]),
