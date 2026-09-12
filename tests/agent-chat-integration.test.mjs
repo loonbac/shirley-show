@@ -35,27 +35,23 @@ const { sendAgentChatMessage } = await import(pathToFileURL(agentChatApiModulePa
 console.log('Running Agent Chat Route and Composition Integration Tests...');
 
 // 1. Catalog route publishing and reactive refresh subscription
+// (single chat entry by design: floating bubble + home hero, NO topbar trigger)
 {
-  let openAgentCalled = false;
   const mockAudio = { stop: () => {} };
 
   const ctrl = createPresentationsController({
     audioController: mockAudio,
-    onOpenAgent: () => { openAgentCalled = true; },
   });
 
-  // Topbar should contain agent-chat-trigger
+  // Topbar must NOT contain agent-chat-trigger (single global entry point)
   const triggerEl = ctrl.topbarEl.querySelector('.agent-chat-trigger');
-  assert.ok(triggerEl !== null, 'Catalog topbar must compose agent-chat-trigger');
-
-  triggerEl.dispatchEvent(new Event('click'));
-  assert.equal(openAgentCalled, true, 'Clicking trigger in topbar must call onOpenAgent');
+  assert.ok(triggerEl === null, 'Catalog topbar must NOT compose agent-chat-trigger');
 
   // Active presentation context in catalog must be null
   assert.equal(activePresentationContextSignal.get(), null, 'Catalog controller must set active context to null');
 
   ctrl.destroy();
-  console.log('✓ 1. Catalog route sets context to null and composes agent-chat-trigger');
+  console.log('✓ 1. Catalog route sets context to null without topbar trigger');
 }
 
 // 2. Presentation detail route publishing, reactive item refresh, and scroll preservation
@@ -118,7 +114,7 @@ console.log('Running Agent Chat Route and Composition Integration Tests...');
   );
 
   const triggerEl = ctrl.topbarEl.querySelector('.agent-chat-trigger');
-  assert.ok(triggerEl !== null, 'Presentation detail topbar must compose agent-chat-trigger');
+      assert.ok(triggerEl === null, 'Presentation detail topbar must NOT compose agent-chat-trigger (single global entry)');
 
   // Setup scroll tracking on window and view element
   window.scrollY = 420;
