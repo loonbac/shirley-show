@@ -1,116 +1,106 @@
 /**
- * Pure generator and sharing helper for WhatsApp ticket photo cards.
- * Warm ivory and antique gold palette (#b8860b) for Shirley Show.
- * Renders attendees, event data, ticket type, short code, and vector QR onto canvas (1080px width).
+ * ticket-photo.js - Generador de foto PNG de entrada para WhatsApp (1080px)
+ * Replicación fiel de fotoEntrada.js de Shirley Show.
+ *
+ * Incluye:
+ * - Logo superior de marca (o texto de respaldo)
+ * - QR musical con degradado #0f1b2e -> #c0246f, esquinas redondeadas y logo-qr central
+ * - Marco redondeado alrededor del QR
+ * - Nombre del comprador (58px, negrita)
+ * - Nombre del evento (46px, morado #6024c9)
+ * - Fecha larga y lugar (38px, gris suave)
+ * - Pastilla de tipo de entrada (fondo lavanda suave #ede7fb, texto morado #6024c9)
+ * - Código corto (primeros 8 caracteres en MAYÚSCULAS)
+ * - Recordatorio: "Muestra este código en la puerta"
  */
+
+import { dibujarQR, trazarRedondeado } from "./ticket-qr-dots.js";
 
 const ANCHO = 1080;
-const MARGEN = 80;
-const QR_PX = 620;
-const MARCO_PADDING = 36;
-const MARCO_SIZE = QR_PX + (MARCO_PADDING * 2); // 692px
+const MARGEN = 70;
+const QR_PX = 660;
 
-// Warm Shirley Show palette tokens (matching tokens/colors.css)
-const COLOR_BG = "#faf8f5";              // Warm Ivory
-const COLOR_SURFACE = "#ffffff";         // Pure White for QR backdrop
-const COLOR_BORDE = "#e2dbce";           // Warm subtle border
-const COLOR_TEXTO = "#1c1917";           // Warm Charcoal
-const COLOR_SUAVE = "#574f45";           // Muted Charcoal
-const COLOR_DIM = "#7d7367";             // Dim Charcoal
-const COLOR_ORO = "#b8860b";             // Sober Metallic Antique Gold
-const COLOR_ORO_HOVER = "#9a7209";       // Deep Gold
-const COLOR_PASTILLA_BG = "#fcf8ed";     // Warm Gold Subtle Tint
-const COLOR_PASTILLA_BORDE = "#b8860b";  // Gold Border
+// Colores de marca originales (fotoEntrada.js / tokens Shirley Show)
+const COLOR_TEXTO = "#1f1a2e";
+const COLOR_SUAVE = "#5b5470";
+const COLOR_PRIMARIO_OSCURO = "#6024c9";
+const COLOR_PRIMARIO_SUAVE = "#ede7fb";
+const COLOR_BORDE = "#d8d2e6";
 
-const FUENTE = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+const FUENTE = "system-ui, 'Segoe UI', Roboto, sans-serif";
 
 /**
- * Normalizes SVG text by guaranteeing valid XML namespace and explicit dimensions.
- * @param {string} svgString 
+ * Formatea una fecha ISO a fecha larga en español (Perú).
+ * Coincide exactamente con fechaLarga() de lib/format.js original.
+ * @param {string} iso 
  * @returns {string}
  */
-export function normalizarSvg(svgString) {
-  let svg = String(svgString || "").trim();
-  if (!svg.includes("xmlns=")) {
-    svg = svg.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+export function fechaLarga(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString("es-PE", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return String(iso);
   }
-  if (!svg.match(/<svg[^>]*\bwidth\s*=/i)) {
-    svg = svg.replace(/<svg\b/i, '<svg width="600" height="600"');
-  }
-  return svg;
 }
 
 /**
- * Asynchronously rasterizes an SVG string into an HTMLImageElement using an object URL.
- * @param {string} svgString 
- * @returns {Promise<HTMLImageElement>}
- */
-export function cargarImagenDesdeSvg(svgString) {
-  return new Promise((resolve, reject) => {
-    if (!svgString) {
-      return reject(new Error("SVG no disponible"));
-    }
-    try {
-      const cleanSvg = normalizarSvg(svgString);
-      const blob = new Blob([cleanSvg], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        resolve(img);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error("No se pudo decodificar el código QR"));
-      };
-      img.src = url;
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
-
-/**
- * Extracts an 8-character uppercase short code from available ticket identifiers.
+ * Extrae el código corto en MAYÚSCULAS (primeros 8 caracteres).
+ * Prioriza codigo_qr, tolerando scan_token o id si el DTO no expone el secreto en crudo.
  * @param {any} entrada 
  * @returns {string}
  */
 export function obtenerCodigoCorto(entrada) {
   if (!entrada) return "";
-  if (entrada.codigo_corto) return String(entrada.codigo_corto).toUpperCase();
   if (entrada.codigo_qr) return String(entrada.codigo_qr).slice(0, 8).toUpperCase();
+  if (entrada.codigo_corto) return String(entrada.codigo_corto).toUpperCase();
   if (entrada.scan_token) return String(entrada.scan_token).replace(/^st_/, "").slice(0, 8).toUpperCase();
   if (entrada.id) return String(entrada.id).replace(/^tix_/, "").slice(0, 8).toUpperCase();
   return "";
 }
 
 /**
- * Formats ISO date string to a human-friendly Spanish format for display.
- * @param {string} isoString 
- * @returns {string}
+ * Carga asíncronamente un elemento HTMLImageElement desde una URL.
+ * @param {string} src 
+ * @returns {Promise<HTMLImageElement>}
  */
-export function formatPublicDateTime(isoString) {
-  if (!isoString) return "";
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return String(isoString);
-    return d.toLocaleString("es-PE", {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return String(isoString);
-  }
+export function cargarImagen(src) {
+  return new Promise((resolver, rechazar) => {
+    if (typeof Image === "undefined") {
+      return rechazar(new Error("Image no disponible en este entorno"));
+    }
+    const img = new Image();
+    img.onload = () => resolver(img);
+    img.onerror = () => rechazar(new Error(`No se pudo cargar la imagen: ${src}`));
+    img.src = src;
+  });
 }
 
 /**
- * Splits text into lines fitting within maxAncho.
- * @param {CanvasRenderingContext2D} ctx 
+ * Intenta cargar una imagen probando una lista de rutas candidatas con fallback.
+ * @param {string[]} rutas 
+ * @returns {Promise<HTMLImageElement|null>}
+ */
+export async function cargarImagenConFallback(rutas) {
+  for (const src of rutas) {
+    try {
+      return await cargarImagen(src);
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * Parte un texto en líneas que quepan en maxAncho según la tipografía activa.
+ * @param {CanvasRenderingContext2D|null} ctx 
  * @param {string} texto 
  * @param {number} maxAncho 
  * @returns {string[]}
@@ -122,7 +112,9 @@ export function partirLineas(ctx, texto, maxAncho) {
   let actual = "";
   for (const p of palabras) {
     const prueba = actual ? `${actual} ${p}` : p;
-    const width = typeof ctx.measureText === "function" ? ctx.measureText(prueba).width : prueba.length * 20;
+    const width = (ctx && typeof ctx.measureText === "function")
+      ? ctx.measureText(prueba).width
+      : prueba.length * 24;
     if (actual && width > maxAncho) {
       lineas.push(actual);
       actual = p;
@@ -135,37 +127,11 @@ export function partirLineas(ctx, texto, maxAncho) {
 }
 
 /**
- * Path drawing helper for rounded rectangles.
- * @param {CanvasRenderingContext2D} ctx 
- * @param {number} x 
- * @param {number} y 
- * @param {number} w 
- * @param {number} h 
- * @param {number} r 
- */
-export function trazarRedondeado(ctx, x, y, w, h, r) {
-  if (typeof ctx.roundRect === "function") {
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, r);
-    return;
-  }
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-/**
- * Pure generator: creates a 1080px PNG Blob ticket photo card ready for WhatsApp sharing.
- * Renders Shirley Show brand, on-screen vector QR (via Image+blobURL+drawImage),
- * attendee name, event title, date, venue, ticket type pill, short code, and door instruction.
+ * Genera una FOTO (PNG) de la entrada a 1080px de ancho, fiel a fotoEntrada.js original.
  *
- * @param {any} entrada 
- * @param {any} [evento] 
- * @returns {Promise<Blob>}
+ * @param {any} entrada Datos de la entrada (nombre_comprador, tipo_entrada, codigo_qr, etc.)
+ * @param {any} [evento] Datos del evento (nombre, fecha_hora, lugar)
+ * @returns {Promise<Blob>} Blob con imagen PNG lista para compartir o descargar
  */
 export async function generarFotoEntrada(entrada, evento) {
   if (!entrada) {
@@ -176,108 +142,99 @@ export async function generarFotoEntrada(entrada, evento) {
     throw new Error("Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.");
   }
 
-  const svgString =
-    entrada.qr_svg ||
+  // Valor a codificar en el QR: el mismo que valida la puerta (codigo_qr)
+  const valorQR =
+    entrada.codigo_qr ||
     entrada.qr ||
-    (typeof document !== "undefined" && document.querySelector(".public-ticket-qr-box svg")?.outerHTML);
+    (typeof entrada.qr_svg === "string" ? entrada.qr_svg : "") ||
+    entrada.scan_token ||
+    entrada.id ||
+    "";
 
-  if (!svgString) {
+  if (!valorQR) {
     throw new Error("Código QR no disponible para esta entrada.");
   }
 
-  const qrImg = await cargarImagenDesdeSvg(svgString);
+  const [logoQR, logoImg] = await Promise.all([
+    cargarImagenConFallback([
+      "/assets/public/logo-qr.png",
+      "/public/logo-qr.png",
+      "/logo-qr.png",
+    ]).catch(() => null),
+    cargarImagenConFallback([
+      "/assets/public/logo.png",
+      "/public/logo.png",
+      "/logo.png",
+    ]).catch(() => null),
+  ]);
 
   const doc = typeof document !== "undefined" ? document : globalThis.document;
   if (!doc || typeof doc.createElement !== "function") {
     throw new Error("Soporte de DOM/Canvas no disponible.");
   }
 
-  const medidor = doc.createElement("canvas").getContext("2d");
-  const maxTexto = ANCHO - (MARGEN * 2);
+  // Medir cuánto ocupa cada texto para darle al canvas la altura justa
+  const canvasMedidor = doc.createElement("canvas");
+  const medidor = canvasMedidor.getContext ? canvasMedidor.getContext("2d") : null;
+  const maxTexto = ANCHO - MARGEN * 2;
 
-  const nombreEvento = (evento && evento.nombre) || entrada.nombre_evento || "Evento";
+  const nombreComprador = entrada.nombre_comprador || "";
+  const nombreEvento = (evento && evento.nombre) || entrada.nombre_evento || "";
   const fechaHoraStr = (evento && evento.fecha_hora) || entrada.fecha_hora || "";
-  const fechaFormateada = formatPublicDateTime(fechaHoraStr);
+  const fechaTexto = fechaHoraStr ? fechaLarga(fechaHoraStr) : "";
   const lugar = (evento && evento.lugar) || entrada.lugar || "";
-  const comprador = entrada.nombre_comprador || "";
-  const tipoEntrada = entrada.tipo_entrada || "General";
-  const codigoCorto = obtenerCodigoCorto(entrada);
 
   const bloques = [
-    comprador ? { texto: comprador, font: `700 56px ${FUENTE}`, color: COLOR_TEXTO, alto: 68 } : null,
-    nombreEvento ? { texto: nombreEvento, font: `700 46px ${FUENTE}`, color: COLOR_ORO, alto: 58 } : null,
-    fechaFormateada ? { texto: fechaFormateada, font: `500 38px ${FUENTE}`, color: COLOR_SUAVE, alto: 50 } : null,
+    nombreComprador ? { texto: nombreComprador, font: `700 58px ${FUENTE}`, color: COLOR_TEXTO, alto: 68 } : null,
+    nombreEvento ? { texto: nombreEvento, font: `700 46px ${FUENTE}`, color: COLOR_PRIMARIO_OSCURO, alto: 56 } : null,
+    fechaTexto ? { texto: fechaTexto, font: `500 38px ${FUENTE}`, color: COLOR_SUAVE, alto: 50 } : null,
     lugar ? { texto: lugar, font: `500 38px ${FUENTE}`, color: COLOR_SUAVE, alto: 50 } : null,
   ].filter(Boolean);
 
   for (const b of bloques) {
-    medidor.font = b.font;
+    if (medidor) medidor.font = b.font;
     b.lineas = partirLineas(medidor, b.texto, maxTexto);
   }
 
+  const altoLogo = logoImg ? 150 : 90;
   const altoTextos = bloques.reduce((s, b) => s + b.lineas.length * b.alto, 0);
-
-  // Layout calculation:
-  // Top: 70
-  // Brand title ("Shirley Show"): 76 + subtitle ("• ENTRADA DIGITAL •"): 24 + gap: 44 = 144
-  // QR Frame: MARCO_SIZE (692)
-  // Gap: 44
-  // Text blocks: altoTextos
-  // Gap before pill: 30
-  // Ticket type pill: 76
-  // Gap: 34
-  // Short code line: codigoCorto ? 44 : 0
-  // Door reminder: 40
-  // Bottom padding: 70
-  const alto = 70 + 144 + MARCO_SIZE + 44 + altoTextos + 30 + 76 + 34 + (codigoCorto ? 44 : 0) + 40 + 70;
+  const alto = 60 + altoLogo + 40 + (QR_PX + 56) + 44 + altoTextos + 26 + 76 + 30 + 40 + 70;
 
   const canvas = doc.createElement("canvas");
   canvas.width = ANCHO;
   canvas.height = alto;
   const ctx = canvas.getContext("2d");
 
-  // 1. Background (Warm Ivory)
-  ctx.fillStyle = COLOR_BG;
+  // Fondo blanco puro
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, ANCHO, alto);
-
-  // Subtle decorative border for card elegance
-  ctx.strokeStyle = COLOR_BORDE;
-  ctx.lineWidth = 2;
-  trazarRedondeado(ctx, 30, 30, ANCHO - 60, alto - 60, 24);
-  ctx.stroke();
-
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
+  let y = 60;
 
-  let y = 70;
+  // 1. Logo de la marca arriba (si no carga, el nombre en texto)
+  if (logoImg && logoImg.width && logoImg.height) {
+    const h = altoLogo;
+    const w = (logoImg.width / logoImg.height) * h;
+    ctx.drawImage(logoImg, (ANCHO - w) / 2, y, w, h);
+  } else {
+    ctx.font = `700 64px ${FUENTE}`;
+    ctx.fillStyle = COLOR_PRIMARIO_OSCURO;
+    ctx.fillText("Shirley Show", ANCHO / 2, y + 70);
+  }
+  y += altoLogo + 40;
 
-  // 2. Brand Header: "Shirley Show"
-  ctx.font = `700 64px ${FUENTE}`;
-  ctx.fillStyle = COLOR_ORO;
-  ctx.fillText("Shirley Show", ANCHO / 2, y + 60);
-  y += 76;
-
-  ctx.font = `600 24px ${FUENTE}`;
-  ctx.fillStyle = COLOR_DIM;
-  ctx.fillText("• ENTRADA DIGITAL •", ANCHO / 2, y + 24);
-  y += 24 + 44;
-
-  // 3. QR Container Frame with smooth rounded corners
-  const xMarco = (ANCHO - MARCO_SIZE) / 2;
-  ctx.fillStyle = COLOR_SURFACE;
-  trazarRedondeado(ctx, xMarco, y, MARCO_SIZE, MARCO_SIZE, 32);
-  ctx.fill();
+  // 2. QR musical dentro de marco redondeado
+  const marco = QR_PX + 56;
+  const xMarco = (ANCHO - marco) / 2;
   ctx.strokeStyle = COLOR_BORDE;
   ctx.lineWidth = 3;
+  trazarRedondeado(ctx, xMarco, y, marco, marco, 28);
   ctx.stroke();
+  dibujarQR(ctx, valorQR, (ANCHO - QR_PX) / 2, y + 28, QR_PX, logoQR);
+  y += marco + 44;
 
-  // QR Image inside frame (drawn directly from rasterized vector SVG)
-  const xQR = (ANCHO - QR_PX) / 2;
-  const yQR = y + MARCO_PADDING;
-  ctx.drawImage(qrImg, xQR, yQR, QR_PX, QR_PX);
-  y += MARCO_SIZE + 44;
-
-  // 4. Details: Buyer, Event, Date, Venue
+  // 3. Datos: comprador, evento, fecha, lugar
   for (const b of bloques) {
     ctx.font = b.font;
     ctx.fillStyle = b.color;
@@ -286,45 +243,35 @@ export async function generarFotoEntrada(entrada, evento) {
       ctx.fillText(linea, ANCHO / 2, y - 14);
     }
   }
-  y += 30;
+  y += 26;
 
-  // 5. Ticket Type Pill (rounded pill with warm ivory-gold background)
+  // 4. Tipo de entrada como pastilla morada suave
+  const tipoEntrada = entrada.tipo_entrada || "General";
   ctx.font = `700 38px ${FUENTE}`;
-  const anchoTextoPastilla = typeof ctx.measureText === "function" ? ctx.measureText(tipoEntrada).width : tipoEntrada.length * 25;
-  const anchoPastilla = Math.max(anchoTextoPastilla + 100, 240);
-  const xPastilla = (ANCHO - anchoPastilla) / 2;
-
-  ctx.fillStyle = COLOR_PASTILLA_BG;
-  trazarRedondeado(ctx, xPastilla, y, anchoPastilla, 76, 38);
+  const anchoTextoPastilla = (ctx && typeof ctx.measureText === "function")
+    ? ctx.measureText(tipoEntrada).width
+    : tipoEntrada.length * 24;
+  const anchoPastilla = anchoTextoPastilla + 90;
+  ctx.fillStyle = COLOR_PRIMARIO_SUAVE;
+  trazarRedondeado(ctx, (ANCHO - anchoPastilla) / 2, y, anchoPastilla, 76, 38);
   ctx.fill();
-
-  ctx.strokeStyle = COLOR_PASTILLA_BORDE;
-  ctx.lineWidth = 2.5;
-  trazarRedondeado(ctx, xPastilla, y, anchoPastilla, 76, 38);
-  ctx.stroke();
-
-  ctx.fillStyle = COLOR_ORO_HOVER;
+  ctx.fillStyle = COLOR_PRIMARIO_OSCURO;
   ctx.fillText(tipoEntrada, ANCHO / 2, y + 51);
-  y += 76 + 34;
+  y += 76 + 30;
 
-  // 6. Short Code & Door instruction
-  if (codigoCorto) {
-    ctx.font = `600 34px ${FUENTE}`;
-    ctx.fillStyle = COLOR_SUAVE;
-    ctx.fillText(`Código: ${codigoCorto}`, ANCHO / 2, y + 24);
-    y += 44;
-  }
+  // 5. Código corto y recordatorio
+  const codigoCorto = obtenerCodigoCorto(entrada);
+  ctx.font = `500 32px ${FUENTE}`;
+  ctx.fillStyle = COLOR_SUAVE;
+  ctx.fillText(`Código: ${codigoCorto}`, ANCHO / 2, y + 20);
+  ctx.fillText("Muestra este código en la puerta", ANCHO / 2, y + 62);
 
-  ctx.font = `500 30px ${FUENTE}`;
-  ctx.fillStyle = COLOR_DIM;
-  ctx.fillText("Muestra este código en la puerta", ANCHO / 2, y + 24);
-
-  return new Promise((resolve, reject) => {
+  return new Promise((resolver, rechazar) => {
     if (typeof canvas.toBlob === "function") {
-      canvas.toBlob((blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error("No se pudo generar el archivo PNG de la entrada"));
-      }, "image/png");
+      canvas.toBlob(
+        (blob) => (blob ? resolver(blob) : rechazar(new Error("No se pudo crear la imagen"))),
+        "image/png"
+      );
     } else if (typeof canvas.toDataURL === "function") {
       try {
         const dataUrl = canvas.toDataURL("image/png");
@@ -334,18 +281,18 @@ export async function generarFotoEntrada(entrada, evento) {
         for (let i = 0; i < len; i++) {
           arr[i] = binStr.charCodeAt(i);
         }
-        resolve(new Blob([arr], { type: "image/png" }));
+        resolver(new Blob([arr], { type: "image/png" }));
       } catch (err) {
-        reject(err);
+        rechazar(err);
       }
     } else {
-      reject(new Error("Canvas no soporta exportación a imagen"));
+      rechazar(new Error("No se pudo crear la imagen"));
     }
   });
 }
 
 /**
- * Downloads a Blob directly to the client device.
+ * Descarga directamente un Blob en el dispositivo del usuario.
  * @param {Blob} blob 
  * @param {string} nombreArchivo 
  */
@@ -363,16 +310,10 @@ export function descargarBlob(blob, nombreArchivo) {
 }
 
 /**
- * Orchestrates sharing the ticket photo card via navigator.share with files,
- * falling back to download + notice. Silently ignores AbortError on cancellation.
- * Only intended for paid tickets.
- *
+ * Comparte la foto de entrada por navigator.share o recurre a descarga directa.
  * @param {any} entrada 
  * @param {any} [evento] 
- * @param {{
- *   onNotice?: (mensaje: string) => void,
- * }} [options={}] 
- * @returns {Promise<void>}
+ * @param {{ onNotice?: (mensaje: string) => void }} [options={}] 
  */
 export async function compartirFotoEntrada(entrada, evento, options = {}) {
   const { onNotice } = options;
@@ -416,7 +357,6 @@ export async function compartirFotoEntrada(entrada, evento, options = {}) {
       return;
     } catch (err) {
       if (err && err.name === "AbortError") {
-        // User closed the share menu: silent exit
         return;
       }
       console.warn("Fallo al compartir foto vía navigator.share, usando descarga:", err);
@@ -428,15 +368,14 @@ export async function compartirFotoEntrada(entrada, evento, options = {}) {
     }
   }
 
-  // Fallback: browser does not support file sharing
   descargarBlob(blob, nombreArchivo);
   if (onNotice) {
-    onNotice("La foto se guardó en tus descargas. Adjúntala en el chat de WhatsApp.");
+    onNotice("La foto se guardó en tus descargas.");
   }
 }
 
 /**
- * Injects ticket photo stylesheet link into document head if not already present.
+ * Inyecta los estilos de la foto de entrada en el head si no existen.
  */
 export function ensureTicketPhotoStyles() {
   if (typeof document === "undefined" || !document.head) return;
@@ -447,3 +386,5 @@ export function ensureTicketPhotoStyles() {
     document.head.appendChild(link);
   }
 }
+
+export { trazarRedondeado };
