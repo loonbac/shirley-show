@@ -19,7 +19,8 @@ use shirley_show::config::{
 use shirley_show::domain::agent_message::AgentMessage;
 use shirley_show::domain::agent_tool::{ToolCall, ToolDefinition};
 use shirley_show::infra::groq::client::{
-    CURRENT_SESSION_ID, GroqClient, HEADER_OPENCODE_SESSION, USER_AGENT_SHIRLEY,
+    CURRENT_SESSION_ID, DEFAULT_MAX_COMPLETION_TOKENS, GroqClient, HEADER_OPENCODE_SESSION,
+    USER_AGENT_SHIRLEY,
 };
 use shirley_show::infra::groq::error::ProviderError;
 use shirley_show::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
@@ -170,7 +171,7 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     let body = state.last_body.lock().await.clone().unwrap();
     assert_eq!(body["model"], "openai/gpt-oss-120b");
     assert_eq!(body["tool_choice"], "auto");
-    assert_eq!(body["max_completion_tokens"], 800);
+    assert_eq!(body["max_completion_tokens"], DEFAULT_MAX_COMPLETION_TOKENS);
 
     let messages = body["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 4);
@@ -252,7 +253,7 @@ async fn test_opencode_provider_request_headers_and_session_forwarding() {
 
     let body = state.last_body.lock().await.clone().unwrap();
     assert_eq!(body["model"], "deepseek-v4-flash");
-    assert_eq!(body["max_completion_tokens"], 800);
+    assert_eq!(body["max_completion_tokens"], DEFAULT_MAX_COMPLETION_TOKENS);
 }
 
 #[tokio::test]

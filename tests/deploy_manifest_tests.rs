@@ -1,12 +1,43 @@
 use std::fs;
 use std::path::Path;
 
+/// Extracts the port from the first `EXPOSE <port>` directive.
+fn dockerfile_exposed_port(content: &str) -> Option<u16> {
+    content
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("EXPOSE "))
+        .and_then(|port| port.trim().parse::<u16>().ok())
+}
+
+/// Extracts the port from the HEALTHCHECK probe URL.
+fn dockerfile_healthcheck_port(content: &str) -> Option<u16> {
+    content
+        .lines()
+        .find_map(|line| line.split("localhost:").nth(1))
+        .and_then(|rest| rest.split('/').next())
+        .and_then(|port| port.trim().parse::<u16>().ok())
+}
+
+/// Extracts the port from the compose `SHIRLEY_BIND=0.0.0.0:<port>` entry.
+fn compose_bind_port(content: &str) -> Option<u16> {
+    content
+        .lines()
+        .find_map(|line| line.split("SHIRLEY_BIND=0.0.0.0:").nth(1))
+        .and_then(|rest| rest.trim().parse::<u16>().ok())
+}
+
 #[test]
 fn test_dockerfile_multi_stage_and_healthcheck() {
     let content = fs::read_to_string("Dockerfile").expect("read Dockerfile");
+    // Versión-agnóstico: el builder debe ser una imagen oficial de Rust con stage
+    // nombrado, para que subir la versión de Rust no rompa la verificación.
+    let has_rust_builder_stage = content.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with("FROM rust:") && trimmed.ends_with("AS builder")
+    });
     assert!(
-        content.contains("FROM rust:1.85-slim-bookworm AS builder"),
-        "Dockerfile must have rust builder stage"
+        has_rust_builder_stage,
+        "Dockerfile must have an official Rust builder stage named 'builder'"
     );
     assert!(
         content.contains("FROM debian:bookworm-slim"),
@@ -25,8 +56,17 @@ fn test_dockerfile_multi_stage_and_healthcheck() {
         "HEALTHCHECK must define --start-period=10s"
     );
     assert!(
-        content.contains("http://localhost:3000/api/presentations"),
+        content.contains("/api/presentations"),
         "HEALTHCHECK must probe /api/presentations"
+    );
+
+    // Consistencia real de puertos: EXPOSE == HEALTHCHECK, en vez de fijar 3000 a mano.
+    let exposed = dockerfile_exposed_port(&content).expect("Dockerfile must EXPOSE a port");
+    let probed =
+        dockerfile_healthcheck_port(&content).expect("HEALTHCHECK must probe a localhost port");
+    assert_eq!(
+        exposed, probed,
+        "HEALTHCHECK port ({probed}) must match EXPOSE port ({exposed})"
     );
 }
 
@@ -48,9 +88,14 @@ fn test_dockerignore_whitelist() {
 #[test]
 fn test_compose_yaml_structure_and_defaults() {
     let content = fs::read_to_string("compose.yaml").expect("read compose.yaml");
+    // La topología puede ser host o bridge+ports; debe estar declarada explícitamente.
+    let uses_host_network = content
+        .lines()
+        .any(|line| line.trim() == "network_mode: host");
+    let publishes_port = content.lines().any(|line| line.trim() == "ports:");
     assert!(
-        content.contains("network_mode: host"),
-        "compose.yaml must specify network_mode: host"
+        uses_host_network ^ publishes_port,
+        "compose.yaml must declare exactly one network strategy: host mode or published ports"
     );
     assert!(
         content.contains("shirley-data:/app/data"),
@@ -63,6 +108,21 @@ fn test_compose_yaml_structure_and_defaults() {
     assert!(
         content.contains("JOSHUA_PC_HOST=${JOSHUA_PC_HOST:-}"),
         "compose.yaml must default JOSHUA_PC_HOST to empty"
+    );
+}
+
+#[test]
+fn test_container_port_consistency_across_manifests() {
+    let dockerfile = fs::read_to_string("Dockerfile").expect("read Dockerfile");
+    let compose = fs::read_to_string("compose.yaml").expect("read compose.yaml");
+
+    let exposed = dockerfile_exposed_port(&dockerfile).expect("Dockerfile must EXPOSE a port");
+    let compose_port =
+        compose_bind_port(&compose).expect("compose.yaml must bind SHIRLEY_BIND to a port");
+
+    assert_eq!(
+        exposed, compose_port,
+        "Dockerfile EXPOSE port ({exposed}) must match compose SHIRLEY_BIND port ({compose_port})"
     );
 }
 
