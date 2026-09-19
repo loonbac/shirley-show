@@ -1,3 +1,5 @@
+/* Breakpoints unificados: base móvil (<640px), min-width: 640px, min-width: 768px, min-width: 1024px */
+
 .welcome-header {
   display: flex;
   flex-direction: column;
@@ -114,7 +116,8 @@
 }
 
 .welcome-header-chat-send {
-  align-self: flex-end;
+  align-self: stretch;
+  width: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -171,6 +174,8 @@
 .welcome-header-hint-chip {
   display: inline-flex;
   align-items: center;
+  /* Touch target >= 44px en móvil (WCAG 2.5.8); el padding vertical se ajusta con la altura mínima. */
+  min-height: var(--touch-target-min, 44px);
   padding: 6px 12px;
   background-color: var(--color-surface, #ffffff);
   border: 1px solid var(--color-border, #e2dbce);
@@ -232,7 +237,24 @@
   font-weight: var(--font-weight-medium, 500);
 }
 
-@media (min-width: 641px) {
+@media (max-width: 639px) {
+  .welcome-header {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+
+  .welcome-header-chat-box {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .welcome-header-chat-input {
+    font-size: var(--font-size-sm, 0.875rem);
+    min-height: 72px;
+    line-height: 1.4;
+  }
+}
+
+@media (min-width: 640px) {
   .welcome-header-chat-box {
     flex-direction: row;
     align-items: flex-end;
@@ -243,6 +265,7 @@
   }
 
   .welcome-header-chat-send {
+    width: auto;
     align-self: auto;
     flex-shrink: 0;
   }

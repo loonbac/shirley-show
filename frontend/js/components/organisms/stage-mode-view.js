@@ -55,7 +55,8 @@ export function createStageModeView(props) {
 
   // Exit Action Button (>= 48px touch target)
   const exitIcon = createIcon({ name: 'close', size: 'base' });
-  const exitText = createElement('span', {}, ['Salir de Escenario']);
+  const exitTextFull = createElement('span', { class: 'stage-mode-exit-text-full' }, ['Salir de Escenario']);
+  const exitTextShort = createElement('span', { class: 'stage-mode-exit-text-short' }, ['Salir']);
   const exitBtn = createElement(
     'button',
     {
@@ -68,7 +69,7 @@ export function createStageModeView(props) {
         }
       },
     },
-    [exitIcon, exitText]
+    [exitIcon, exitTextFull, exitTextShort]
   );
 
   // Title

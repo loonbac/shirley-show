@@ -1,3 +1,5 @@
+/* Breakpoints unificados: base móvil (<640px), min-width: 640px, min-width: 768px, min-width: 1024px */
+
 :root {
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
@@ -21,3 +23,8 @@
   --line-height-relaxed: 1.7;
   --line-height-lyrics: 1.75;
 }
+
+.text-center {
+  text-align: center;
+}
+

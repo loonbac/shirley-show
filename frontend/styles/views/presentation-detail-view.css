@@ -1,3 +1,5 @@
+/* Breakpoints unificados: base móvil (<640px), min-width: 640px, min-width: 768px, min-width: 1024px */
+
 .presentation-detail-view {
   display: flex;
   flex-direction: column;
@@ -13,9 +15,24 @@
 
 .presentation-title-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-3);
+}
+
+.presentation-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.presentation-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .presentation-title-text {
@@ -27,6 +44,20 @@
 
 .presentation-quick-add-section {
   width: 100%;
+}
+
+.add-item-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+@media (min-width: 640px) {
+  .presentation-title-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
 }
 
 @media (min-width: 768px) and (max-width: 1023px) {
@@ -53,3 +84,4 @@
     font-size: var(--font-size-3xl);
   }
 }
+

@@ -265,7 +265,7 @@ export function createExpenseFormDialog(props) {
     required: 'true',
   }, catOptions);
 
-  const catField = createElement('div', { class: 'text-input-field' }, [
+  const catField = createElement('div', { class: 'text-input-wrapper' }, [
     createElement('label', { class: 'text-input-label' }, ['Categoría']),
     selectCat,
   ]);
@@ -440,7 +440,7 @@ export function createInterestFormDialog(props) {
       createElement('option', { value: 'Confirmado', selected: interest.estado === 'Confirmado' ? 'selected' : undefined }, ['Confirmado']),
       createElement('option', { value: 'Cancelado', selected: interest.estado === 'Cancelado' ? 'selected' : undefined }, ['Cancelado']),
     ]);
-    statusSelectField = createElement('div', { class: 'text-input-field' }, [
+    statusSelectField = createElement('div', { class: 'text-input-wrapper' }, [
       createElement('label', { class: 'text-input-label' }, ['Estado']),
       statusSelect,
     ]);
@@ -548,7 +548,7 @@ export function createConvertInterestDialog(props) {
     createElement('option', { value: t.nombre }, [`${t.nombre} (S/ ${t.precio.toFixed(2)})`])
   );
   const typeSelect = createElement('select', { class: 'text-input events-select' }, typeOptions);
-  const typeField = createElement('div', { class: 'text-input-field' }, [
+  const typeField = createElement('div', { class: 'text-input-wrapper' }, [
     createElement('label', { class: 'text-input-label' }, ['Tipo de Entrada']),
     typeSelect,
   ]);
@@ -569,7 +569,7 @@ export function createConvertInterestDialog(props) {
     createElement('option', { value: 'Cortesía' }, ['Cortesía']),
   ]);
   medioSelect.value = 'Yape';
-  const medioField = createElement('div', { class: 'text-input-field' }, [
+  const medioField = createElement('div', { class: 'text-input-wrapper' }, [
     createElement('label', { class: 'text-input-label' }, ['Medio de Pago']),
     medioSelect,
   ]);
@@ -579,7 +579,7 @@ export function createConvertInterestDialog(props) {
     createElement('option', { value: 'Pendiente' }, ['Pendiente']),
   ]);
   estadoSelect.value = 'Pagado';
-  const estadoField = createElement('div', { class: 'text-input-field' }, [
+  const estadoField = createElement('div', { class: 'text-input-wrapper' }, [
     createElement('label', { class: 'text-input-label' }, ['Estado de Pago']),
     estadoSelect,
   ]);
@@ -730,7 +730,7 @@ export function createSellTicketDialog(props) {
   const typeSelect = createElement('select', { class: 'text-input events-select' }, typeOptions);
   typeSelect.value = hasSingleType ? ticketTypes[0].nombre : '';
 
-  const typeField = createElement('div', { class: 'text-input-field' }, [
+  const typeField = createElement('div', { class: 'text-input-wrapper' }, [
     createElement('label', { class: 'text-input-label' }, ['Tipo de Entrada']),
     typeSelect,
   ]);
@@ -751,7 +751,7 @@ export function createSellTicketDialog(props) {
     createElement('option', { value: 'Cortesía' }, ['Cortesía']),
   ]);
   medioSelect.value = 'Yape';
-  const medioField = createElement('div', { class: 'text-input-field' }, [
+  const medioField = createElement('div', { class: 'text-input-wrapper' }, [
     createElement('label', { class: 'text-input-label' }, ['Medio de Pago']),
     medioSelect,
   ]);
@@ -761,7 +761,7 @@ export function createSellTicketDialog(props) {
     createElement('option', { value: 'Pendiente' }, ['Pendiente']),
   ]);
   estadoSelect.value = 'Pagado';
-  const estadoField = createElement('div', { class: 'text-input-field' }, [
+  const estadoField = createElement('div', { class: 'text-input-wrapper' }, [
     createElement('label', { class: 'text-input-label' }, ['Estado de Pago']),
     estadoSelect,
   ]);

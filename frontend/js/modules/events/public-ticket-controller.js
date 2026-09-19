@@ -63,7 +63,7 @@ export function createPublicTicketView(initialState = {}) {
     if (state.isLoading) {
       const loadingCard = createElement("div", { class: "public-ticket-card public-ticket-loading" }, [
         createElement("div", { class: "public-ticket-body" }, [
-          createElement("div", { class: "events-spinner" }),
+          createElement("div", { class: "spinner" }),
           createElement("p", { class: "text-center font-bold" }, ["Cargando entrada digital..."]),
         ]),
       ]);

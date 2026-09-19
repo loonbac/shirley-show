@@ -125,13 +125,13 @@ export function createPresentationDetailView(props) {
       onClick: onAddItemClick,
     });
 
-    const headerLeft = createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, [
+    const headerLeft = createElement('div', { class: 'presentation-header-left' }, [
       titleEl,
       renameBtn.el,
       deleteBtn.el,
     ]);
 
-    const headerRight = createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } }, [
+    const headerRight = createElement('div', { class: 'presentation-header-right' }, [
       stageBtn.el,
       addBtn.el,
     ]);

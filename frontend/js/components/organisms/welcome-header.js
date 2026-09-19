@@ -52,13 +52,26 @@ export function createWelcomeHeader(props = {}) {
     introTextGroup,
   ]);
 
+  function getResponsivePlaceholder() {
+    if (typeof window !== 'undefined' && window.innerWidth <= 480) {
+      return 'Escríbeme… ej: crea Gala Acústica';
+    }
+    return 'Escríbeme… ej: créame la presentación Gala Acústica';
+  }
+
   // 2. Chat Hero Composer (The central protagonist)
   const chatInput = createElement('textarea', {
     class: 'welcome-header-chat-input',
-    placeholder: 'Escríbeme… ej: créame la presentación Gala Acústica',
-    rows: '2',
+    placeholder: getResponsivePlaceholder(),
+    rows: '3',
     'aria-label': 'Escribe una instrucción o mensaje para Ressy',
   });
+
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('resize', () => {
+      chatInput.placeholder = getResponsivePlaceholder();
+    }, { passive: true });
+  }
 
   const sendIcon = createIcon({ name: 'send', size: 'base', className: 'welcome-header-send-icon' });
   const sendLabel = createElement('span', { class: 'welcome-header-send-label' }, ['Enviar']);

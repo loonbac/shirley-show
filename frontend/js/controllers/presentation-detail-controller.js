@@ -1,6 +1,4 @@
 import { createAppTopbar } from '../components/organisms/app-topbar.js';
-import { createButton } from '../components/atoms/button.js';
-import { createIcon } from '../components/atoms/icon.js';
 import { createPresentationDetailView } from '../components/views/presentation-detail-view.js';
 import { createPresentationFormDialog } from '../components/organisms/presentation-form-dialog.js';
 import { createAddItemDialog } from '../components/organisms/add-item-dialog.js';
@@ -124,20 +122,6 @@ export function createPresentationDetailController(deps) {
     stageModeView = null;
   }
 
-  const stageBtn = createButton({
-    text: 'Modo Escenario',
-    variant: 'secondary',
-    icon: createIcon({ name: 'play', size: 'sm' }),
-    onClick: () => enterStageMode(),
-  });
-
-  const addItemBtn = createButton({
-    text: 'Agregar Elemento',
-    variant: 'primary',
-    icon: createIcon({ name: 'plus', size: 'sm' }),
-    onClick: () => openAddItemDialog(),
-  });
-
   const topbar = createAppTopbar({
     title: 'Cargando...',
     onBack: () => {
@@ -151,7 +135,6 @@ export function createPresentationDetailController(deps) {
         toEvents();
       }
     },
-    actions: [stageBtn.el, addItemBtn.el],
   });
 
   const view = createPresentationDetailView({
