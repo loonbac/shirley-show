@@ -7,6 +7,22 @@ import { createPlaybackControls } from '../molecules/playback-controls.js';
 import { formatBytes } from '../../utils/format/bytes.js';
 
 /**
+ * Triggers a direct native download for a track's audio file.
+ * @param {{ id: string }} track
+ */
+export function downloadTrackFile(track) {
+  if (!track || !track.id) return;
+  const url = `/api/tracks/${encodeURIComponent(track.id)}/audio?download=1`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/**
  * Formats seconds to MM:SS string.
  * @param {number} seconds 
  * @returns {string}
@@ -35,6 +51,7 @@ function formatDuration(seconds) {
  *   onMoveDown?: (item: any) => void,
  *   onDelete?: (item: any) => void,
  *   onEdit?: (item: any) => void,
+ *   onDownload?: (item: any) => void,
  * }} props 
  * @returns {{
  *   el: HTMLElement,
@@ -54,6 +71,7 @@ export function createTrackItem(props) {
     onMoveDown,
     onDelete,
     onEdit,
+    onDownload,
   } = props;
 
   const isCurrentTrack = playbackState.currentTrackId === item.id;
@@ -182,6 +200,22 @@ export function createTrackItem(props) {
   const metaText = item.byte_size ? formatBytes(item.byte_size) : '';
   const metaEl = createElement('span', { class: 'track-item-meta' }, [metaText]);
 
+  const downloadBtn = createIconButton({
+    iconName: 'download',
+    ariaLabel: `Descargar pista ${item.title}`,
+    title: 'Descargar pista',
+    onClick: (e) => {
+      if (e && typeof e.stopPropagation === 'function') {
+        e.stopPropagation();
+      }
+      if (typeof onDownload === 'function') {
+        onDownload(item);
+      } else {
+        downloadTrackFile(item);
+      }
+    },
+  });
+
   const editBtn = createIconButton({
     iconName: 'edit',
     ariaLabel: `Editar pista ${item.title}`,
@@ -203,6 +237,7 @@ export function createTrackItem(props) {
 
   const headerActions = createElement('div', { class: 'track-item-actions' }, [
     metaEl,
+    downloadBtn.el,
     editBtn.el,
     deleteBtn.el,
   ]);
@@ -246,11 +281,13 @@ export function createTrackItem(props) {
       item = nextProps.item;
       titleText.textContent = item.title;
       metaEl.textContent = item.byte_size ? formatBytes(item.byte_size) : '';
+      downloadBtn.update({ ariaLabel: `Descargar pista ${item.title}` });
       editBtn.update({ ariaLabel: `Editar pista ${item.title}` });
       deleteBtn.update({ ariaLabel: `Eliminar pista ${item.title}` });
       dragHandle.update({ ariaLabel: `Arrastrar pista ${item.title}` });
     }
     if (nextProps.onEdit !== undefined) onEdit = nextProps.onEdit;
+    if (nextProps.onDownload !== undefined) onDownload = nextProps.onDownload;
     if (nextProps.isFirst !== undefined) isFirst = nextProps.isFirst;
     if (nextProps.isLast !== undefined) isLast = nextProps.isLast;
 

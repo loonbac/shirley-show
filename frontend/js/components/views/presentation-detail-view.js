@@ -24,6 +24,8 @@ import { useDragAndDrop } from '../../behaviors/use-drag-and-drop.js';
  *   onDeletePresentation: () => void,
  *   onAddItemClick: () => void,
  *   onEnterStageMode?: () => void,
+ *   onDownloadAllTracks?: () => void,
+ *   onDownloadTrack?: (item: any) => void,
  *   onQuickAdd?: (type: 'track' | 'lyrics' | 'note') => void,
  *   onEditItem?: (item: any) => void,
  *   onReorderItem?: (itemId: string, targetPosition: number) => void,
@@ -50,6 +52,8 @@ export function createPresentationDetailView(props) {
     onDeletePresentation,
     onAddItemClick,
     onEnterStageMode,
+    onDownloadAllTracks,
+    onDownloadTrack,
     onQuickAdd,
     onEditItem,
     onReorderItem,
@@ -131,10 +135,27 @@ export function createPresentationDetailView(props) {
       deleteBtn.el,
     ]);
 
-    const headerRight = createElement('div', { class: 'presentation-header-right' }, [
-      stageBtn.el,
-      addBtn.el,
-    ]);
+    const headerRightChildren = [];
+
+    const hasTracks = items.some((it) => it.type === 'track');
+    if (hasTracks) {
+      const downloadAllBtn = createButton({
+        text: 'Descargar todas',
+        variant: 'secondary',
+        icon: createIcon({ name: 'download', size: 'sm' }),
+        onClick: () => {
+          if (typeof onDownloadAllTracks === 'function') {
+            onDownloadAllTracks();
+          }
+        },
+      });
+      headerRightChildren.push(downloadAllBtn.el);
+    }
+
+    headerRightChildren.push(stageBtn.el);
+    headerRightChildren.push(addBtn.el);
+
+    const headerRight = createElement('div', { class: 'presentation-header-right' }, headerRightChildren);
 
     const detailHeader = createElement('div', { class: 'presentation-title-row' }, [
       headerLeft,
@@ -194,6 +215,7 @@ export function createPresentationDetailView(props) {
             onMoveDown,
             onDelete: onDeleteItem,
             onEdit: onEditItem,
+            onDownload: onDownloadTrack,
           });
         } else if (item.type === 'lyrics') {
           comp = createLyricsItem({
@@ -276,6 +298,12 @@ export function createPresentationDetailView(props) {
     }
     if (nextProps.onEnterStageMode !== undefined) {
       onEnterStageMode = nextProps.onEnterStageMode;
+    }
+    if (nextProps.onDownloadAllTracks !== undefined) {
+      onDownloadAllTracks = nextProps.onDownloadAllTracks;
+    }
+    if (nextProps.onDownloadTrack !== undefined) {
+      onDownloadTrack = nextProps.onDownloadTrack;
     }
     if (nextProps.onReorderItem !== undefined) {
       onReorderItem = nextProps.onReorderItem;

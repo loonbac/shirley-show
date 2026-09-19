@@ -12,7 +12,10 @@ pub struct OpenedAudioTrack {
     pub path: PathBuf,
     pub media_type: String,
     pub byte_size: u64,
+    pub title: String,
 }
+
+pub type OpenTrackAudioResult = OpenedAudioTrack;
 
 pub struct OpenTrackAudio<R: ShowItemReader> {
     reader: Arc<R>,
@@ -30,8 +33,13 @@ impl<R: ShowItemReader> OpenTrackAudio<R> {
             .get_by_id(track_id)?
             .ok_or_else(|| AppError::not_found("track_not_found", "Pista no encontrada."))?;
 
-        let (audio_key, media_type, expected_size) = match &item.payload {
-            ShowItemPayload::Track(t) => (t.audio_key.clone(), t.media_type.clone(), t.byte_size),
+        let (audio_key, media_type, expected_size, title) = match &item.payload {
+            ShowItemPayload::Track(t) => (
+                t.audio_key.clone(),
+                t.media_type.clone(),
+                t.byte_size,
+                t.title.clone(),
+            ),
             _ => {
                 return Err(AppError::bad_request(
                     "not_a_track",
@@ -64,6 +72,7 @@ impl<R: ShowItemReader> OpenTrackAudio<R> {
             path,
             media_type,
             byte_size,
+            title,
         })
     }
 }

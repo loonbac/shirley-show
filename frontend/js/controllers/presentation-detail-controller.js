@@ -5,6 +5,7 @@ import { createAddItemDialog } from '../components/organisms/add-item-dialog.js'
 import { createQuickEditDialog } from '../components/organisms/quick-edit-dialog.js';
 import { createConfirmationDialog } from '../components/molecules/confirmation-dialog.js';
 import { createStageModeView } from '../components/organisms/stage-mode-view.js';
+import { downloadTrackFile } from '../components/organisms/track-item.js';
 import { useWakeLock } from '../behaviors/use-wake-lock.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
 import { setStageModeActive } from '../core/state/stage-mode-state.js';
@@ -51,6 +52,29 @@ export function createPresentationDetailController(deps) {
   let activeDialog = null;
   let stageModeView = null;
   let isReordering = false;
+  let isDownloadingAll = false;
+
+  async function handleDownloadAllTracks() {
+    if (isDownloadingAll) return;
+    const tracks = items.filter((it) => it.type === 'track');
+    if (tracks.length === 0) return;
+
+    isDownloadingAll = true;
+    try {
+      for (let i = 0; i < tracks.length; i++) {
+        downloadTrackFile(tracks[i]);
+        if (i < tracks.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+    } finally {
+      isDownloadingAll = false;
+    }
+  }
+
+  function handleDownloadTrack(track) {
+    downloadTrackFile(track);
+  }
 
   function closeActiveDialog() {
     if (activeDialog) {
@@ -147,6 +171,8 @@ export function createPresentationDetailController(deps) {
     onDeletePresentation: () => openDeletePresentationDialog(),
     onAddItemClick: () => openAddItemDialog(),
     onEnterStageMode: () => enterStageMode(),
+    onDownloadAllTracks: () => handleDownloadAllTracks(),
+    onDownloadTrack: (track) => handleDownloadTrack(track),
     onQuickAdd: (type) => openAddItemDialog(type),
     onEditItem: (item) => openQuickEditDialog(item),
     onReorderItem: (itemId, targetPosition) => handleDragReorder(itemId, targetPosition),
