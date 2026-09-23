@@ -5,6 +5,44 @@ import { setupDomEnvironment } from '../../tests/fake-dom.mjs';
 
 setupDomEnvironment();
 
+if (!globalThis.HTMLElement.prototype.click) {
+  globalThis.HTMLElement.prototype.click = function () {
+    this.dispatchEvent(new Event('click'));
+  };
+}
+
+// Provide 2D Canvas mock in FakeDOM environment for ticket image generation
+const origCreateElement = globalThis.document.createElement.bind(globalThis.document);
+globalThis.document.createElement = function (tag) {
+  const el = origCreateElement(tag);
+  if (String(tag).toLowerCase() === 'canvas') {
+    el.getContext = () => ({
+      measureText: (text) => ({ width: (String(text).length || 1) * 12 }),
+      fillRect: () => {},
+      drawImage: () => {},
+      fillText: () => {},
+      stroke: () => {},
+      fill: () => {},
+      beginPath: () => {},
+      arc: () => {},
+      arcTo: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      closePath: () => {},
+      save: () => {},
+      restore: () => {},
+      translate: () => {},
+      scale: () => {},
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+    });
+    el.toBlob = (cb) => {
+      const blob = new Blob(['fake-ticket-png-data'], { type: 'image/png' });
+      cb(blob);
+    };
+  }
+  return el;
+};
+
 const topbarModulePath = resolve(process.cwd(), 'frontend/js/components/organisms/app-topbar.js');
 const { createAppTopbar } = await import(pathToFileURL(topbarModulePath).href);
 
@@ -22,6 +60,9 @@ const {
 
 const ticketPreviewModulePath = resolve(process.cwd(), 'frontend/js/modules/events/ticket-image-preview-dialog.js');
 const { createTicketImagePreviewDialog } = await import(pathToFileURL(ticketPreviewModulePath).href);
+
+const ticketPhotoModulePath = resolve(process.cwd(), 'frontend/js/modules/events/ticket-photo.js');
+const { generarFotoEntrada } = await import(pathToFileURL(ticketPhotoModulePath).href);
 
 const routerModulePath = resolve(process.cwd(), 'frontend/js/router/parse-route.js');
 const { parseRoute } = await import(pathToFileURL(routerModulePath).href);
@@ -41,9 +82,12 @@ console.log('Running Events UI and Integration Tests...');
     onClose: () => {},
   });
   assert.ok(preview.el.textContent.includes('Imagen de la entrada'));
-  assert.ok(preview.el.textContent.includes('abre WhatsApp'));
-  assert.ok(preview.el.textContent.includes('clic derecho'));
-  assert.ok(preview.el.textContent.includes('Copiar imagen'));
+  // TIS-1: Obsolete clipboard workaround text must be removed
+  assert.equal(preview.el.textContent.includes('abre WhatsApp'), false, 'Obsolete mobile clipboard help must be removed');
+  assert.equal(preview.el.textContent.includes('clic derecho'), false, 'Obsolete desktop clipboard help must be removed');
+  assert.equal(preview.el.textContent.includes('Copiar imagen'), false, 'Obsolete copy action must be removed');
+  // Unpaid restriction preserved
+  assert.ok(preview.el.textContent.includes('pendiente de pago'), 'Must enforce unpaid restriction');
   preview.destroy();
 }
 
@@ -425,13 +469,29 @@ console.log('Running Events UI and Integration Tests...');
       null,
       'The issued ticket card must not open WhatsApp with a link'
     );
-    assert.ok(
+    assert.equal(
       cards[0].querySelector('.events-quick-ticket-preview-btn'),
-      'The issued ticket card must offer a simple image preview'
+      null,
+      'Must NOT require intermediate preview button (TIS-1)'
     );
     assert.equal(cards[0].textContent.includes('Ver Ticket'), false);
     assert.equal(cards[0].textContent.includes('Compartir por WhatsApp'), false);
-    assert.equal(cards[0].textContent.includes('Ver imagen de la entrada'), true);
+    assert.equal(cards[0].textContent.includes('Ver imagen de la entrada'), false, 'No intermediate preview CTA text');
+
+    // Immediate ticket image presentation
+    const img1 = cards[0].querySelector('.ticket-image-preview');
+    assert.ok(img1, 'Must render ticket image immediately for ticket #1');
+    const img2 = cards[1].querySelector('.ticket-image-preview');
+    assert.ok(img2, 'Must render ticket image immediately for ticket #2');
+
+    // No verbose clipboard workaround text
+    assert.equal(quickSale.el.textContent.includes('abre WhatsApp'), false);
+    assert.equal(quickSale.el.textContent.includes('clic derecho'), false);
+    assert.equal(quickSale.el.textContent.includes('Copiar imagen'), false);
+
+    // Unsupported environment fallback (Node / default has no Web Share files)
+    const actionBtn = cards[0].querySelector('.events-quick-ticket-download-btn, .events-quick-ticket-share-btn');
+    assert.ok(actionBtn, 'Must render ticket action button');
 
     quickSale.destroy();
   }
@@ -675,6 +735,557 @@ console.log('Running Events UI and Integration Tests...');
   assert.ok(detailCtrl.viewEl.textContent.includes('Sonido/Luces'));
 
   detailCtrl.destroy();
+}
+
+// 7. Ticket Image Sharing & Immediate Presentation (ODD Task TIS-1)
+{
+  const origNavigatorDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const baseNavigator = globalThis.navigator || {};
+
+  function setMockNavigator(mockObj) {
+    Object.defineProperty(globalThis, 'navigator', {
+      value: mockObj,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  function restoreNavigator() {
+    if (origNavigatorDesc) {
+      Object.defineProperty(globalThis, 'navigator', origNavigatorDesc);
+    }
+  }
+
+  // 7.a Native file sharing supported (mobile environment simulation)
+  {
+    let shareCalls = [];
+    setMockNavigator({
+      ...baseNavigator,
+      canShare: (data) => Boolean(data && data.files && data.files.length > 0),
+      share: async (data) => {
+        shareCalls.push(data);
+      },
+    });
+
+    const quickSale = createSellTicketDialog({
+      eventName: 'Noche de Salsa',
+      ticketTypes: [{ nombre: 'VIP', precio: 80, capacidad: 20 }],
+      onSell: async () => [
+        {
+          id: 'tix-share-1',
+          tipo_entrada: 'VIP',
+          precio: 80,
+          nombre_comprador: 'Mario Vargas',
+          scan_token: 'tok_mario_1',
+          estado_pago: 'Pagado',
+        },
+      ],
+      onCancel: () => {},
+    });
+
+    const form = quickSale.el.querySelector('form');
+    const inputs = quickSale.el.querySelectorAll('input');
+    inputs[0].value = 'Mario Vargas';
+    inputs[1].value = '';
+    inputs[2].value = '1';
+    form.dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const card = quickSale.el.querySelector('.events-quick-ticket-card');
+    assert.ok(card, 'Card must be rendered');
+
+    // Immediate image preview
+    const img = card.querySelector('.ticket-image-preview');
+    assert.ok(img, 'Must render ticket image immediately');
+    assert.equal(img.style.display, 'block', 'Image must be displayed after generation');
+
+    // Concise Compartir action
+    const shareBtn = card.querySelector('.events-quick-ticket-share-btn');
+    assert.ok(shareBtn, 'Must render concise Compartir button on Web Share supported device');
+    assert.equal(shareBtn.textContent, 'Compartir');
+    assert.equal(shareBtn.disabled, false, 'Share button must be enabled once image is ready');
+
+    // Clicking Compartir calls navigator.share directly with pre-generated image file
+    shareBtn.dispatchEvent(new Event('click'));
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(shareCalls.length, 1, 'navigator.share must be called');
+    assert.ok(shareCalls[0].title.includes('Noche de Salsa'));
+    assert.equal(shareCalls[0].files.length, 1);
+    assert.equal(shareCalls[0].files[0].type, 'image/png');
+    assert.ok(shareCalls[0].files[0].name.startsWith('entrada-'));
+
+    quickSale.destroy();
+  }
+
+  // 7.b Silent AbortError handling when user cancels native share sheet
+  {
+    let abortHandledSilently = true;
+    let fallbackDownloadTriggered = false;
+
+    // Track if a download link was clicked
+    const origBodyAppend = document.body.appendChild.bind(document.body);
+    document.body.appendChild = function (child) {
+      if (child.tagName === 'A' && child.download) {
+        fallbackDownloadTriggered = true;
+      }
+      return origBodyAppend(child);
+    };
+
+    setMockNavigator({
+      ...baseNavigator,
+      canShare: (data) => Boolean(data && data.files && data.files.length > 0),
+      share: async () => {
+        const abortErr = new Error('The user aborted the share operation.');
+        abortErr.name = 'AbortError';
+        throw abortErr;
+      },
+    });
+
+    const quickSale = createSellTicketDialog({
+      eventName: 'Noche de Salsa',
+      ticketTypes: [{ nombre: 'General', precio: 50, capacidad: 10 }],
+      onSell: async () => [
+        {
+          id: 'tix-abort-1',
+          tipo_entrada: 'General',
+          precio: 50,
+          nombre_comprador: 'Sara Morales',
+          scan_token: 'tok_sara_1',
+          estado_pago: 'Pagado',
+        },
+      ],
+      onCancel: () => {},
+    });
+
+    const form = quickSale.el.querySelector('form');
+    const inputs = quickSale.el.querySelectorAll('input');
+    inputs[0].value = 'Sara Morales';
+    inputs[1].value = '';
+    inputs[2].value = '1';
+    form.dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const card = quickSale.el.querySelector('.events-quick-ticket-card');
+    const shareBtn = card.querySelector('.events-quick-ticket-share-btn');
+    assert.ok(shareBtn);
+
+    try {
+      shareBtn.dispatchEvent(new Event('click'));
+      await new Promise((r) => setTimeout(r, 10));
+    } catch {
+      abortHandledSilently = false;
+    }
+
+    assert.equal(abortHandledSilently, true, 'AbortError must be silently handled without throwing');
+    assert.equal(fallbackDownloadTriggered, false, 'AbortError must NOT trigger fallback download');
+
+    document.body.appendChild = origBodyAppend;
+    quickSale.destroy();
+  }
+
+  // 7.c Desktop / unsupported environment fallback (Descargar)
+  {
+    setMockNavigator({
+      ...baseNavigator,
+      canShare: undefined,
+      share: undefined,
+    });
+
+    let downloadTriggered = false;
+    let downloadedFilename = null;
+    const origBodyAppend = document.body.appendChild.bind(document.body);
+    document.body.appendChild = function (child) {
+      if (child.tagName === 'A' && child.download) {
+        downloadTriggered = true;
+        downloadedFilename = child.download;
+      }
+      return origBodyAppend(child);
+    };
+
+    const quickSale = createSellTicketDialog({
+      eventName: 'Concierto Rock',
+      ticketTypes: [{ nombre: 'General', precio: 40, capacidad: 30 }],
+      onSell: async () => [
+        {
+          id: 'tix-desk-1',
+          tipo_entrada: 'General',
+          precio: 40,
+          nombre_comprador: 'Luis Rojas',
+          scan_token: 'tok_luis_1',
+          estado_pago: 'Pagado',
+        },
+      ],
+      onCancel: () => {},
+    });
+
+    const form = quickSale.el.querySelector('form');
+    const inputs = quickSale.el.querySelectorAll('input');
+    inputs[0].value = 'Luis Rojas';
+    inputs[1].value = '';
+    inputs[2].value = '1';
+    form.dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const card = quickSale.el.querySelector('.events-quick-ticket-card');
+    const downloadBtn = card.querySelector('.events-quick-ticket-download-btn');
+    assert.ok(downloadBtn, 'Must render Descargar button when Web Share files is unsupported');
+    assert.equal(downloadBtn.textContent, 'Descargar');
+
+    downloadBtn.dispatchEvent(new Event('click'));
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(downloadTriggered, true, 'Clicking Descargar must trigger download in unsupported browser');
+    assert.ok(downloadedFilename && downloadedFilename.startsWith('entrada-'));
+
+    document.body.appendChild = origBodyAppend;
+    quickSale.destroy();
+  }
+
+  // 7.d Unpaid ticket restrictions preserved
+  {
+    const quickSale = createSellTicketDialog({
+      eventName: 'Noche de Cumbia',
+      ticketTypes: [{ nombre: 'General', precio: 30, capacidad: 20 }],
+      onSell: async () => [
+        {
+          id: 'tix-unpaid-1',
+          tipo_entrada: 'General',
+          precio: 30,
+          nombre_comprador: 'Pedro Gómez',
+          scan_token: 'tok_pedro_1',
+          estado_pago: 'Pendiente',
+        },
+      ],
+      onCancel: () => {},
+    });
+
+    const form = quickSale.el.querySelector('form');
+    const inputs = quickSale.el.querySelectorAll('input');
+    inputs[0].value = 'Pedro Gómez';
+    inputs[1].value = '';
+    inputs[2].value = '1';
+    // Change payment status to Pendiente
+    quickSale.el.querySelectorAll('select')[1].value = 'Pendiente';
+    form.dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const card = quickSale.el.querySelector('.events-quick-ticket-card');
+    assert.ok(card, 'Card must be rendered for unpaid ticket');
+
+    // Unpaid restrictions:
+    assert.ok(card.querySelector('.events-badge-warning'), 'Must have warning badge');
+    assert.ok(card.querySelector('.events-quick-ticket-unpaid-note'), 'Must show unpaid notice');
+    assert.ok(card.textContent.includes('pendiente de pago'));
+    assert.equal(card.querySelector('.ticket-image-preview'), null, 'Unpaid ticket must NOT render image preview');
+    assert.equal(card.querySelector('.events-quick-ticket-share-btn'), null, 'Unpaid ticket must NOT offer share button');
+    assert.equal(card.querySelector('.events-quick-ticket-download-btn'), null, 'Unpaid ticket must NOT offer download button');
+
+    quickSale.destroy();
+  }
+
+  // 7.e Multiple issued tickets: each gets immediate image and concise action
+  {
+    setMockNavigator({
+      ...baseNavigator,
+      canShare: (data) => Boolean(data && data.files && data.files.length > 0),
+      share: async () => {},
+    });
+
+    const quickSale = createSellTicketDialog({
+      eventName: 'Festival Shirley',
+      ticketTypes: [{ nombre: 'General', precio: 25, capacidad: 50 }],
+      onSell: async () => [
+        { id: 'm-1', tipo_entrada: 'General', precio: 25, nombre_comprador: 'Familia Perez', scan_token: 't1', estado_pago: 'Pagado' },
+        { id: 'm-2', tipo_entrada: 'General', precio: 25, nombre_comprador: 'Familia Perez', scan_token: 't2', estado_pago: 'Pagado' },
+        { id: 'm-3', tipo_entrada: 'General', precio: 25, nombre_comprador: 'Familia Perez', scan_token: 't3', estado_pago: 'Pagado' },
+      ],
+      onCancel: () => {},
+    });
+
+    const form = quickSale.el.querySelector('form');
+    const inputs = quickSale.el.querySelectorAll('input');
+    inputs[0].value = 'Familia Perez';
+    inputs[1].value = '';
+    inputs[2].value = '3';
+    form.dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 30));
+
+    const cards = quickSale.el.querySelectorAll('.events-quick-ticket-card');
+    assert.equal(cards.length, 3, 'Must render exactly 3 ticket cards');
+
+    for (let i = 0; i < 3; i++) {
+      const img = cards[i].querySelector('.ticket-image-preview');
+      assert.ok(img, `Card #${i + 1} must render ticket image immediately`);
+      const btn = cards[i].querySelector('.events-quick-ticket-share-btn');
+      assert.ok(btn, `Card #${i + 1} must render its own share button`);
+      assert.equal(btn.textContent, 'Compartir');
+    }
+
+    quickSale.destroy();
+  }
+
+  // 7.f Standalone createTicketImagePreviewDialog with paid ticket and Web Share support
+  {
+    let shareCalled = false;
+    setMockNavigator({
+      ...baseNavigator,
+      canShare: (data) => Boolean(data && data.files && data.files.length > 0),
+      share: async () => {
+        shareCalled = true;
+      },
+    });
+
+    const preview = createTicketImagePreviewDialog({
+      ticket: { nombre_comprador: 'Elena Rios', estado_pago: 'Pagado', codigo_qr: 'QR987654' },
+      event: { nombre: 'Noche Criolla' },
+      onClose: () => {},
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    assert.ok(preview.el.querySelector('.ticket-image-preview'));
+    const shareBtn = preview.el.querySelector('.ticket-image-share-btn');
+    assert.ok(shareBtn);
+    assert.equal(shareBtn.textContent, 'Compartir');
+    assert.equal(shareBtn.disabled, false);
+
+    shareBtn.dispatchEvent(new Event('click'));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(shareCalled, true, 'createTicketImagePreviewDialog must invoke navigator.share on click');
+
+    preview.destroy();
+  }
+
+  // 7.g Fallback to download when navigator.share encounters unexpected non-abort error
+  {
+    let fallbackDownloadTriggered = false;
+    const origBodyAppend = document.body.appendChild.bind(document.body);
+    document.body.appendChild = function (child) {
+      if (child.tagName === 'A' && child.download) {
+        fallbackDownloadTriggered = true;
+      }
+      return origBodyAppend(child);
+    };
+
+    setMockNavigator({
+      ...baseNavigator,
+      canShare: (data) => Boolean(data && data.files && data.files.length > 0),
+      share: async () => {
+        throw new Error('OS Share sheet failure');
+      },
+    });
+
+    const quickSale = createSellTicketDialog({
+      eventName: 'Noche de Salsa',
+      ticketTypes: [{ nombre: 'VIP', precio: 80, capacidad: 20 }],
+      onSell: async () => [
+        {
+          id: 'tix-share-fail-1',
+          tipo_entrada: 'VIP',
+          precio: 80,
+          nombre_comprador: 'Carmen Ruiz',
+          scan_token: 'tok_carmen_1',
+          estado_pago: 'Pagado',
+        },
+      ],
+      onCancel: () => {},
+    });
+
+    const form = quickSale.el.querySelector('form');
+    const inputs = quickSale.el.querySelectorAll('input');
+    inputs[0].value = 'Carmen Ruiz';
+    inputs[1].value = '';
+    inputs[2].value = '1';
+    form.dispatchEvent(new Event('submit'));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const card = quickSale.el.querySelector('.events-quick-ticket-card');
+    const shareBtn = card.querySelector('.events-quick-ticket-share-btn');
+    assert.ok(shareBtn);
+
+    // Suppress console.warn for expected fallback test
+    const origWarn = console.warn;
+    console.warn = () => {};
+    shareBtn.dispatchEvent(new Event('click'));
+    await new Promise((r) => setTimeout(r, 10));
+    console.warn = origWarn;
+
+    assert.equal(fallbackDownloadTriggered, true, 'Non-AbortError in share must trigger fallback download');
+
+    document.body.appendChild = origBodyAppend;
+    quickSale.destroy();
+  }
+
+  // 7.h Standalone createTicketImagePreviewDialog fails closed on missing or unknown payment status (TIS-3)
+  {
+    for (const testCase of [
+      { label: 'missing payment status', ticket: { nombre_comprador: 'Lucia Diaz', codigo_qr: 'QR111' } },
+      { label: 'unknown payment status', ticket: { nombre_comprador: 'Roberto Gomez', estado_pago: 'Desconocido', codigo_qr: 'QR222' } },
+      { label: 'null payment status', ticket: { nombre_comprador: 'Ana Paz', estado_pago: null, codigo_qr: 'QR333' } },
+    ]) {
+      const preview = createTicketImagePreviewDialog({
+        ticket: testCase.ticket,
+        event: { nombre: 'Noche Criolla' },
+        onClose: () => {},
+      });
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      const statusEl = preview.el.querySelector('.ticket-image-status');
+      assert.ok(statusEl, `${testCase.label}: must render status element`);
+      assert.equal(
+        statusEl.textContent,
+        'Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.',
+        `${testCase.label}: must show exact unpaid explanation`
+      );
+
+      const img = preview.el.querySelector('.ticket-image-preview');
+      assert.ok(img, `${testCase.label}: image element exists`);
+      assert.equal(img.style.display, 'none', `${testCase.label}: image element must remain hidden`);
+      assert.ok(!img.src, `${testCase.label}: image src must not be populated`);
+
+      assert.equal(
+        preview.el.querySelector('.ticket-image-share-btn'),
+        null,
+        `${testCase.label}: must not offer share action`
+      );
+      assert.equal(
+        preview.el.querySelector('.ticket-image-download-btn'),
+        null,
+        `${testCase.label}: must not offer download action`
+      );
+
+      const actionsEl = preview.el.querySelector('.events-dialog-actions');
+      assert.ok(actionsEl, `${testCase.label}: actions container must exist`);
+      const actionButtons = actionsEl.querySelectorAll('button');
+      assert.equal(actionButtons.length, 1, `${testCase.label}: only close button must be present`);
+      assert.equal(actionButtons[0].textContent, 'Cerrar');
+
+      preview.destroy();
+    }
+  }
+
+  // 7.i Quick Sell Ticket Dialog fails closed on missing or unknown payment status (TIS-3)
+  {
+    for (const testCase of [
+      { label: 'missing payment status', ticket: { id: 'tix-missing-1', tipo_entrada: 'General', precio: 40, nombre_comprador: 'Hugo V.', scan_token: 'tok_hugo_1' } },
+      { label: 'unknown payment status', ticket: { id: 'tix-unknown-1', tipo_entrada: 'General', precio: 40, nombre_comprador: 'Sara M.', scan_token: 'tok_sara_1', estado_pago: 'EnRevision' } },
+    ]) {
+      const quickSale = createSellTicketDialog({
+        eventName: 'Festival Shirley',
+        ticketTypes: [{ nombre: 'General', precio: 40, capacidad: 20 }],
+        onSell: async () => [testCase.ticket],
+        onCancel: () => {},
+      });
+
+      const form = quickSale.el.querySelector('form');
+      const inputs = quickSale.el.querySelectorAll('input');
+      inputs[0].value = testCase.ticket.nombre_comprador;
+      inputs[1].value = '';
+      inputs[2].value = '1';
+      form.dispatchEvent(new Event('submit'));
+      await new Promise((r) => setTimeout(r, 20));
+
+      const card = quickSale.el.querySelector('.events-quick-ticket-card');
+      assert.ok(card, `${testCase.label}: card must be rendered`);
+
+      const unpaidNote = card.querySelector('.events-quick-ticket-unpaid-note');
+      assert.ok(unpaidNote, `${testCase.label}: must render unpaid note`);
+      assert.equal(
+        unpaidNote.textContent,
+        'Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.',
+        `${testCase.label}: must show exact unpaid explanation`
+      );
+
+      assert.equal(
+        card.querySelector('.ticket-image-preview'),
+        null,
+        `${testCase.label}: must NOT render image preview`
+      );
+      assert.equal(
+        card.querySelector('.events-quick-ticket-share-btn'),
+        null,
+        `${testCase.label}: must NOT offer share button`
+      );
+      assert.equal(
+        card.querySelector('.events-quick-ticket-download-btn'),
+        null,
+        `${testCase.label}: must NOT offer download button`
+      );
+
+      quickSale.destroy();
+    }
+  }
+
+  // 7.j Direct regression tests for generarFotoEntrada paid-status defense in depth (TIS-3)
+  {
+    const unpaidError = {
+      message: 'Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.',
+    };
+
+    // Missing payment status
+    await assert.rejects(
+      async () => {
+        await generarFotoEntrada({
+          nombre_comprador: 'Lucas M.',
+          codigo_qr: 'QR-MISSING',
+        });
+      },
+      unpaidError,
+      'generarFotoEntrada must reject when estado_pago is missing'
+    );
+
+    // Null payment status
+    await assert.rejects(
+      async () => {
+        await generarFotoEntrada({
+          nombre_comprador: 'Lucas M.',
+          estado_pago: null,
+          codigo_qr: 'QR-NULL',
+        });
+      },
+      unpaidError,
+      'generarFotoEntrada must reject when estado_pago is null'
+    );
+
+    // Unknown payment status
+    await assert.rejects(
+      async () => {
+        await generarFotoEntrada({
+          nombre_comprador: 'Lucas M.',
+          estado_pago: 'Desconocido',
+          codigo_qr: 'QR-UNKNOWN',
+        });
+      },
+      unpaidError,
+      'generarFotoEntrada must reject when estado_pago is unknown'
+    );
+
+    // Pending payment status
+    await assert.rejects(
+      async () => {
+        await generarFotoEntrada({
+          nombre_comprador: 'Lucas M.',
+          estado_pago: 'Pendiente',
+          codigo_qr: 'QR-PENDING',
+        });
+      },
+      unpaidError,
+      'generarFotoEntrada must reject when estado_pago is Pendiente'
+    );
+
+    // Explicitly paid status must succeed and produce a Blob
+    const blob = await generarFotoEntrada({
+      nombre_comprador: 'Lucas M.',
+      estado_pago: 'Pagado',
+      codigo_qr: 'QR-PAID',
+    });
+    assert.ok(blob, 'generarFotoEntrada must succeed when estado_pago is explicitly Pagado');
+  }
+
+  // Restore navigator
+  restoreNavigator();
 }
 
 console.log('All Events UI and Integration Tests passed cleanly!');

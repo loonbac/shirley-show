@@ -138,7 +138,7 @@ export async function generarFotoEntrada(entrada, evento) {
     throw new Error("Entrada requerida para generar la foto.");
   }
 
-  if (entrada.estado_pago && entrada.estado_pago !== "Pagado") {
+  if (entrada.estado_pago !== "Pagado") {
     throw new Error("Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.");
   }
 
@@ -201,9 +201,15 @@ export async function generarFotoEntrada(entrada, evento) {
   const alto = 60 + altoLogo + 40 + (QR_PX + 56) + 44 + altoTextos + 26 + 76 + 30 + 40 + 70;
 
   const canvas = doc.createElement("canvas");
+  if (!canvas || typeof canvas.getContext !== "function") {
+    throw new Error("Soporte de Canvas 2D no disponible.");
+  }
   canvas.width = ANCHO;
   canvas.height = alto;
   const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Soporte de Canvas 2D no disponible.");
+  }
 
   // Fondo blanco puro
   ctx.fillStyle = "#ffffff";
@@ -292,6 +298,53 @@ export async function generarFotoEntrada(entrada, evento) {
 }
 
 /**
+ * Crea un objeto File a partir de un Blob de imagen de entrada.
+ * @param {Blob} blob
+ * @param {any} entrada
+ * @returns {File|null}
+ */
+export function crearArchivoEntrada(blob, entrada) {
+  if (!blob) return null;
+  const codigo = obtenerCodigoCorto(entrada) || "entrada";
+  const nombreArchivo = `entrada-${codigo}.png`;
+  try {
+    if (typeof File !== "undefined") {
+      return new File([blob], nombreArchivo, { type: "image/png" });
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Comprueba si el entorno y navegador soportan Web Share para compartir archivos de imagen.
+ * @param {File} [archivo] Archivo opcional a verificar; si no se pasa, verifica con un archivo simulado.
+ * @returns {boolean}
+ */
+export function puedeCompartirArchivos(archivo) {
+  if (
+    typeof navigator === "undefined" ||
+    typeof navigator.share !== "function" ||
+    typeof navigator.canShare !== "function"
+  ) {
+    return false;
+  }
+  try {
+    let testFile = archivo;
+    if (!testFile) {
+      if (typeof File === "undefined" || typeof Blob === "undefined") {
+        return false;
+      }
+      testFile = new File([new Blob([""], { type: "image/png" })], "ticket.png", { type: "image/png" });
+    }
+    return Boolean(navigator.canShare({ files: [testFile] }));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Descarga directamente un Blob en el dispositivo del usuario.
  * @param {Blob} blob 
  * @param {string} nombreArchivo 
@@ -311,44 +364,52 @@ export function descargarBlob(blob, nombreArchivo) {
 
 /**
  * Comparte la foto de entrada por navigator.share o recurre a descarga directa.
+ * Si se pasa `options.file` o `options.blob`, los reutiliza directamente sin regenerar la imagen
+ * para invocar navigator.share dentro del gesto de usuario (user activation).
+ * Silencia AbortError si el usuario cancela la hoja de compartir nativa.
+ *
  * @param {any} entrada 
  * @param {any} [evento] 
- * @param {{ onNotice?: (mensaje: string) => void }} [options={}] 
+ * @param {{
+ *   onNotice?: (mensaje: string) => void,
+ *   blob?: Blob | null,
+ *   file?: File | null,
+ * }} [options={}]
  */
 export async function compartirFotoEntrada(entrada, evento, options = {}) {
-  const { onNotice } = options;
+  const { onNotice, blob: providedBlob, file: providedFile } = options;
   const codigo = obtenerCodigoCorto(entrada) || "entrada";
   const nombreArchivo = `entrada-${codigo}.png`;
 
-  let blob;
-  try {
-    blob = await generarFotoEntrada(entrada, evento);
-  } catch (err) {
-    if (onNotice) {
-      onNotice("No se pudo crear la foto de la entrada.");
-    }
-    throw err;
+  let blob = providedBlob || null;
+  let archivo = providedFile || null;
+
+  if (!archivo && blob) {
+    archivo = crearArchivoEntrada(blob, entrada);
   }
 
-  let archivo = null;
-  try {
-    if (typeof File !== "undefined") {
-      archivo = new File([blob], nombreArchivo, { type: "image/png" });
+  // Si no se proporcionó ni blob ni archivo, generarlo (fallback compatible)
+  if (!blob && !archivo) {
+    try {
+      blob = await generarFotoEntrada(entrada, evento);
+    } catch (err) {
+      if (onNotice) {
+        onNotice("No se pudo crear la foto de la entrada.");
+      }
+      throw err;
     }
-  } catch {
-    archivo = null;
+    if (!archivo && blob) {
+      archivo = crearArchivoEntrada(blob, entrada);
+    }
   }
 
-  const canShareFiles =
-    typeof navigator !== "undefined" &&
-    typeof navigator.canShare === "function" &&
-    archivo &&
-    navigator.canShare({ files: [archivo] });
+  const canShareFiles = puedeCompartirArchivos(archivo);
 
   if (canShareFiles && typeof navigator.share === "function") {
     try {
-      const nombreEvento = (evento && evento.nombre) || entrada.nombre_evento || "el evento";
-      const comprador = entrada.nombre_comprador || "";
+      const nombreEvento = (evento && evento.nombre) || (entrada && entrada.nombre_evento) || "el evento";
+      const comprador = (entrada && entrada.nombre_comprador) || "";
+      // Invocación a navigator.share directa en el turno del gesto de usuario
       await navigator.share({
         title: `Entrada ${nombreEvento}`,
         text: `Entrada para ${nombreEvento} - ${comprador}`,
@@ -360,7 +421,9 @@ export async function compartirFotoEntrada(entrada, evento, options = {}) {
         return;
       }
       console.warn("Fallo al compartir foto vía navigator.share, usando descarga:", err);
-      descargarBlob(blob, nombreArchivo);
+      if (blob) {
+        descargarBlob(blob, nombreArchivo);
+      }
       if (onNotice) {
         onNotice("No se pudo abrir el menú de compartir; la foto se guardó en tus descargas.");
       }
@@ -368,7 +431,9 @@ export async function compartirFotoEntrada(entrada, evento, options = {}) {
     }
   }
 
-  descargarBlob(blob, nombreArchivo);
+  if (blob) {
+    descargarBlob(blob, nombreArchivo);
+  }
   if (onNotice) {
     onNotice("La foto se guardó en tus descargas.");
   }

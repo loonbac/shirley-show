@@ -4,7 +4,14 @@ import { createTextInput } from '../../components/atoms/text-input.js';
 import { bindDialogDismiss } from '../../behaviors/bind-dialog-dismiss.js';
 import { bindFormSubmit } from '../../behaviors/bind-form-submit.js';
 import { trimRequired } from '../../utils/validation/trim-required.js';
-import { createTicketImagePreviewDialog } from './ticket-image-preview-dialog.js';
+import {
+  generarFotoEntrada,
+  compartirFotoEntrada,
+  descargarBlob,
+  puedeCompartirArchivos,
+  crearArchivoEntrada,
+  obtenerCodigoCorto,
+} from './ticket-photo.js';
 
 /**
  * Creates an accessible modal dialog for creating or editing an event.
@@ -687,14 +694,8 @@ export function createConvertInterestDialog(props) {
  */
 export function createSellTicketDialog(props) {
   const { eventName = '', event = null, ticketTypes = [], onSell, onCancel } = props;
-  let ticketImageDialog = null;
-
-  function closeTicketImageDialog() {
-    if (ticketImageDialog) {
-      ticketImageDialog.destroy();
-      ticketImageDialog = null;
-    }
-  }
+  const createdObjectUrls = [];
+  let isDestroyed = false;
 
   const titleEl = createElement('h3', { class: 'events-dialog-title' }, ['Venta Rápida de Entradas']);
 
@@ -835,29 +836,104 @@ export function createSellTicketDialog(props) {
         createElement('span', {}, [`Precio: S/ ${Number(ticket.precio).toFixed(2)}`]),
       ]);
 
-      const previewBtn = createButton({
-        text: 'Ver imagen de la entrada',
+      if (!isPaid) {
+        const unpaidNote = createElement('p', { class: 'events-quick-ticket-unpaid-note' }, [
+          'Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.',
+        ]);
+        return createElement('div', { class: 'events-quick-ticket-card' }, [
+          header,
+          details,
+          unpaidNote,
+        ]);
+      }
+
+      const ticketWithData = {
+        ...ticket,
+        nombre_comprador: ticket.nombre_comprador || metadata.nombre_comprador,
+        contacto: ticket.contacto || metadata.contacto,
+      };
+
+      const statusEl = createElement('p', {
+        class: 'ticket-image-status',
+        role: 'status',
+        'aria-live': 'polite',
+      }, ['Preparando imagen…']);
+
+      const imageEl = createElement('img', {
+        class: 'ticket-image-preview events-quick-ticket-image',
+        alt: `Entrada #${idx + 1}: ${ticket.tipo_entrada} - ${ticketWithData.nombre_comprador || 'participante'}`,
+        style: 'display: none;',
+      });
+
+      let ticketImageBlob = null;
+      let ticketImageFile = null;
+      let ticketImageUrl = null;
+      const initiallyCanShare = puedeCompartirArchivos();
+      let canShare = initiallyCanShare;
+
+      const actionBtn = createButton({
+        text: initiallyCanShare ? 'Compartir' : 'Descargar',
         variant: 'primary',
         type: 'button',
+        disabled: true,
         onClick: () => {
-          closeTicketImageDialog();
-          ticketImageDialog = createTicketImagePreviewDialog({
-            ticket,
-            event: event || { nombre: eventName },
-            onClose: closeTicketImageDialog,
-          });
-          document.body.appendChild(ticketImageDialog.el);
+          if (!ticketImageBlob) return;
+          if (canShare && ticketImageFile) {
+            compartirFotoEntrada(ticketWithData, event || { nombre: eventName }, {
+              file: ticketImageFile,
+              blob: ticketImageBlob,
+            });
+          } else {
+            const codigo = obtenerCodigoCorto(ticketWithData) || 'entrada';
+            descargarBlob(ticketImageBlob, `entrada-${codigo}.png`);
+          }
         },
       });
-      previewBtn.el.classList.add('events-quick-ticket-preview-btn');
+      actionBtn.el.classList.add(
+        initiallyCanShare ? 'events-quick-ticket-share-btn' : 'events-quick-ticket-download-btn'
+      );
 
       const cardActions = createElement('div', { class: 'events-quick-ticket-card-actions' }, [
-        previewBtn.el,
+        actionBtn.el,
       ]);
+
+      generarFotoEntrada(ticketWithData, event || { nombre: eventName })
+        .then((blob) => {
+          if (isDestroyed) return;
+          ticketImageBlob = blob;
+          ticketImageFile = crearArchivoEntrada(blob, ticketWithData);
+          ticketImageUrl = URL.createObjectURL(blob);
+          createdObjectUrls.push(ticketImageUrl);
+
+          imageEl.src = ticketImageUrl;
+          imageEl.style.display = 'block';
+          statusEl.textContent = '';
+          statusEl.style.display = 'none';
+
+          canShare = puedeCompartirArchivos(ticketImageFile);
+          if (canShare) {
+            actionBtn.el.classList.remove('events-quick-ticket-download-btn');
+            actionBtn.el.classList.add('events-quick-ticket-share-btn');
+          } else {
+            actionBtn.el.classList.remove('events-quick-ticket-share-btn');
+            actionBtn.el.classList.add('events-quick-ticket-download-btn');
+          }
+          actionBtn.update({
+            text: canShare ? 'Compartir' : 'Descargar',
+            disabled: false,
+          });
+        })
+        .catch((err) => {
+          if (isDestroyed) return;
+          statusEl.style.display = 'block';
+          statusEl.textContent = (err && err.message) || 'No se pudo generar la imagen.';
+        });
 
       return createElement('div', { class: 'events-quick-ticket-card' }, [
         header,
         details,
+        statusEl,
+        imageEl,
         cardActions,
       ]);
     });
@@ -882,8 +958,8 @@ export function createSellTicketDialog(props) {
   const unbindDismiss = bindDialogDismiss(overlayEl, onCancel);
   const unbindSubmit = bindFormSubmit(formEl, async () => {
     errorEl.style.display = 'none';
-    const nombre_comprador = compradorInput.el.querySelector('input').value.trim();
-    const contacto = contactoInput.el.querySelector('input').value.trim();
+    const nombre_comprador = (compradorInput.el.querySelector('input').value || '').trim();
+    const contacto = (contactoInput.el.querySelector('input').value || '').trim();
     const tipo_entrada = typeSelect.value;
     const cantidad = parseInt(cantidadInput.el.querySelector('input').value, 10);
     const medio_pago = medioSelect.value;
@@ -936,7 +1012,13 @@ export function createSellTicketDialog(props) {
   });
 
   function destroy() {
-    closeTicketImageDialog();
+    isDestroyed = true;
+    for (const url of createdObjectUrls) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    }
+    createdObjectUrls.length = 0;
     unbindDismiss();
     unbindSubmit();
     if (overlayEl.parentNode) {
