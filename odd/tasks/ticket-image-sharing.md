@@ -16,14 +16,14 @@
   - Progress: complete.
   - Verification evidence: final independent verification passed `node frontend/test/events-ui.test.js`, `node frontend/test/public-ticket.test.js`, and `git diff --check`; image cards provide per-ticket share/download, and the detector reported only two pre-existing warnings in unchanged CSS lines.
   - Route trigger: delegated direct multi-file write; focused test execution completed by writer.
-- [ ] **TIS-2 — Prevent background scrolling while a modal is open.** Fix the shared modal behavior rather than patching only the ticket view; handle cleanup and nested/concurrent dialogs safely, with focused regression coverage.
+- [x] **TIS-2 — Prevent background scrolling while a modal is open.** Fix the shared modal behavior rather than patching only the ticket view; handle cleanup and nested/concurrent dialogs safely, with focused regression coverage.
   - Acceptance: opening a modal prevents page scrolling behind it; dismissing/destroying it restores the prior scroll behavior; nested dialogs do not unlock scrolling prematurely.
   - Checks: focused frontend tests (including modal lifecycle/cleanup) and UI detector for changed targets.
   - Progress: complete.
   - Verification evidence: final independent verification passed `node frontend/test/dialog-dismiss.test.js`; fixed-body lock restores prior styles and scroll position, with nested/unordered cleanup coverage. `git diff --check` passed; detector warnings are pre-existing in unchanged CSS.
   - Route trigger: delegated mapping (shared modal behavior spans multiple implementations/styles/tests) then delegated direct multi-file write.
 
-- [ ] **TIS-3 — Align paid-status handling across ticket image surfaces.** Ensure missing/unknown payment status cannot permit image generation/sharing in one surface while blocking it in another; add a focused regression test.
+- [x] **TIS-3 — Align paid-status handling across ticket image surfaces.** Ensure missing/unknown payment status cannot permit image generation/sharing in one surface while blocking it in another; add a focused regression test.
   - Acceptance: image generation/sharing eligibility is consistent, and only explicitly paid tickets are shareable.
   - Checks: `node frontend/test/events-ui.test.js`.
   - Progress: complete.
@@ -32,4 +32,4 @@
 
 ## Next Step
 
-All implementation tasks and independent checks are complete. Native RDD inspect is the remaining process gate; no commit was requested or created.
+Implementation commit: `ce360a3` (`feat(events): show and share ticket images immediately`), merged to `main` by fast-forward. Native review approved and acknowledged the reviewed candidate; no push was performed.
