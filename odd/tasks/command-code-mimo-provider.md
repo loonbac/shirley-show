@@ -20,4 +20,5 @@ Replace the Shirley Show app's default OpenCode Go API configuration with Comman
 - `cargo test --test agent_chat_tests test_agent_chat_unconfigured_provider` — 1 passed.
 - `cargo test --test deploy_manifest_tests` — 6 passed.
 - `git diff --check` — passed.
+- Implementation commit: `a4e4f9a` (`feat(ai): switch default provider to Command Code MiMo`).
 - `.env.example` was not modified because access was denied as a sensitive path; update it separately through an authorized path if needed.
