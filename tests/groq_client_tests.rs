@@ -13,14 +13,13 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 use shirley_show::config::{
-    DEFAULT_GROQ_BASE_URL, DEFAULT_GROQ_MODEL, DEFAULT_OPENCODE_BASE_URL, DEFAULT_OPENCODE_MODEL,
-    GroqConfig, LlmProviderKind,
+    DEFAULT_COMMAND_CODE_BASE_URL, DEFAULT_COMMAND_CODE_MODEL, DEFAULT_GROQ_BASE_URL,
+    DEFAULT_GROQ_MODEL, GroqConfig, LlmProviderKind,
 };
 use shirley_show::domain::agent_message::AgentMessage;
 use shirley_show::domain::agent_tool::{ToolCall, ToolDefinition};
 use shirley_show::infra::groq::client::{
-    CURRENT_SESSION_ID, DEFAULT_MAX_COMPLETION_TOKENS, GroqClient, HEADER_OPENCODE_SESSION,
-    USER_AGENT_SHIRLEY,
+    CURRENT_SESSION_ID, DEFAULT_MAX_COMPLETION_TOKENS, GroqClient, USER_AGENT_SHIRLEY,
 };
 use shirley_show::infra::groq::error::ProviderError;
 use shirley_show::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
@@ -165,7 +164,7 @@ async fn test_groq_client_request_serialization_and_auth_header() {
     let ua = headers.get("user-agent").unwrap().to_str().unwrap();
     assert_eq!(ua, USER_AGENT_SHIRLEY);
 
-    assert!(headers.get(HEADER_OPENCODE_SESSION).is_some());
+    assert!(headers.get("x-opencode-session").is_none());
 
     // Check payload received by mock server
     let body = state.last_body.lock().await.clone().unwrap();
@@ -204,23 +203,23 @@ async fn test_groq_client_request_serialization_and_auth_header() {
 }
 
 #[tokio::test]
-async fn test_opencode_provider_request_headers_and_session_forwarding() {
+async fn test_command_code_provider_request_headers_and_auth() {
     let (addr, state) = start_mock_server().await;
 
     let config = GroqConfig {
-        api_key: Some("opencode_live_token_777".to_string()),
+        api_key: Some("cmd_live_token_777".to_string()),
         base_url: format!("http://{}", addr),
-        model: "deepseek-v4-flash".to_string(),
-        provider: LlmProviderKind::OpenCode,
+        model: "xiaomi/mimo-v2.6-pro".to_string(),
+        provider: LlmProviderKind::CommandCode,
     };
 
     let client = GroqClient::new(config).expect("client creation");
 
     let request = CompletionRequest {
-        model: "deepseek-v4-flash".to_string(),
-        system_prompt: "Eres Ressy en OpenCode Go.".to_string(),
+        model: "xiaomi/mimo-v2.6-pro".to_string(),
+        system_prompt: "Eres Ressy en Command Code.".to_string(),
         messages: vec![AgentMessage::User {
-            content: "Hola desde OpenCode".to_string(),
+            content: "Hola desde Command Code".to_string(),
         }],
         tools: vec![],
     };
@@ -236,40 +235,33 @@ async fn test_opencode_provider_request_headers_and_session_forwarding() {
     let headers = state.last_headers.lock().await.clone().unwrap();
     assert_eq!(
         headers.get("authorization").unwrap().to_str().unwrap(),
-        "Bearer opencode_live_token_777"
+        "Bearer cmd_live_token_777"
     );
     assert_eq!(
         headers.get("user-agent").unwrap().to_str().unwrap(),
         "shirley-show/1.0"
     );
-    assert_eq!(
-        headers
-            .get(HEADER_OPENCODE_SESSION)
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        "session-conversation-uuid-999"
-    );
+    assert!(headers.get("x-opencode-session").is_none());
 
     let body = state.last_body.lock().await.clone().unwrap();
-    assert_eq!(body["model"], "deepseek-v4-flash");
+    assert_eq!(body["model"], "xiaomi/mimo-v2.6-pro");
     assert_eq!(body["max_completion_tokens"], DEFAULT_MAX_COMPLETION_TOKENS);
 }
 
 #[tokio::test]
-async fn test_ephemeral_session_generated_when_context_missing() {
+async fn test_no_session_header_sent() {
     let (addr, state) = start_mock_server().await;
 
     let config = GroqConfig {
         api_key: Some("any_key".to_string()),
         base_url: format!("http://{}", addr),
-        model: "deepseek-v4-flash".to_string(),
-        provider: LlmProviderKind::OpenCode,
+        model: "xiaomi/mimo-v2.6-pro".to_string(),
+        provider: LlmProviderKind::CommandCode,
     };
 
     let client = GroqClient::new(config).unwrap();
     let request = CompletionRequest {
-        model: "deepseek-v4-flash".to_string(),
+        model: "xiaomi/mimo-v2.6-pro".to_string(),
         system_prompt: "sys".to_string(),
         messages: vec![AgentMessage::User {
             content: "ping".to_string(),
@@ -281,11 +273,7 @@ async fn test_ephemeral_session_generated_when_context_missing() {
     let _ = client.complete(request).await.unwrap();
 
     let headers = state.last_headers.lock().await.clone().unwrap();
-    let session_header = headers.get(HEADER_OPENCODE_SESSION);
-    assert!(session_header.is_some());
-    let session_str = session_header.unwrap().to_str().unwrap();
-    // Must be a non-empty generated UUID v4
-    assert!(uuid::Uuid::parse_str(session_str).is_ok());
+    assert!(headers.get("x-opencode-session").is_none());
 }
 
 #[tokio::test]
@@ -532,32 +520,32 @@ fn test_groq_config_validation_and_trimming() {
 }
 
 #[test]
-fn test_opencode_config_validation_and_trimming() {
-    // Normalization of base_url and trimming of api_key for OpenCode Go
+fn test_command_code_config_validation_and_trimming() {
+    // Normalization of base_url and trimming of api_key for Command Code
     let mut config = GroqConfig {
-        api_key: Some("   opencode_secret_key_1   ".to_string()),
-        base_url: "https://opencode.ai/zen/go/v1///".to_string(),
-        model: "  deepseek-v4-flash  ".to_string(),
-        provider: LlmProviderKind::OpenCode,
+        api_key: Some("   cmd_secret_key_1   ".to_string()),
+        base_url: "https://api.commandcode.ai/provider/v1///".to_string(),
+        model: "  xiaomi/mimo-v2.6-pro  ".to_string(),
+        provider: LlmProviderKind::CommandCode,
     };
     config.normalize();
 
-    assert_eq!(config.api_key.as_deref(), Some("opencode_secret_key_1"));
-    assert_eq!(config.base_url, "https://opencode.ai/zen/go/v1");
-    assert_eq!(config.model, "deepseek-v4-flash");
-    assert_eq!(config.provider_name(), "OpenCode Go");
-    assert!(config.is_opencode());
+    assert_eq!(config.api_key.as_deref(), Some("cmd_secret_key_1"));
+    assert_eq!(config.base_url, "https://api.commandcode.ai/provider/v1");
+    assert_eq!(config.model, "xiaomi/mimo-v2.6-pro");
+    assert_eq!(config.provider_name(), "Command Code");
+    assert!(config.is_command_code());
 
-    // Empty base_url defaults to OpenCode base url
+    // Empty base_url defaults to Command Code base url
     let mut config_empty = GroqConfig {
         api_key: None,
         base_url: "   ".to_string(),
         model: "".to_string(),
-        provider: LlmProviderKind::OpenCode,
+        provider: LlmProviderKind::CommandCode,
     };
     config_empty.normalize();
-    assert_eq!(config_empty.base_url, DEFAULT_OPENCODE_BASE_URL);
-    assert_eq!(config_empty.model, DEFAULT_OPENCODE_MODEL);
+    assert_eq!(config_empty.base_url, DEFAULT_COMMAND_CODE_BASE_URL);
+    assert_eq!(config_empty.model, DEFAULT_COMMAND_CODE_MODEL);
 }
 
 #[tokio::test]
@@ -717,38 +705,38 @@ async fn test_groq_client_max_retries_exceeded_on_429() {
 }
 
 #[test]
-fn test_provider_selection_env_hierarchy_opencode_first() {
+fn test_provider_selection_env_hierarchy_command_code_first() {
     let _guard = ENV_MUTEX.lock().unwrap();
 
     unsafe {
-        std::env::set_var("OPENCODE_API_KEY", "opencode_token_alpha");
+        std::env::set_var("CMD_API_KEY", "cmd_token_alpha");
         std::env::set_var("GROQ_API_KEY", "groq_token_beta");
-        std::env::remove_var("OPENCODE_MODEL");
-        std::env::remove_var("OPENCODE_BASE_URL");
+        std::env::remove_var("CMD_MODEL");
+        std::env::remove_var("CMD_BASE_URL");
         std::env::remove_var("GROQ_MODEL");
         std::env::remove_var("GROQ_BASE_URL");
 
         let config = GroqConfig::from_env();
-        assert_eq!(config.provider, LlmProviderKind::OpenCode);
-        assert_eq!(config.api_key.as_deref(), Some("opencode_token_alpha"));
-        assert_eq!(config.model, DEFAULT_OPENCODE_MODEL);
-        assert_eq!(config.base_url, DEFAULT_OPENCODE_BASE_URL);
+        assert_eq!(config.provider, LlmProviderKind::CommandCode);
+        assert_eq!(config.api_key.as_deref(), Some("cmd_token_alpha"));
+        assert_eq!(config.model, DEFAULT_COMMAND_CODE_MODEL);
+        assert_eq!(config.base_url, DEFAULT_COMMAND_CODE_BASE_URL);
 
         // Clean up
-        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("CMD_API_KEY");
         std::env::remove_var("GROQ_API_KEY");
     }
 }
 
 #[test]
-fn test_provider_selection_fallback_to_groq_when_opencode_missing() {
+fn test_provider_selection_fallback_to_groq_when_command_code_missing() {
     let _guard = ENV_MUTEX.lock().unwrap();
 
     unsafe {
-        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("CMD_API_KEY");
         std::env::set_var("GROQ_API_KEY", "groq_token_delta");
-        std::env::remove_var("OPENCODE_MODEL");
-        std::env::remove_var("OPENCODE_BASE_URL");
+        std::env::remove_var("CMD_MODEL");
+        std::env::remove_var("CMD_BASE_URL");
         std::env::remove_var("GROQ_MODEL");
         std::env::remove_var("GROQ_BASE_URL");
 
@@ -764,11 +752,11 @@ fn test_provider_selection_fallback_to_groq_when_opencode_missing() {
 }
 
 #[test]
-fn test_provider_selection_whitespace_opencode_key_falls_back_to_groq() {
+fn test_provider_selection_whitespace_cmd_key_falls_back_to_groq() {
     let _guard = ENV_MUTEX.lock().unwrap();
 
     unsafe {
-        std::env::set_var("OPENCODE_API_KEY", "   \t  \n ");
+        std::env::set_var("CMD_API_KEY", "   \t  \n ");
         std::env::set_var("GROQ_API_KEY", "groq_token_fallback");
 
         let config = GroqConfig::from_env();
@@ -776,7 +764,7 @@ fn test_provider_selection_whitespace_opencode_key_falls_back_to_groq() {
         assert_eq!(config.api_key.as_deref(), Some("groq_token_fallback"));
 
         // Clean up
-        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("CMD_API_KEY");
         std::env::remove_var("GROQ_API_KEY");
     }
 }
@@ -786,16 +774,16 @@ fn test_provider_selection_unconfigured_when_no_keys() {
     let _guard = ENV_MUTEX.lock().unwrap();
 
     unsafe {
-        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("CMD_API_KEY");
         std::env::remove_var("GROQ_API_KEY");
-        std::env::remove_var("OPENCODE_MODEL");
-        std::env::remove_var("OPENCODE_BASE_URL");
+        std::env::remove_var("CMD_MODEL");
+        std::env::remove_var("CMD_BASE_URL");
 
         let config = GroqConfig::from_env();
         assert_eq!(config.api_key, None);
-        assert_eq!(config.provider, LlmProviderKind::OpenCode);
-        assert_eq!(config.model, DEFAULT_OPENCODE_MODEL);
-        assert_eq!(config.base_url, DEFAULT_OPENCODE_BASE_URL);
+        assert_eq!(config.provider, LlmProviderKind::CommandCode);
+        assert_eq!(config.model, DEFAULT_COMMAND_CODE_MODEL);
+        assert_eq!(config.base_url, DEFAULT_COMMAND_CODE_BASE_URL);
     }
 }
 
@@ -804,20 +792,20 @@ fn test_provider_selection_custom_model_and_base_url() {
     let _guard = ENV_MUTEX.lock().unwrap();
 
     unsafe {
-        std::env::set_var("OPENCODE_API_KEY", "opencode_custom_key");
-        std::env::set_var("OPENCODE_MODEL", "deepseek-custom-exp");
-        std::env::set_var("OPENCODE_BASE_URL", "https://custom.opencode.ai/zen/v1/");
+        std::env::set_var("CMD_API_KEY", "cmd_custom_key");
+        std::env::set_var("CMD_MODEL", "custom-model-exp");
+        std::env::set_var("CMD_BASE_URL", "https://custom.commandcode.ai/v1/");
 
         let config = GroqConfig::from_env();
-        assert_eq!(config.provider, LlmProviderKind::OpenCode);
-        assert_eq!(config.api_key.as_deref(), Some("opencode_custom_key"));
-        assert_eq!(config.model, "deepseek-custom-exp");
-        assert_eq!(config.base_url, "https://custom.opencode.ai/zen/v1");
+        assert_eq!(config.provider, LlmProviderKind::CommandCode);
+        assert_eq!(config.api_key.as_deref(), Some("cmd_custom_key"));
+        assert_eq!(config.model, "custom-model-exp");
+        assert_eq!(config.base_url, "https://custom.commandcode.ai/v1");
 
         // Clean up
-        std::env::remove_var("OPENCODE_API_KEY");
-        std::env::remove_var("OPENCODE_MODEL");
-        std::env::remove_var("OPENCODE_BASE_URL");
+        std::env::remove_var("CMD_API_KEY");
+        std::env::remove_var("CMD_MODEL");
+        std::env::remove_var("CMD_BASE_URL");
     }
 }
 
@@ -825,9 +813,9 @@ fn test_provider_selection_custom_model_and_base_url() {
 fn test_groq_config_debug_redacts_api_key() {
     let config = GroqConfig {
         api_key: Some("super_secret_raw_key_never_leak".to_string()),
-        base_url: "https://opencode.ai/zen/go/v1".to_string(),
-        model: "deepseek-v4-flash".to_string(),
-        provider: LlmProviderKind::OpenCode,
+        base_url: "https://api.commandcode.ai/provider/v1".to_string(),
+        model: "xiaomi/mimo-v2.6-pro".to_string(),
+        provider: LlmProviderKind::CommandCode,
     };
 
     let debug_output = format!("{:?}", config);

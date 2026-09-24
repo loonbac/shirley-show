@@ -73,7 +73,7 @@ pub async fn chat(State(state): State<AppState>, request: Request) -> Result<Res
 
     let mut input = parsed_request.input;
     // Si falta session_id en la solicitud, se genera un UUID efímero por request
-    // (documentado como menos óptimo para la reutilización de caché en OpenCode Go / vLLM prefix cache).
+    // (menos óptimo para la reutilización de prefix cache en Command Code / proveedores compatibles).
     let session_id = parsed_request
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());

@@ -48,8 +48,9 @@ Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n /run/current-sys
 
 | Variable | Ejemplo | Notas |
 |---|---|---|
-| `OPENCODE_API_KEY` | key de OpenCode Go | Requerida. Guarda como secreto. |
-| `OPENCODE_MODEL` | `deepseek-v4-flash` | Opcional. |
+| `CMD_API_KEY` | key de Command Code Provider API | Requerida. Guarda como secreto. |
+| `CMD_MODEL` | `xiaomi/mimo-v2.6-pro` | Opcional (por defecto MiMo V2.6 Pro). |
+| `CMD_BASE_URL` | `https://api.commandcode.ai/provider/v1` | Opcional. |
 | `GROQ_API_KEY` / `GROQ_MODEL` | `gsk_...` | Opcional, solo como fallback. |
 | `JOSHUA_PC_HOST` | `100.73.247.39` | Vacío = modo local (sin GPU remota). |
 | `JOSHUA_PC_USER` / `JOSHUA_PC_PORT` | `loonbac` / `22` | Opcional. |

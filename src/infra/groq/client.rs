@@ -25,7 +25,6 @@ pub const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 // no tool calls even though the upstream request itself succeeded.
 pub const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4_096;
 pub const USER_AGENT_SHIRLEY: &str = "shirley-show/1.0";
-pub const HEADER_OPENCODE_SESSION: &str = "x-opencode-session";
 
 tokio::task_local! {
     pub static CURRENT_SESSION_ID: String;
@@ -108,18 +107,10 @@ impl ChatCompletionProvider for GroqClient {
         let client = self.client.clone();
         let base_url = self.config.base_url.clone();
         let api_key = self.config.api_key.clone();
+        let provider_name = self.config.provider_name();
 
         Box::pin(async move {
             let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-
-            let session_id = CURRENT_SESSION_ID
-                .try_with(|id| id.clone())
-                .unwrap_or_else(|_| {
-                    // Generar un ID de sesión efímero cuando no se recibe en el contexto del turno.
-                    // Documentación: Generar una sesión efímera por request es menos óptimo para
-                    // la reutilización de caché de prefijos (prefix caching) en OpenCode Go / vLLM.
-                    uuid::Uuid::new_v4().to_string()
-                });
 
             let mut wire_messages = Vec::with_capacity(request.messages.len() + 1);
             wire_messages.push(GroqMessage::System {
@@ -149,9 +140,9 @@ impl ChatCompletionProvider for GroqClient {
                                 },
                             })
                             .collect();
-                        // OpenCode Go requires `content` to be present on an assistant
-                        // message that carries tool calls; other OpenAI-compatible APIs
-                        // also accept the empty string.
+                        // Command Code and OpenAI-compatible APIs require or expect `content` to
+                        // be present on an assistant message that carries tool calls; other
+                        // OpenAI-compatible APIs also accept the empty string.
                         let content = if wire_tool_calls.is_empty() {
                             content
                         } else {
@@ -187,8 +178,9 @@ impl ChatCompletionProvider for GroqClient {
                 })
                 .collect();
 
-            // DeepSeek's thinking mode rejects `required`; automatic selection is
-            // supported by OpenCode and still permits the narrowly scoped audio tools.
+            // Thinking models can reject `required`; automatic selection is supported
+            // by Command Code and other OpenAI-compatible providers, permitting the
+            // narrowly scoped audio tools.
             let tool_choice = (!wire_tools.is_empty()).then(|| "auto".to_string());
 
             let body = GroqChatCompletionWireRequest {
@@ -204,7 +196,6 @@ impl ChatCompletionProvider for GroqClient {
                 let mut req_builder = client
                     .post(&endpoint)
                     .header(reqwest::header::USER_AGENT, USER_AGENT_SHIRLEY)
-                    .header(HEADER_OPENCODE_SESSION, &session_id)
                     .json(&body);
                 if let Some(ref key) = api_key {
                     req_builder = req_builder.bearer_auth(key);
@@ -239,7 +230,7 @@ impl ChatCompletionProvider for GroqClient {
                         let parsed: GroqChatCompletionResponse = serde_json::from_str(&raw_body)
                             .map_err(|error| {
                                 eprintln!(
-                                    "OpenCode response schema error: {error}; body: {}",
+                                    "{provider_name} response schema error: {error}; body: {}",
                                     raw_body.chars().take(2_000).collect::<String>()
                                 );
                                 ProviderError::MalformedResponse(
@@ -256,7 +247,7 @@ impl ChatCompletionProvider for GroqClient {
                         for tc in choice.message.tool_calls {
                             if tc.id.is_empty() || tc.function.name.is_empty() {
                                 eprintln!(
-                                    "OpenCode invalid tool call: id={:?}, name={:?}, arguments={:?}",
+                                    "{provider_name} invalid tool call: id={:?}, name={:?}, arguments={:?}",
                                     tc.id, tc.function.name, tc.function.arguments
                                 );
                                 return Err(ProviderError::MalformedResponse(
@@ -278,7 +269,7 @@ impl ChatCompletionProvider for GroqClient {
 
                         if content.is_none() && tool_calls.is_empty() {
                             eprintln!(
-                                "OpenCode response contained neither text nor tool calls; finish_reason={finish_reason:?}"
+                                "{provider_name} response contained neither text nor tool calls; finish_reason={finish_reason:?}"
                             );
                             return Err(ProviderError::MalformedResponse(
                                 "Response contains neither content nor tool calls".to_string(),
@@ -296,7 +287,7 @@ impl ChatCompletionProvider for GroqClient {
                     _ => {
                         let body = response.text().await.unwrap_or_default();
                         eprintln!(
-                            "OpenCode returned HTTP {}: {}",
+                            "{provider_name} returned HTTP {}: {}",
                             status.as_u16(),
                             body.chars().take(2_000).collect::<String>()
                         );

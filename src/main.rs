@@ -90,12 +90,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             Err(e) => {
-                eprintln!("Aviso: No se pudo inicializar el cliente de Groq: {e}");
+                eprintln!("Aviso: No se pudo inicializar el cliente de IA: {e}");
             }
         }
     } else {
         state = state.with_agent_provider(None, agent_limits, config.groq.model.clone());
-        println!("Asistente Ressy en modo no configurado (GROQ_API_KEY no detectada).");
+        println!(
+            "Asistente Ressy en modo no configurado (CMD_API_KEY ni GROQ_API_KEY detectadas)."
+        );
     }
 
     let app = create_router(state);

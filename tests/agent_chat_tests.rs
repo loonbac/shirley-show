@@ -207,7 +207,7 @@ async fn test_agent_chat_unconfigured_provider() {
     assert_eq!(notice.code, "agent_unconfigured");
     assert_eq!(notice.retryable, false);
     assert!(output.message.contains("GROQ_API_KEY"));
-    assert!(output.message.contains("OPENCODE_API_KEY"));
+    assert!(output.message.contains("CMD_API_KEY"));
 }
 
 #[tokio::test]

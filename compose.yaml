@@ -14,9 +14,9 @@ services:
       - SHIRLEY_BIND=0.0.0.0:3001
       - SHIRLEY_DATA_DIR=/app/data
       - SHIRLEY_FRONTEND_DIR=/app/frontend
-      - OPENCODE_API_KEY=${OPENCODE_API_KEY:?OPENCODE_API_KEY requerida}
-      - OPENCODE_MODEL=${OPENCODE_MODEL:-deepseek-v4-flash}
-      - OPENCODE_BASE_URL=${OPENCODE_BASE_URL:-https://opencode.ai/zen/go/v1}
+      - CMD_API_KEY=${CMD_API_KEY:?CMD_API_KEY requerida}
+      - CMD_MODEL=${CMD_MODEL:-xiaomi/mimo-v2.6-pro}
+      - CMD_BASE_URL=${CMD_BASE_URL:-https://api.commandcode.ai/provider/v1}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-120b}
       - YT_DLP_BIN=${YT_DLP_BIN:-yt-dlp}
