@@ -136,8 +136,12 @@ export function createDoorView(props) {
   });
   manualInput.value = '';
 
+  let manualFallbackOpen = false;
+
   function focusInput() {
     if (state.activeTab !== 'scan') return;
+    if (state.isCameraActive) return;
+    if (!manualFallbackOpen) return;
     setTimeout(() => {
       try {
         manualInput.focus();
@@ -243,7 +247,7 @@ export function createDoorView(props) {
       bannerEl = createElement('div', { class: 'door-banner door-banner-idle' }, [
         createElement('div', { class: 'door-banner-icon' }, ['🎟️']),
         createElement('h3', { class: 'door-banner-title' }, ['Listo para Validar']),
-        createElement('p', {}, ['Escanea un código QR o ingrésalo manualmente abajo.']),
+        createElement('p', {}, ['Apunta la cámara al código QR de la entrada.']),
       ]);
     } else if (res.resultado === 'Valida') {
       bannerEl = createElement('div', { class: 'door-banner door-banner-valid' }, [
@@ -311,11 +315,22 @@ export function createDoorView(props) {
       await onSubmitCode(code);
     });
 
+    const manualSummary = createElement('summary', { class: 'door-manual-fallback-summary' }, [
+      '⌨️ Ingreso manual (solo si la cámara falla)',
+    ]);
+
     const manualSection = createElement('div', { class: 'door-manual-section' }, [
-      createElement('label', { class: 'door-manual-label font-bold' }, ['Entrada Manual']),
       formEl,
     ]);
-    scanPane.appendChild(manualSection);
+    const manualFallback = createElement('details', { class: 'door-manual-fallback' }, [
+      manualSummary,
+      manualSection,
+    ]);
+    manualFallback.addEventListener('toggle', () => {
+      manualFallbackOpen = Boolean(manualFallback.open);
+      if (manualFallbackOpen) focusInput();
+    });
+    scanPane.appendChild(manualFallback);
 
     // Build Sell Pane
     const sellPane = createElement('div', {
@@ -601,6 +616,7 @@ export function createDoorController(deps = {}) {
   let scanner = null;
   let isCameraActive = false;
   let sessionSold = 0;
+  let destroyed = false;
 
   const view = createDoorView({
     eventName: 'Cargando...',
@@ -631,9 +647,18 @@ export function createDoorController(deps = {}) {
 
   loadEvent();
 
+  // La cámara es lo primero: arranca sola al entrar al modo puerta.
+  if (isCameraSupported()) {
+    setTimeout(() => {
+      if (!destroyed && !isCameraActive) startCamera();
+    }, 300);
+  }
+
   function handleTabChange(tab) {
     if (tab === 'sell' && isCameraActive) {
       stopCamera();
+    } else if (tab === 'scan' && !isCameraActive && isCameraSupported()) {
+      startCamera();
     }
   }
 
@@ -686,7 +711,6 @@ export function createDoorController(deps = {}) {
     }
     isCameraActive = false;
     view.update({ isCameraActive: false });
-    view.focusInput();
   }
 
   async function handleSubmitCode(code) {
@@ -751,6 +775,7 @@ export function createDoorController(deps = {}) {
   }
 
   function destroy() {
+    destroyed = true;
     stopCamera();
     if (scanner) {
       scanner.destroy();
