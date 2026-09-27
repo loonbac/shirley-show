@@ -1182,3 +1182,227 @@
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-bold);
 }
+
+/* --- Door Mode Tabs & Sell Section (DOOR-2) --- */
+.door-tabs-nav {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.door-tab-btn {
+  flex: 1;
+  min-height: 48px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  transition: all 0.15s ease-in-out;
+}
+
+.door-tab-btn.active,
+.door-tab-btn[aria-selected="true"] {
+  background: var(--color-brand-primary, #d97706);
+  color: #ffffff;
+  border-color: var(--color-brand-primary, #d97706);
+}
+
+.door-tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.door-tab-pane[hidden],
+.door-tab-pane.is-hidden {
+  display: none !important;
+}
+
+.door-sell-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.door-sell-type-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.door-sell-type-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+}
+
+.door-sell-type-price {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+}
+
+.door-sell-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.door-field-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.door-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.door-stepper-btn {
+  width: 56px;
+  height: 56px;
+  min-height: 48px;
+  min-width: 48px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.door-stepper-btn:disabled,
+.door-stepper-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.door-stepper-input {
+  width: 90px;
+  height: 56px;
+  min-height: 48px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  text-align: center;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-sizing: border-box;
+}
+
+.door-sell-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.door-sell-total-label {
+  font-size: var(--font-size-lg);
+  color: var(--color-text);
+}
+
+.door-sell-total-value {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-brand-primary, #d97706);
+}
+
+.door-segment-group {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.door-segment-btn {
+  flex: 1;
+  min-height: 48px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  transition: all 0.15s ease-in-out;
+}
+
+.door-segment-btn.active,
+.door-segment-btn[aria-pressed="true"] {
+  background: var(--color-brand-primary, #d97706);
+  color: #ffffff;
+  border-color: var(--color-brand-primary, #d97706);
+}
+
+.door-yape-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: #ffffff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.door-yape-qr {
+  max-width: 220px;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+.door-yape-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  margin: 0;
+}
+
+.door-register-sell-btn {
+  width: 100%;
+  min-height: 48px;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+}
+
+.door-sell-session-count {
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+}
