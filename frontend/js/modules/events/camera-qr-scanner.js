@@ -70,6 +70,48 @@ export function getJsQR() {
  * @param {{ onDecodeError?: (err: unknown) => void }} [hooks={}] receptor de errores del vendor (reporta y sigue, nunca silencia)
  * @returns {string|null} payload recortado o null si ningún intento decodifica
  */
+export function waitForVideoMetadata(video, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    if (!video) return reject(new Error('sin elemento de video'));
+    if (typeof video.videoWidth === 'number' && video.videoWidth > 0) return resolve();
+    if (typeof video.readyState === 'number' && video.readyState >= 1) return resolve();
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        cleanup();
+        reject(new Error('timeout esperando metadata del video'));
+      }
+    }, timeoutMs);
+    function onMeta() {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        cleanup();
+        resolve();
+      }
+    }
+    function cleanup() {
+      try {
+        if (typeof video.removeEventListener === 'function') {
+          video.removeEventListener('loadedmetadata', onMeta);
+        }
+      } catch {}
+    }
+    try {
+      if (typeof video.addEventListener === 'function') {
+        video.addEventListener('loadedmetadata', onMeta, { once: true });
+      } else {
+        clearTimeout(timer);
+        resolve();
+      }
+    } catch {
+      clearTimeout(timer);
+      resolve();
+    }
+  });
+}
+
 export function decodeFrameWithFallbacks(jsQRFn, data, width, height, hooks = {}) {
   const { onDecodeError = () => {} } = hooks;
   if (typeof jsQRFn !== 'function' || !data || width <= 0 || height <= 0) return null;
@@ -147,6 +189,7 @@ export function downscaleDecode(jsQRFn, data, width, height) {
  *   onScan: (code: string) => void,
  *   onError?: (error: Error) => void,
  *   scanIntervalMs?: number,
+ *   waitForMetadata?: (video: HTMLVideoElement, timeoutMs?: number) => Promise<void>,
  * }} options 
  * @returns {{
  *   start: () => Promise<void>,
@@ -161,6 +204,7 @@ export function createCameraQrScanner(options) {
     onScan,
     onError = () => {},
     scanIntervalMs = 250,
+    waitForMetadata = waitForVideoMetadata,
   } = options;
 
   let stream = null;
@@ -252,11 +296,24 @@ export function createCameraQrScanner(options) {
 
       if (videoEl) {
         videoEl.srcObject = stream;
+        videoEl.muted = true;
         if (typeof videoEl.setAttribute === 'function') {
           videoEl.setAttribute('playsinline', 'true');
+          videoEl.setAttribute('muted', 'true');
+          videoEl.setAttribute('autoplay', 'true');
+        }
+        // Esperar metadata para tener videoWidth/videoHeight antes del loop.
+        try {
+          await waitForMetadata(videoEl, 4000);
+        } catch (err) {
+          console.warn('Video sin metadata a tiempo, igual intento escanear:', err);
         }
         if (typeof videoEl.play === 'function') {
-          await videoEl.play().catch(() => {});
+          try {
+            await videoEl.play();
+          } catch (err) {
+            console.warn('video.play() rechazado (autoplay policy?):', err);
+          }
         }
       }
 

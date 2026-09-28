@@ -15,6 +15,7 @@ const {
   isCameraSupported,
   getJsQR,
   decodeFrameWithFallbacks,
+  waitForVideoMetadata,
   createCameraQrScanner,
 } = await import(pathToFileURL(scannerModulePath).href);
 
@@ -667,6 +668,40 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   globalThis.jsQR = realJsQR;
   globalThis.window.jsQR = realJsQR;
   assert.equal(typeof getJsQR(), 'function', 'getJsQR debe resolver el vendor oficial');
+
+  // waitForVideoMetadata: resuelve de inmediato con metadata lista,
+  // espera el evento loadedmetadata, y rechaza por timeout.
+  {
+    const readyVideo = { videoWidth: 640, videoHeight: 480, readyState: 2 };
+    await waitForVideoMetadata(readyVideo, 100);
+
+    let listener = null;
+    const lateVideo = {
+      videoWidth: 0,
+      videoHeight: 0,
+      readyState: 0,
+      addEventListener: (type, fn) => { listener = fn; },
+      removeEventListener: () => { listener = null; },
+    };
+    const pending = waitForVideoMetadata(lateVideo, 500);
+    lateVideo.videoWidth = 640;
+    listener();
+    await pending;
+
+    const neverVideo = {
+      videoWidth: 0,
+      readyState: 0,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    let timedOut = false;
+    try {
+      await waitForVideoMetadata(neverVideo, 30);
+    } catch {
+      timedOut = true;
+    }
+    assert.equal(timedOut, true, 'sin metadata debe rechazar por timeout');
+  }
 
   const PAYLOAD = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
