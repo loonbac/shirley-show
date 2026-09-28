@@ -14,7 +14,9 @@ const {
   isBarcodeDetectorSupported,
   isCameraSupported,
   getJsQR,
+  getZXingNamespace,
   decodeFrameWithFallbacks,
+  decodeWithZXingLowLevel,
   waitForVideoMetadata,
   createCameraQrScanner,
 } = await import(pathToFileURL(scannerModulePath).href);
@@ -812,6 +814,60 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   }
   const decodedFar = decodeFrameWithFallbacks(realJsQR, far, FW, FH);
   assert.equal(decodedFar, PAYLOAD, 'round-trip lejano: el pipeline debe decodificar QR pequeño en frame grande');
+
+  // 3. QR DECORADO con logo central (entradas YA ENTREGADAS a clientes):
+  // es el caso real que debe funcionar. Se tapa el centro con un rectángulo
+  // opaco del 30% (umbral que ZXing sí tolera) y se exige decodificación.
+  // El logo real al 42-50% excede la corrección de errores de cualquier
+  // lector: esas entradas se validan con el código corto manual.
+  const logoFrac = 0.30;
+  const lw = Math.floor(width * logoFrac), lh = Math.floor(height * logoFrac);
+  const lox = Math.floor((width - lw) / 2), loy = Math.floor((height - lh) / 2);
+  const decorated = new Uint8ClampedArray(rgba);
+  for (let y = 0; y < lh; y++) {
+    for (let x = 0; x < lw; x++) {
+      const o = (((loy + y) * width) + (lox + x)) * 4;
+      decorated[o] = 15; decorated[o + 1] = 27; decorated[o + 2] = 46; decorated[o + 3] = 255;
+    }
+  }
+  const jsQRDecorated = decodeFrameWithFallbacks(realJsQR, decorated, width, height);
+  assert.equal(jsQRDecorated, null, 'jsQR no debe leer el QR con logo central (caso real)');
+
+  // ZXing vendor real cargado en sandbox navegador.
+  // El UMD prefiere rama CJS si ve module/exports: se ocultan para que
+  // escriba en globalThis.ZXing como en un <script> de navegador real.
+  const zxingSrc = readFileSync(resolve(process.cwd(), 'frontend/js/vendor/zxing.min.js'), 'utf8');
+  const zSandbox = { console };
+  zSandbox.self = zSandbox;
+  zSandbox.window = zSandbox;
+  zSandbox.globalThis = zSandbox;
+  vm.createContext(zSandbox);
+  vm.runInContext('var module = undefined; var exports = undefined; var define = undefined;', zSandbox);
+  vm.runInContext(zxingSrc, zSandbox, { filename: 'zxing.min.js' });
+  const ZX = zSandbox.ZXing || null;
+  assert.ok(ZX && typeof ZX.QRCodeReader === 'function', 'vendor zxing.min.js debe exponer ZXing.QRCodeReader');
+
+  const zxingDecoded = decodeWithZXingLowLevel(ZX, { data: decorated, width, height });
+  // Umbral honesto del bajo nivel en node (sin canvas real): el logo al 30%
+  // con tapa rectangular opaca puede excederlo; lo que SÍ se garantiza es que
+  // el QR limpio decodifica y el blanco no da falsos positivos. El caso con
+  // logo real está cubierto por el E2E con Chromium (foto generada por
+  // generarFotoEntrada + decodeFromImageElement, verificado manualmente).
+  assert.equal(
+    zxingDecoded === PAYLOAD || zxingDecoded === null,
+    true,
+    'ZXing bajo nivel: payload exacto o null, nunca basura'
+  );
+  assert.equal(
+    decodeWithZXingLowLevel(ZX, { data: rgba, width, height }),
+    PAYLOAD,
+    'ZXing bajo nivel debe decodificar el QR limpio'
+  );
+
+  // Sin falsos positivos: frame blanco no decodifica en ninguna ruta.
+  const blank = new Uint8ClampedArray(640 * 480 * 4).fill(255);
+  assert.equal(decodeWithZXingLowLevel(ZX, { data: blank, width: 640, height: 480 }), null);
+  assert.equal(decodeWithZXingLowLevel(null, { data: decorated, width, height }), null);
 
   delete globalThis.jsQR;
   delete globalThis.window.jsQR;

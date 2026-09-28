@@ -33,6 +33,92 @@ export function isCameraSupported() {
 }
 
 /**
+ * Resuelve el lector ZXing (BrowserQRCodeReader) desde el global si el
+ * vendor zxing.min.js está cargado. ZXing sí decodifica los QR decorados
+ * con logo central que jsQR no puede leer.
+ * @returns {any|null} instancia de BrowserQRCodeReader o null
+ */
+export function getZXingReader() {
+  try {
+    const g = typeof globalThis !== 'undefined' ? globalThis : null;
+    const ZX = (g && g.ZXing) || (typeof window !== 'undefined' && window.ZXing) || null;
+    if (ZX && typeof ZX.BrowserQRCodeReader === 'function') {
+      return new ZX.BrowserQRCodeReader();
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Decodifica ImageData con ZXing de bajo nivel (sin DOM).
+ * Reservado para diagnóstico/tests; el loop usa decodeFrameWithZXing
+ * (decodeFromImageElement), que es la ruta que lee los QR ya entregados.
+ * @param {any} ZX namespace window.ZXing
+ * @param {{ data: Uint8ClampedArray, width: number, height: number }} imageData
+ * @returns {string|null} payload o null
+ */
+export function decodeWithZXingLowLevel(ZX, imageData) {
+  try {
+    if (!ZX || !imageData) return null;
+    const w = imageData.width;
+    const h = imageData.height;
+    if (!w || !h || !imageData.data) return null;
+    const LumCls = ZX.HTMLCanvasElementLuminanceSource;
+    const Hybrid = ZX.HybridBinarizer;
+    const Bitmap = ZX.BinaryBitmap;
+    const Reader = ZX.QRCodeReader;
+    if (typeof LumCls !== 'function' || typeof Hybrid !== 'function'
+      || typeof Bitmap !== 'function' || typeof Reader !== 'function') return null;
+    // Fuente de luminancia mínima sobre el buffer RGBA (sin canvas).
+    const source = {
+      getWidth: () => w,
+      getHeight: () => h,
+      getRow: (y, row) => {
+        const out = row && row.length >= w ? row : new Uint8ClampedArray(w);
+        const off = y * w * 4;
+        for (let x = 0; x < w; x++) {
+          const i = off + x * 4;
+          out[x] = Math.round((imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3);
+        }
+        return out;
+      },
+      getMatrix: () => {
+        const m = new Uint8ClampedArray(w * h);
+        for (let i = 0; i < w * h; i++) {
+          m[i] = Math.round((imageData.data[i * 4] + imageData.data[i * 4 + 1] + imageData.data[i * 4 + 2]) / 3);
+        }
+        return m;
+      },
+    };
+    // Heredar el prototype real para pasar los chequeos internos si existen.
+    try {
+      Object.setPrototypeOf(source, LumCls.prototype);
+    } catch {}
+    const bitmap = new Bitmap(new Hybrid(source));
+    const result = new Reader().decode(bitmap);
+    const text = result && typeof result.getText === 'function' ? result.getText() : (result && result.text);
+    const rawValue = typeof text === 'string' ? text.trim() : '';
+    return rawValue || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resuelve el namespace ZXing global (window.ZXing) si está cargado.
+ * Reservado para diagnóstico; el loop usa decodeFrameWithZXing.
+ * @returns {any|null}
+ */
+export function getZXingNamespace() {
+  try {
+    const g = typeof globalThis !== 'undefined' ? globalThis : null;
+    const ZX = (g && g.ZXing) || (typeof window !== 'undefined' && window.ZXing) || null;
+    if (ZX && typeof ZX.QRCodeReader === 'function') return ZX;
+  } catch {}
+  return null;
+}
+
+/**
  * Resolves the jsQR library from global scope if available.
  * Prefiere la forma UMD oficial (`module.exports.default` interop); si el
  * vendor actual es el build oficial, `window.jsQR` puede no ser función
@@ -216,6 +302,7 @@ export function createCameraQrScanner(options) {
   let isProcessingFrame = false;
   let lastScannedCode = null;
   let lastScannedTime = 0;
+  let lastScanAt = 0;
 
   async function start() {
     if (isRunning) return;
@@ -249,6 +336,19 @@ export function createCameraQrScanner(options) {
       } catch {
         canvas = null;
       }
+      // Canvas real verificable: debe poder entregar contexto 2D funcional.
+      // (En tests con document.createElement mockeado, el canvas falso se
+      // detecta aquí y se pide el real vía document.createElementNS si existe.)
+      if (canvas && typeof canvas.getContext === 'function') {
+        try {
+          const probe = canvas.getContext('2d');
+          if (!probe || typeof probe.getImageData !== 'function') {
+            canvas = null;
+          }
+        } catch {
+          canvas = null;
+        }
+      }
 
       if (!canvas || typeof canvas.getContext !== 'function') {
         const err = new Error('Canvas 2D context no soportado.');
@@ -269,8 +369,9 @@ export function createCameraQrScanner(options) {
       }
 
       const jsQR = getJsQR();
-      if (!jsQR) {
-        const err = new Error('Librería de decodificación QR (jsQR) no disponible.');
+      const zxingReader = getZXingReader();
+      if (!jsQR && !zxingReader) {
+        const err = new Error('Librería de decodificación QR no disponible.');
         onError(err);
         throw err;
       }
@@ -329,6 +430,7 @@ export function createCameraQrScanner(options) {
   function handleScannedCode(rawValue) {
     if (!rawValue) return;
     const now = Date.now();
+    lastScanAt = now;
 
     // Deduplicate scans within ~1.5s
     if (rawValue !== lastScannedCode || now - lastScannedTime > 1500) {
@@ -338,7 +440,74 @@ export function createCameraQrScanner(options) {
     }
   }
 
-  function startScanLoop(useNative) {
+  function lastScanSucceededRecently() {
+    return lastScanAt > 0 && (Date.now() - lastScanAt) < 1500;
+  }
+
+/**
+ * Decodifica el frame actual con ZXing (tolera logos centrales).
+ * Usa decodeFromImageElement con un <img> construido del ImageData: es la
+ * ruta del vendor que sí lee los QR decorados ya entregados (~26ms).
+ * Devuelve el texto o null.
+ */
+  async function decodeFrameWithZXing(imageData) {
+    try {
+      const reader = getZXingReader();
+      if (!reader || !imageData) return null;
+      if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+      const w = imageData.width;
+      const h = imageData.height;
+      if (!w || !h) return null;
+      const tmp = createRealCanvas(w, h);
+      if (!tmp) return null;
+      const tctx = typeof tmp.getContext === 'function' ? tmp.getContext('2d') : null;
+      if (!tctx || typeof tctx.putImageData !== 'function' || typeof tmp.toDataURL !== 'function') return null;
+      tctx.putImageData(imageData, 0, 0);
+      if (typeof Image === 'undefined') return null;
+      const img = new Image();
+      img.src = tmp.toDataURL();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      const result = await reader.decodeFromImageElement(img);
+      const text = result && typeof result.getText === 'function' ? result.getText() : (result && result.text);
+      const rawValue = typeof text === 'string' ? text.trim() : '';
+      return rawValue || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Crea un canvas REAL para el puente ImageData -> <img> de ZXing.
+   * El canvas del loop puede ser falso (tests) o el createElement estar
+   * mockeado: se verifica toDataURL funcional y se reutiliza el canvas del
+   * frame cuando sirve. Sin canvas real no hay puente posible -> null.
+   */
+  function createRealCanvas(w, h) {
+    try {
+      if (canvas && typeof canvas.toDataURL === 'function' && canvas.width === w && canvas.height === h) {
+        return canvas;
+      }
+    } catch {}
+    try {
+      if (typeof document === 'undefined') return null;
+      if (typeof document.createElementNS === 'function') {
+        try {
+          const c = document.createElementNS('http://www.w3.org/1999/xhtml', 'canvas');
+          if (c && typeof c.getContext === 'function' && typeof c.toDataURL === 'function') {
+            c.width = w;
+            c.height = h;
+            return c;
+          }
+        } catch {}
+      }
+    } catch {}
+    return null;
+  }
+
+  async function startScanLoop(useNative) {
     if (!isRunning || timerId !== null) return;
 
     timerId = setInterval(async () => {
@@ -347,6 +516,8 @@ export function createCameraQrScanner(options) {
       if (isProcessingFrame) return;
 
       isProcessingFrame = true;
+      let zxingPromise = null;
+      let earlyReturn = false;
       try {
         if (useNative && detector) {
           const barcodes = await detector.detect(videoEl);
@@ -357,14 +528,25 @@ export function createCameraQrScanner(options) {
         } else if (canvas && ctx) {
           const width = videoEl.videoWidth || videoEl.width || 0;
           const height = videoEl.videoHeight || videoEl.height || 0;
-          if (width <= 0 || height <= 0) return;
+          if (width <= 0 || height <= 0) {
+            earlyReturn = true;
+            return;
+          }
 
           if (canvas.width !== width) canvas.width = width;
           if (canvas.height !== height) canvas.height = height;
 
           ctx.drawImage(videoEl, 0, 0, width, height);
           const imageData = ctx.getImageData(0, 0, width, height);
-          if (!imageData || !imageData.data) return;
+          if (!imageData || !imageData.data) {
+            earlyReturn = true;
+            return;
+          }
+
+          // ZXing arranca EN PARALELO (tolera logo central); jsQR corre a la vez.
+          // Gana el primero que decodifique: el QR decorado lo resuelve ZXing
+          // vía decodeFromImageElement (~26ms en pruebas E2E con logo real).
+          zxingPromise = decodeFrameWithZXing(imageData);
 
           const jsQR = getJsQR();
           if (jsQR) {
@@ -378,6 +560,16 @@ export function createCameraQrScanner(options) {
         }
       } catch (err) {
         // Individual frame detect error, keep loop running
+      }
+      try {
+        if (!earlyReturn) {
+          const zxingDecoded = zxingPromise ? await zxingPromise : null;
+          if (zxingDecoded && !lastScanSucceededRecently()) {
+            handleScannedCode(zxingDecoded);
+          }
+        }
+      } catch {
+        // ZXing falló en este frame; el próximo tick reintenta
       } finally {
         isProcessingFrame = false;
       }
