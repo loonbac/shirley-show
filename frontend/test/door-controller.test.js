@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { inflateSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import vm from 'node:vm';
 import { setupDomEnvironment } from '../../tests/fake-dom.mjs';
 
 setupDomEnvironment();
@@ -10,6 +14,7 @@ const {
   isBarcodeDetectorSupported,
   isCameraSupported,
   getJsQR,
+  decodeFrameWithFallbacks,
   createCameraQrScanner,
 } = await import(pathToFileURL(scannerModulePath).href);
 
@@ -633,6 +638,148 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   assert.ok(sessionCounter.textContent.includes('Vendidas en esta sesión: 0'));
 
   controller.destroy();
+}
+
+// 12. DOOR-1b: Fallback decodifica un QR REAL como los del backend (round-trip).
+// Genera un PNG QR con payload hex de 32 (igual que codigo_qr), lo decodifica
+// con el vendor jsQR real de frontend/js/vendor/jsqr.min.js y exige el payload exacto.
+// Cubre además el pipeline del scanner: crop central + attemptBoth + downscale.
+{
+  // Cargar vendor oficial UMD en un sandbox con forma de navegador.
+  const vendorSrc = readFileSync(resolve(process.cwd(), 'frontend/js/vendor/jsqr.min.js'), 'utf8');
+  const sandboxModule = { exports: {} };
+  const sandbox = {
+    module: sandboxModule,
+    exports: sandboxModule.exports,
+    self: {},
+    console,
+  };
+  sandbox.window = sandbox.self;
+  vm.createContext(sandbox);
+  vm.runInContext(vendorSrc, sandbox, { filename: 'jsqr.min.js' });
+  const realJsQR =
+    (typeof sandbox.self.jsQR === 'function' && sandbox.self.jsQR) ||
+    (sandbox.module.exports && typeof sandbox.module.exports.default === 'function' && sandbox.module.exports.default) ||
+    (typeof sandbox.module.exports === 'function' && sandbox.module.exports);
+  assert.equal(typeof realJsQR, 'function', 'vendor jsqr.min.js debe exponer una función jsQR');
+
+  // getJsQR() del scanner debe resolver esta forma (incl. interop .default).
+  globalThis.jsQR = realJsQR;
+  globalThis.window.jsQR = realJsQR;
+  assert.equal(typeof getJsQR(), 'function', 'getJsQR debe resolver el vendor oficial');
+
+  const PAYLOAD = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+  // QR real vía qrcode+pngjs si están disponibles en /tmp (solo entorno de test).
+  let pngBytes = null;
+  try {
+    const genScript = [
+      "const QRCode = require('/tmp/node_modules/qrcode');",
+      `(async () => { const buf = await QRCode.toBuffer('${PAYLOAD}', { width: 400, margin: 2 }); process.stdout.write(buf.toString('base64')); })();`,
+    ].join('\n');
+    const b64 = execFileSync(process.execPath, ['-e', genScript], { encoding: 'utf8', timeout: 15000 }).trim();
+    pngBytes = Buffer.from(b64, 'base64');
+  } catch (err) {
+    assert.fail(`no se pudo generar QR real para round-trip: ${(err && err.message) || err}`);
+  }
+
+  // Parse mínimo de PNG 8-bit RGB/RGBA a RGBA contiguo.
+  function decodePngRgba(buf) {
+    let pos = 8;
+    let width = 0, height = 0, colorType = 0, bitDepth = 0;
+    const idat = [];
+    while (pos < buf.length) {
+      const len = buf.readUInt32BE(pos);
+      const type = buf.toString('ascii', pos + 4, pos + 8);
+      const data = buf.subarray(pos + 8, pos + 8 + len);
+      if (type === 'IHDR') {
+        width = data.readUInt32BE(0);
+        height = data.readUInt32BE(4);
+        bitDepth = data[8];
+        colorType = data[9];
+      } else if (type === 'IDAT') {
+        idat.push(data);
+      } else if (type === 'IEND') {
+        break;
+      }
+      pos += 12 + len;
+    }
+    assert.equal(bitDepth, 8, 'QR PNG debe ser 8-bit');
+    assert.ok(colorType === 2 || colorType === 6, 'QR PNG debe ser RGB o RGBA');
+    const inflated = inflateSync(Buffer.concat(idat));
+    const channels = colorType === 6 ? 4 : 3;
+    const stride = width * channels;
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    let p = 0;
+    let prev = Buffer.alloc(stride);
+    for (let y = 0; y < height; y++) {
+      const filter = inflated[p++];
+      const row = Buffer.from(inflated.subarray(p, p + stride));
+      p += stride;
+      const recon = Buffer.alloc(stride);
+      for (let i = 0; i < stride; i++) {
+        const a = i < channels ? 0 : recon[i - channels];
+        const b = prev[i];
+        const c = i < channels ? 0 : prev[i - channels];
+        let v = row[i];
+        if (filter === 1) v = (v + a) & 255;
+        else if (filter === 2) v = (v + b) & 255;
+        else if (filter === 3) v = (v + ((a + b) >> 1)) & 255;
+        else if (filter === 4) {
+          const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+          const pr = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+          v = (v + pr) & 255;
+        }
+        recon[i] = v;
+      }
+      for (let x = 0; x < width; x++) {
+        const o = (y * width + x) * 4;
+        if (channels === 4) {
+          rgba[o] = recon[x * 4]; rgba[o + 1] = recon[x * 4 + 1]; rgba[o + 2] = recon[x * 4 + 2]; rgba[o + 3] = recon[x * 4 + 3];
+        } else {
+          rgba[o] = recon[x * 3]; rgba[o + 1] = recon[x * 3 + 1]; rgba[o + 2] = recon[x * 3 + 2]; rgba[o + 3] = 255;
+        }
+      }
+      prev = recon;
+    }
+    return { rgba, width, height };
+  }
+
+  // El round-trip usa el pipeline REAL del scanner (decodeFrameWithFallbacks),
+  // no una copia: si el pipeline de producción cambia, este test lo sigue.
+  const { rgba, width, height } = decodePngRgba(pngBytes);
+
+  // 1. Frame limpio: decodificación exacta del payload.
+  const decoded = decodeFrameWithFallbacks(realJsQR, rgba, width, height);
+  assert.equal(decoded, PAYLOAD, 'round-trip: el fallback debe decodificar el QR real exacto');
+
+  // 1b. Errores del vendor se reportan vía onDecodeError (nunca silenciados).
+  let reported = 0;
+  const throwingJsQR = () => { throw new Error('vendor boom'); };
+  const decodedErr = decodeFrameWithFallbacks(throwingJsQR, rgba, width, height, {
+    onDecodeError: () => { reported++; },
+  });
+  assert.equal(decodedErr, null, 'vendor que lanza debe devolver null');
+  assert.ok(reported > 0, 'errores del vendor deben reportarse vía onDecodeError');
+
+  // 2. QR lejano: mismo QR de 160px centrado en frame 1280x720.
+  const FW = 1280, FH = 720;
+  const far = new Uint8ClampedArray(FW * FH * 4).fill(255);
+  const scale = 160 / width;
+  const sw = Math.floor(width * scale), sh = Math.floor(height * scale);
+  const ox = Math.floor((FW - sw) / 2), oy = Math.floor((FH - sh) / 2);
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const sx = Math.min(width - 1, Math.floor(x / scale)), sy = Math.min(height - 1, Math.floor(y / scale));
+      const si = (sy * width + sx) * 4, di = ((oy + y) * FW + (ox + x)) * 4;
+      far[di] = rgba[si]; far[di + 1] = rgba[si + 1]; far[di + 2] = rgba[si + 2]; far[di + 3] = 255;
+    }
+  }
+  const decodedFar = decodeFrameWithFallbacks(realJsQR, far, FW, FH);
+  assert.equal(decodedFar, PAYLOAD, 'round-trip lejano: el pipeline debe decodificar QR pequeño en frame grande');
+
+  delete globalThis.jsQR;
+  delete globalThis.window.jsQR;
 }
 
 console.log('Door Mode tests passed successfully.');

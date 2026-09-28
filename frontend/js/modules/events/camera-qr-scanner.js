@@ -34,16 +34,109 @@ export function isCameraSupported() {
 
 /**
  * Resolves the jsQR library from global scope if available.
+ * Prefiere la forma UMD oficial (`module.exports.default` interop); si el
+ * vendor actual es el build oficial, `window.jsQR` puede no ser función
+ * directa y hay que resolver `.default`.
  * @returns {((data: Uint8ClampedArray, width: number, height: number, options?: any) => any) | null}
  */
 export function getJsQR() {
-  if (typeof globalThis !== 'undefined' && typeof globalThis.jsQR === 'function') {
-    return globalThis.jsQR;
+  const candidates = [];
+  if (typeof globalThis !== 'undefined') {
+    candidates.push(globalThis.jsQR);
+    candidates.push(globalThis.jsqr);
   }
-  if (typeof window !== 'undefined' && typeof window.jsQR === 'function') {
-    return window.jsQR;
+  if (typeof window !== 'undefined') {
+    candidates.push(window.jsQR);
+    candidates.push(window.jsqr);
+  }
+  if (typeof self !== 'undefined' && typeof self.jsQR !== 'undefined') {
+    candidates.push(self.jsQR);
+  }
+  for (const c of candidates) {
+    if (typeof c === 'function') return c;
+    if (c && typeof c.default === 'function') return c.default;
   }
   return null;
+}
+
+/**
+ * Decodifica un frame RGBA probando frame completo, recorte central y
+ * mitad de resolución. Definida a nivel de módulo para que el loop de
+ * escaneo y los tests compartan el mismo pipeline (sin duplicación).
+ * @param {(data: Uint8ClampedArray, w: number, h: number, opts?: any) => any} jsQRFn
+   * @param {Uint8ClampedArray} data frame RGBA contiguo
+ * @param {number} width ancho del frame
+ * @param {number} height alto del frame
+ * @param {{ onDecodeError?: (err: unknown) => void }} [hooks={}] receptor de errores del vendor (reporta y sigue, nunca silencia)
+ * @returns {string|null} payload recortado o null si ningún intento decodifica
+ */
+export function decodeFrameWithFallbacks(jsQRFn, data, width, height, hooks = {}) {
+  const { onDecodeError = () => {} } = hooks;
+  if (typeof jsQRFn !== 'function' || !data || width <= 0 || height <= 0) return null;
+  // Full frame primero (QR cercano), luego centro recortado (QR lejano).
+  const attempts = [{ data, w: width, h: height }];
+  const cropFrac = 0.6;
+  if (width > 160 && height > 160) {
+    const cw = Math.floor(width * cropFrac);
+    const ch = Math.floor(height * cropFrac);
+    const ox = Math.floor((width - cw) / 2);
+    const oy = Math.floor((height - ch) / 2);
+    attempts.push({ data: cropCenter(data, width, height, ox, oy, cw, ch), w: cw, h: ch });
+  }
+  for (const a of attempts) {
+    let code = null;
+    try {
+      code = jsQRFn(a.data, a.w, a.h, { inversionAttempts: 'attemptBoth' });
+    } catch (err) {
+      onDecodeError(err);
+    }
+    if (!code) {
+      try {
+        code = downscaleDecode(jsQRFn, a.data, a.w, a.h);
+      } catch (err) {
+        onDecodeError(err);
+      }
+    }
+    if (code && code.data) {
+      const rawValue = String(code.data).trim();
+      if (rawValue) return rawValue;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extrae el rectángulo central (ox,oy,cw,ch) como buffer RGBA contiguo.
+ */
+export function cropCenter(data, width, height, ox, oy, cw, ch) {
+  const out = new Uint8ClampedArray(cw * ch * 4);
+  for (let y = 0; y < ch; y++) {
+    const srcStart = ((oy + y) * width + ox) * 4;
+    out.set(data.subarray(srcStart, srcStart + cw * 4), y * cw * 4);
+  }
+  return out;
+}
+
+/**
+ * Reintento a mitad de resolución para QR lejanos/pequeños.
+ * Devuelve el resultado de jsQR o null.
+ */
+export function downscaleDecode(jsQRFn, data, width, height) {
+  if (width < 320 || height < 320) return null;
+  const sw = Math.floor(width / 2);
+  const sh = Math.floor(height / 2);
+  const small = new Uint8ClampedArray(sw * sh * 4);
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < sw; x++) {
+      const si = ((y * 2) * width + x * 2) * 4;
+      const di = (y * sw + x) * 4;
+      small[di] = data[si];
+      small[di + 1] = data[si + 1];
+      small[di + 2] = data[si + 2];
+      small[di + 3] = data[si + 3];
+    }
+  }
+  return jsQRFn(small, sw, sh, { inversionAttempts: 'attemptBoth' });
 }
 
 /**
@@ -218,12 +311,11 @@ export function createCameraQrScanner(options) {
 
           const jsQR = getJsQR();
           if (jsQR) {
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-              inversionAttempts: 'dontInvert',
+            const decoded = decodeFrameWithFallbacks(jsQR, imageData.data, imageData.width, imageData.height, {
+              onDecodeError: (err) => console.warn('jsQR decode error:', err),
             });
-            if (code && code.data) {
-              const rawValue = String(code.data).trim();
-              handleScannedCode(rawValue);
+            if (decoded) {
+              handleScannedCode(decoded);
             }
           }
         }
