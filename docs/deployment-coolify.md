@@ -49,7 +49,7 @@ Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n /run/current-sys
 | Variable | Ejemplo | Notas |
 |---|---|---|
 | `CMD_API_KEY` | key de Command Code Provider API | Requerida. Guarda como secreto. |
-| `CMD_MODEL` | `xiaomi/mimo-v2.6-pro` | Opcional (por defecto MiMo V2.6 Pro). |
+| `CMD_MODEL` | `stealth/space-bunny-alpha` | Opcional (por defecto Space Bunny Alpha). |
 | `CMD_BASE_URL` | `https://api.commandcode.ai/provider/v1` | Opcional. |
 | `GROQ_API_KEY` / `GROQ_MODEL` | `gsk_...` | Opcional, solo como fallback. |
 | `JOSHUA_PC_HOST` | `100.73.247.39` | Vacío = modo local (sin GPU remota). |

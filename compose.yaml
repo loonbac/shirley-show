@@ -15,7 +15,7 @@ services:
       - SHIRLEY_DATA_DIR=/app/data
       - SHIRLEY_FRONTEND_DIR=/app/frontend
       - CMD_API_KEY=${CMD_API_KEY:?CMD_API_KEY requerida}
-      - CMD_MODEL=${CMD_MODEL:-xiaomi/mimo-v2.6-pro}
+      - CMD_MODEL=${CMD_MODEL:-stealth/space-bunny-alpha}
       - CMD_BASE_URL=${CMD_BASE_URL:-https://api.commandcode.ai/provider/v1}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-120b}

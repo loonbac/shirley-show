@@ -6,7 +6,7 @@ use std::time::Duration;
 pub const DEFAULT_GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
 pub const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
 pub const DEFAULT_COMMAND_CODE_BASE_URL: &str = "https://api.commandcode.ai/provider/v1";
-pub const DEFAULT_COMMAND_CODE_MODEL: &str = "xiaomi/mimo-v2.6-pro";
+pub const DEFAULT_COMMAND_CODE_MODEL: &str = "stealth/space-bunny-alpha";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LlmProviderKind {
