@@ -34,20 +34,23 @@ memory = "1g"                        # opcional; ver §5
 
 volumes = [
   "/srv/shirley/data:/app/data",
-  "/srv/shirley/secrets/id_ed25519:/home/shirley/.ssh/id_ed25519:ro",
+  "/srv/shirley/secrets/colab-token.json:/home/shirley/.config/colab/token.json",
 ]
 ```
 
-Dos advertencias sobre los volúmenes:
+Tres advertencias sobre los volúmenes:
 
 - **El directorio del host debe existir y pertenecer a UID 1000.** Docker crea
   el directorio faltante como root y entonces la app no puede escribir. Créalo
   antes con `install -d -o 1000 -g 1000 /srv/shirley/data`.
-- **La clave SSH tiene que ser un archivo, no un directorio.** Si
-  `/srv/shirley/secrets/id_ed25519` no existe, Docker crea un *directorio* en esa
-  ruta y el contenedor arranca con una clave inservible; el fallo aparece recién
-  al separar voces. Si no vas a usar la PC remota, elimina esa línea del TOML y
-  deja `JOSHUA_PC_HOST` vacío.
+- **El token de Colab tiene que ser un archivo, no un directorio.** Si
+  `/srv/shirley/secrets/colab-token.json` no existe, Docker crea un *directorio*
+  en esa ruta y el contenedor arranca con un token inservible; el fallo aparece
+  recién al separar voces, con `colab_token_missing`.
+- **El token se monta sin `:ro`.** `colab` reescribe ese archivo cuando refresca
+  el `access_token` caducado. Con un montaje de solo lectura, la separación
+  funciona una hora y después falla. El archivo del host debe pertenecer a UID
+  1000 para que el contenedor pueda escribir en él.
 
 ## 3. Variables de entorno
 
@@ -59,7 +62,10 @@ El panel escribe `/srv/panel/projects/<id>.env` (modo 0600) y lo pasa con
 | `CMD_API_KEY` | key de Command Code | Ressy responde "no configurado"; el resto funciona |
 | `CMD_MODEL` | `stealth/space-bunny-alpha` | usa el valor por defecto |
 | `SHIRLEY_PUBLIC_BASE_URL` | `https://shirley.example.com` | **el enlace del ticket sale relativo** y el comprador no puede abrirlo |
-| `JOSHUA_PC_HOST` | `100.73.247.39` | separación vocal local, sin GPU remota |
+| `SHIRLEY_COLAB_TOKEN` | `/home/shirley/.config/colab/token.json` | ya viene del Dockerfile; cámbialo solo si montas el token en otra ruta |
+| `SHIRLEY_COLAB_GPU` | `g4` | usa el valor por defecto (RTX PRO 6000, 102 GB) |
+| `SHIRLEY_COLAB_OVERLAP` | `12` | usa el valor por defecto; bajarlo acelera y baja calidad |
+| `SHIRLEY_COLAB_TIMEOUT_SECS` | `1800` | usa el valor por defecto |
 | `SHIRLEY_DATA_DIR` | `/app/data` | ya viene del Dockerfile; no lo cambies |
 | `SHIRLEY_BIND` | `0.0.0.0:3001` | ya viene del Dockerfile; no lo cambies |
 
@@ -100,7 +106,7 @@ docker run -d --name prueba --restart unless-stopped \
   --memory 1g \
   --env-file /srv/panel/projects/app-shir.env \
   -v /srv/shirley/data:/app/data \
-  -v /srv/shirley/secrets/id_ed25519:/home/shirley/.ssh/id_ed25519:ro \
+  -v /srv/shirley/secrets/colab-token.json:/home/shirley/.config/colab/token.json \
   -p 127.0.0.1:65529:3001 \
   panel-app-shir:latest
 
@@ -117,17 +123,48 @@ coincide con el real.
 
 - Que la app responda: el estado es `docker inspect .State.Status`, no un healthcheck.
 - Que el enlace del ticket funcione: depende de `SHIRLEY_PUBLIC_BASE_URL`.
-- Que la separación vocal remota funcione: depende de Tailscale y de la clave SSH.
+- Que la separación vocal remota funcione: depende del token de Colab y de que
+  la cuota de la cuenta siga disponible.
 - Que los datos sobrevivan: haz un segundo despliegue y comprueba que los shows
   siguen ahí. Un dato escrito dentro del contenedor se pierde.
 
-## 8. Red hacia la PC de Joshua
+## 8. Token de Colab
 
-El contenedor sale a `tailscale0` del host por NAT de Docker. No requiere
-`network_mode: host`; basta con que el host tenga Tailscale arriba y alcance
-`100.73.247.39`. Para diagnosticarlo desde el contenedor:
+La separación vocal enciende una GPU en Google Colab, la usa y la apaga. El
+contenedor solo necesita un token OAuth válido; el tráfico sale por la red
+normal del host.
+
+**De dónde sale el token.** En la máquina donde ejecutaste `colab login` una vez,
+el CLI guarda el token en `~/.config/colab/token.json`:
 
 ```sh
-docker exec -it panel-app-shir ssh -i /home/shirley/.ssh/id_ed25519 \
-  -o BatchMode=yes loonbac@100.73.247.39 true && echo OK
+# en tu máquina
+colab quota        # si responde, el token sirve
+ls -l ~/.config/colab/token.json
 ```
+
+**Cómo llevarlo al servidor.** Cópialo y dale el propietario del contenedor:
+
+```sh
+# en el servidor
+install -d -m 700 /srv/shirley/secrets
+scp tu-usuario@tu-maquina:~/.config/colab/token.json /tmp/colab-token.json
+install -o 1000 -g 1000 -m 600 /tmp/colab-token.json /srv/shirley/secrets/colab-token.json
+rm /tmp/colab-token.json
+chown 1000:1000 /srv/shirley/secrets/colab-token.json
+```
+
+**Cómo comprobarlo desde el contenedor:**
+
+```sh
+docker exec -it panel-app-shir colab quota
+```
+
+Si responde con tu cuota, la separación funcionará. Si dice que no hay token,
+revisa la ruta: el contenedor lo busca en `/home/shirley/.config/colab/token.json`
+y el usuario del contenedor es `shirley` (UID 1000).
+
+**El token caduca y se renueva solo.** `access_token` dura una hora; `colab`
+lo refresca con el `refresh_token` y reescribe el archivo. Por eso el montaje es
+de lectura-escritura. Si el archivo del host es de `root`, el refresco falla con
+un error de permisos que la app reporta como `colab_unavailable`.

@@ -42,14 +42,13 @@ services:
       - SHIRLEY_COLAB_TIMEOUT_SECS=${SHIRLEY_COLAB_TIMEOUT_SECS:-1800}
     volumes:
       - shirley-data:/app/data
-      # SSH private key (ed25519, chmod 600, owned by UID 1000). Never commit it.
-      # The host path must exist and be a file: if it is missing, Docker creates a
-      # DIRECTORY and the container starts with an unusable key.
-      - ${SSH_KEY_HOST_PATH:-/opt/shirley/secrets/id_ed25519}:/home/shirley/.ssh/id_ed25519:ro
       # Colab OAuth token (JSON with access_token, refresh_token and expiry).
-      # Same trap: a missing host path becomes a directory and the container
-      # starts with an unusable token.
-      - ${COLAB_TOKEN_HOST_PATH:-/opt/shirley/secrets/colab-token.json}:/home/shirley/.config/colab/token.json:ro
+      # Mounted read-write on purpose: colab-cli rewrites this file when it
+      # refreshes an expired access_token, and a read-only mount makes every
+      # separation fail once the hour is up.
+      # The host path must exist and be a file: if it is missing, Docker creates
+      # a DIRECTORY and the container starts with an unusable token.
+      - ${COLAB_TOKEN_HOST_PATH:-/opt/shirley/secrets/colab-token.json}:/home/shirley/.config/colab/token.json
 
 volumes:
   shirley-data:
