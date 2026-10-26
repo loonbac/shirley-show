@@ -78,7 +78,7 @@ export function formatCameraErrorMessage(err) {
  *     message?: string,
  *   } | null,
  *   isSubmittingSell?: boolean,
- *   onSubmitCode: (code: string) => Promise<void> | void,
+ *   onSubmitCode: (code: string) => Promise<void> | void,  // called with the scanned 32-hex secret
  *   onToggleCamera?: () => void,
  *   onBack?: () => void,
  *   onTabChange?: (tab: 'scan' | 'sell') => void,
@@ -87,8 +87,6 @@ export function formatCameraErrorMessage(err) {
  * @returns {{
  *   el: HTMLElement,
  *   videoEl: HTMLVideoElement,
- *   focusInput: () => void,
- *   clearInput: () => void,
  *   update: (newState: any) => void,
  *   destroy: () => void,
  * }}
@@ -125,33 +123,6 @@ export function createDoorView(props) {
     muted: 'true',
     playsinline: 'true',
   });
-
-  const manualInput = createElement('input', {
-    type: 'text',
-    class: 'door-manual-input',
-    placeholder: 'Código QR (32 hex) o escanear...',
-    autocomplete: 'off',
-    autocapitalize: 'none',
-    spellcheck: 'false',
-  });
-  manualInput.value = '';
-
-  let manualFallbackOpen = false;
-
-  function focusInput() {
-    if (state.activeTab !== 'scan') return;
-    if (state.isCameraActive) return;
-    if (!manualFallbackOpen) return;
-    setTimeout(() => {
-      try {
-        manualInput.focus();
-      } catch {}
-    }, 50);
-  }
-
-  function clearInput() {
-    manualInput.value = '';
-  }
 
   function render() {
     container.innerHTML = '';
@@ -199,7 +170,6 @@ export function createDoorView(props) {
           state.activeTab = 'scan';
           if (typeof onTabChange === 'function') onTabChange('scan');
           render();
-          focusInput();
         }
       },
     }, ['Escanear']);
@@ -295,42 +265,13 @@ export function createDoorView(props) {
       scanPane.appendChild(cameraSection);
     }
 
-    // Manual Input Form (ALWAYS in scanPane)
-    const submitBtn = createButton({
-      text: 'Validar Código',
-      variant: 'primary',
-      type: 'submit',
-    });
-    submitBtn.el.classList.add('door-submit-btn');
-
-    const formEl = createElement('form', { class: 'door-manual-form' }, [
-      manualInput,
-      submitBtn.el,
-    ]);
-
-    formEl.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const code = manualInput.value.trim();
-      if (!code) return;
-      await onSubmitCode(code);
-    });
-
-    const manualSummary = createElement('summary', { class: 'door-manual-fallback-summary' }, [
-      '⌨️ Ingreso manual (solo si la cámara falla)',
-    ]);
-
-    const manualSection = createElement('div', { class: 'door-manual-section' }, [
-      formEl,
-    ]);
-    const manualFallback = createElement('details', { class: 'door-manual-fallback' }, [
-      manualSummary,
-      manualSection,
-    ]);
-    manualFallback.addEventListener('toggle', () => {
-      manualFallbackOpen = Boolean(manualFallback.open);
-      if (manualFallbackOpen) focusInput();
-    });
-    scanPane.appendChild(manualFallback);
+    // Check-in happens only by scanning the QR. There is no manual code entry:
+    // typing a short prefix would turn the 128-bit secret into a guessable code.
+    scanPane.appendChild(
+      createElement('p', { class: 'door-scan-hint' }, [
+        'Apunta la cámara al código QR de la entrada.',
+      ])
+    );
 
     // Build Sell Pane
     const sellPane = createElement('div', {
@@ -567,14 +508,10 @@ export function createDoorView(props) {
   }
 
   render();
-  focusInput();
 
   function update(newState) {
     state = { ...state, ...newState };
     render();
-    if (state.activeTab === 'scan') {
-      focusInput();
-    }
   }
 
   function destroy() {
@@ -584,8 +521,6 @@ export function createDoorView(props) {
   return {
     el: container,
     videoEl,
-    focusInput,
-    clearInput,
     update,
     destroy,
   };
@@ -602,6 +537,7 @@ export function createDoorView(props) {
  * @returns {{
  *   headerEl: HTMLElement | null,
  *   viewEl: HTMLElement,
+ *   submitCode: (code: string) => Promise<void>,
  *   destroy: () => void,
  * }}
  */
@@ -715,9 +651,24 @@ export function createDoorController(deps = {}) {
 
   async function handleSubmitCode(code) {
     if (!code) return;
+    const trimmed = String(code).trim();
+    if (!trimmed) return;
 
+    // Only the full 32-hex QR secret reaches the backend. Anything else is
+    // rejected locally so the operator sees it immediately.
+    if (!/^[0-9a-fA-F]{32}$/.test(trimmed)) {
+      view.update({
+        result: { resultado: 'Invalida', motivo: 'Formato de código inválido' },
+      });
+      return;
+    }
+
+    await submitCheckin(trimmed);
+  }
+
+  async function submitCheckin(secret) {
     try {
-      const result = await api.checkInTicket(eventId, code);
+      const result = await api.checkInTicket(eventId, secret);
       view.update({ result });
     } catch (err) {
       view.update({
@@ -726,9 +677,6 @@ export function createDoorController(deps = {}) {
           motivo: (err && err.message) || 'Error de conexión',
         },
       });
-    } finally {
-      view.clearInput();
-      view.focusInput();
     }
   }
 
@@ -787,6 +735,9 @@ export function createDoorController(deps = {}) {
   return {
     headerEl: null,
     viewEl: view.el,
+    // Entry point for a decoded QR. The camera scanner calls it, and so does
+    // the test suite; the only accepted value is the full 32-hex secret.
+    submitCode: handleSubmitCode,
     destroy,
   };
 }

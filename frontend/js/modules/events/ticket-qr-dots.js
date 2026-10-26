@@ -863,7 +863,7 @@ export function construir(valor) {
   const { size, dark } = generarMatriz(valor);
   const lienzo = size + MARGEN * 2;
 
-  const logoMods = Math.round(size * 0.5);
+  const logoMods = Math.round(size * 0.25);
   const desde = Math.floor((size - logoMods) / 2);
 
   // Dibujamos todas las notas excluyendo únicamente las esquinas de detección

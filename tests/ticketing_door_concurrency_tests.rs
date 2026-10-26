@@ -190,6 +190,48 @@ fn test_checkin_validation_outcomes_and_security_rules() {
         }
         other => panic!("second checkin must be Ya Usada, got: {:?}", other),
     }
+
+    // Case 7: Check-in by valid 8-hex prefix of an unused ticket
+    let short_ticket_2 = sell_tickets
+        .execute(SellTicketsInput {
+            evento_id: event1_id.clone(),
+            interesado_id: None,
+            nombre_comprador: "Carlos Paz".to_string(),
+            contacto: "922333444".to_string(),
+            tipo_entrada: "General".to_string(),
+            cantidad: 1,
+            medio_pago: PaymentMethod::Yape,
+            estado_pago: PaymentStatus::Pagado,
+        })
+        .unwrap()
+        .remove(0);
+
+    // R1-001: the 8-hex prefix is not a credential. Accepting it would cut the
+    // 128-bit secret down to a guessable 32-bit code, so it must be rejected.
+    let prefix_8 = short_ticket_2.codigo_qr.as_str()[0..8].to_uppercase();
+    match checkin.execute(&event1_id, &prefix_8).unwrap() {
+        CheckInOutcome::Invalida { motivo } => {
+            assert!(
+                motivo.to_lowercase().contains("formato"),
+                "expected a format rejection, got: {motivo}"
+            );
+        }
+        other => panic!("8-hex prefix must be Invalida, got: {:?}", other),
+    }
+
+    // Case 8: the rejected prefix must not consume the entry, so the same
+    // ticket still checks in with its full secret.
+    match checkin.execute(&event1_id, short_ticket_2.codigo_qr.as_str()).unwrap() {
+        CheckInOutcome::Valida {
+            nombre_comprador,
+            tipo_entrada,
+            ..
+        } => {
+            assert_eq!(nombre_comprador, "Carlos Paz");
+            assert_eq!(tipo_entrada, "General");
+        }
+        other => panic!("full secret must check in, got: {:?}", other),
+    }
 }
 
 #[test]
