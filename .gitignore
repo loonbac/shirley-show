@@ -9,3 +9,7 @@ data/
 production-data/
 secrets/*
 !secrets/.gitkeep
+
+# Python bytecode
+__pycache__/
+*.pyc
