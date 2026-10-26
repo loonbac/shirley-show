@@ -630,7 +630,7 @@ exit 0
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
-async fn test_app_state_selects_vocal_separator_based_on_joshua_pc_host() {
+async fn test_app_state_always_selects_the_colab_separator() {
     let _lock = ENV_MUTEX.lock().unwrap();
 
     let pool = shirley_show::infra::sqlite::init_pool(":memory:").unwrap();
@@ -643,26 +643,39 @@ async fn test_app_state_selects_vocal_separator_based_on_joshua_pc_host() {
         timeout: Duration::from_secs(5),
     };
 
-    // 1. When JOSHUA_PC_HOST is unset -> ProcessVocalSeparator is selected
+    // S1: separation always runs on Colab, so the Joshua PC variable no longer
+    // selects a different backend. Both states must be remote and must fail the
+    // same way; an SSH key is never consulted any more.
     remove_env("JOSHUA_PC_HOST");
-    let state_local = shirley_show::state::AppState::new(pool.clone());
-    let err_local = state_local
+    let state_without = shirley_show::state::AppState::new(pool.clone());
+    assert!(
+        state_without.vocal_separator.is_remote(),
+        "the backend must be remote even without JOSHUA_PC_HOST"
+    );
+    let err_without = state_without
         .vocal_separator
         .separate(req.clone())
         .await
         .unwrap_err();
-    assert_eq!(err_local.code(), "invalid_audio_duration");
 
-    // 2. When JOSHUA_PC_HOST is set -> SshVocalSeparator is selected
     set_env("JOSHUA_PC_HOST", "100.73.247.39");
     set_env("JOSHUA_PC_SSH_KEY", "/nonexistent/id_ed25519");
-    let state_remote = shirley_show::state::AppState::new(pool);
-    let err_remote = state_remote
+    let state_with = shirley_show::state::AppState::new(pool);
+    assert!(
+        state_with.vocal_separator.is_remote(),
+        "the backend must be remote with JOSHUA_PC_HOST set too"
+    );
+    let err_with = state_with
         .vocal_separator
         .separate(req)
         .await
         .unwrap_err();
-    assert_eq!(err_remote.code(), "ssh_key_missing");
+
+    assert_eq!(
+        err_without.code(),
+        err_with.code(),
+        "JOSHUA_PC_HOST must not change which backend answers"
+    );
 
     remove_env("JOSHUA_PC_HOST");
     remove_env("JOSHUA_PC_SSH_KEY");
