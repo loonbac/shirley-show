@@ -33,6 +33,26 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 0. GPU watchdog. Only the client can send "colab stop", so a SIGKILL, an OOM
+# or a lost connection would leave the GPU allocated with nobody holding the
+# handle. This arms a watchdog inside the runtime that kills this kernel, which
+# makes Colab release the session. On the happy path the client stops the
+# session first and the whole runtime dies, so the watchdog never fires.
+WATCHDOG_ABSOLUTE_SECS = 3000   # hard ceiling for a hung separation
+WATCHDOG_GRACE_SECS = 300       # after the result is uploaded
+
+def _arm_watchdog(seconds):
+    try:
+        subprocess.Popen(
+            ["setsid", "sh", "-c", f"sleep {{seconds}}; kill -9 {{os.getpid()}}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+_arm_watchdog(WATCHDOG_ABSOLUTE_SECS)
+
 # 1. Install dependencies only if import fails
 try:
     import audio_separator
@@ -195,6 +215,11 @@ payload = {{
     "size": size_bytes
 }}
 print(json.dumps(payload))
+sys.stdout.flush()
+
+# 9. The result is already uploaded. If the client never confirms the stop,
+# free the GPU anyway once the grace period expires.
+_arm_watchdog(WATCHDOG_GRACE_SECS)
 "#
     )
 }
@@ -228,6 +253,10 @@ mod tests {
         assert!(script.contains("320k"));
         assert!(script.contains("litterbox.catbox.moe"));
         assert!(script.contains("json.dumps(payload)"));
+        // S2: a client crash must not leave the GPU allocated.
+        assert!(script.contains("_arm_watchdog(WATCHDOG_ABSOLUTE_SECS)"));
+        assert!(script.contains("_arm_watchdog(WATCHDOG_GRACE_SECS)"));
+        assert!(script.contains("kill -9"));
     }
 
     #[test]
@@ -245,6 +274,40 @@ mod tests {
         assert!(script.contains("PASSWORD = \"pass_coros\""));
         for m in COROS_MODELS {
             assert!(script.contains(m));
+        }
+    }
+
+    #[test]
+    fn test_generated_script_is_valid_python() {
+        let script = generate_remote_script(
+            VocalSeparationMode::Instrumental,
+            &INSTRUMENTAL_MODELS,
+            12,
+            "pw",
+            "/content/in.wav",
+        );
+        // The runtime script is Python: a template typo must fail here instead of
+        // on a paid GPU, after the session has already started.
+        let path = std::env::temp_dir().join(format!(
+            "colab_remote_script_{}.py",
+            std::process::id()
+        ));
+        std::fs::write(&path, &script).unwrap();
+
+        let output = std::process::Command::new("python3")
+            .args(["-m", "py_compile"])
+            .arg(&path)
+            .output();
+
+        let _ = std::fs::remove_file(&path);
+
+        match output {
+            Ok(o) => assert!(
+                o.status.success(),
+                "generated script is not valid Python: {}",
+                String::from_utf8_lossy(&o.stderr)
+            ),
+            Err(_) => eprintln!("skipping: python3 is not available"),
         }
     }
 }
