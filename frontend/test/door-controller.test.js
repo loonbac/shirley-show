@@ -104,7 +104,15 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   // Initial Idle State
   const idleBanner = view.el.querySelector('.door-banner-idle');
   assert.ok(idleBanner, 'Initial state must render idle banner');
-  assert.ok(view.el.querySelector('.door-manual-input'), 'Manual input MUST always be present');
+  assert.equal(
+    view.el.querySelector('.door-manual-input'),
+    null,
+    'Manual code input must not exist: check-in is scan-only'
+  );
+  assert.ok(
+    view.el.querySelector('.door-scan-hint'),
+    'A hint telling the operator to scan must be rendered'
+  );
 
   // Outcome 1: Valida (Green banner)
   view.update({
@@ -181,18 +189,29 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
 
   assert.ok(controller.viewEl, 'Controller provides viewEl');
 
-  // Submit code through form
-  const input = controller.viewEl.querySelector('.door-manual-input');
-  input.value = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
-
-  const form = controller.viewEl.querySelector('form');
-  form.dispatchEvent(new Event('submit'));
-
+  // The decoded QR is the only entry point: there is no manual form any more.
+  await controller.submitCode('a1b2c3d4e5f60718293a4b5c6d7e8f90');
   await new Promise((r) => setTimeout(r, 20));
 
   assert.equal(checkedEventId, 'evt-door-123');
   assert.equal(checkedCode, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
   assert.ok(controller.viewEl.textContent.includes('Mateo Quispe'));
+
+  // R1-001: an 8-hex prefix is not a credential and must never reach the API.
+  let shortCheckedCode = null;
+  mockApi.checkInTicket = async (eventId, codigo) => {
+    shortCheckedCode = codigo;
+    return { resultado: 'Valida' };
+  };
+
+  await controller.submitCode('611D26D0');
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(shortCheckedCode, null, '8-hex code must never reach checkInTicket');
+  assert.ok(
+    controller.viewEl.textContent.includes('Formato de código inválido'),
+    '8-hex code must be rejected locally'
+  );
 
   controller.destroy();
 }
@@ -707,17 +726,21 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
 
   const PAYLOAD = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
-  // QR real vía qrcode+pngjs si están disponibles en /tmp (solo entorno de test).
+  // Real QR via qrcode+pngjs, resolved from the project's own pnpm store.
+  // Run "pnpm install" once; the lockfile pins exact versions and integrity.
   let pngBytes = null;
   try {
     const genScript = [
-      "const QRCode = require('/tmp/node_modules/qrcode');",
+      "const QRCode = require('qrcode');",
       `(async () => { const buf = await QRCode.toBuffer('${PAYLOAD}', { width: 400, margin: 2 }); process.stdout.write(buf.toString('base64')); })();`,
     ].join('\n');
     const b64 = execFileSync(process.execPath, ['-e', genScript], { encoding: 'utf8', timeout: 15000 }).trim();
     pngBytes = Buffer.from(b64, 'base64');
   } catch (err) {
-    assert.fail(`no se pudo generar QR real para round-trip: ${(err && err.message) || err}`);
+    assert.fail(
+      `no se pudo generar QR real para round-trip: ${(err && err.message) || err}. ` +
+        'Ejecuta "pnpm install" en la raíz del repositorio.'
+    );
   }
 
   // Parse mínimo de PNG 8-bit RGB/RGBA a RGBA contiguo.

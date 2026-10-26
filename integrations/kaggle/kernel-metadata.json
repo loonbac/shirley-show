@@ -1,0 +1,14 @@
+{
+  "id": "TU_USUARIO_KAGGLE/shirley-separar",
+  "title": "Shirley Show - separacion de voces",
+  "code_file": "separar.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": ["TU_USUARIO_KAGGLE/shirley-audio"],
+  "kernel_sources": [],
+  "competition_sources": []
+}

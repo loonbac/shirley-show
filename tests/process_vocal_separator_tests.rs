@@ -14,6 +14,24 @@ use shirley_show::ports::vocal_separator::{
     VocalSeparationError, VocalSeparationRequest, VocalSeparator,
 };
 
+/// The local PolarFormer backend is retired from production (separation now runs
+/// on Colab). Its tests need the real model artifacts in $HOME, so hosts without
+/// them skip instead of failing: a missing artifact is an environment fact, not
+/// a regression.
+macro_rules! require_polarformer_artifacts {
+    () => {
+        let installed = ProcessVocalSeparatorConfig::contractual_polarformer_paths()
+            .and_then(|(ckpt, conf)| {
+                ProcessVocalSeparatorConfig::validate_polarformer_artifacts_at(&ckpt, &conf)
+            })
+            .is_ok();
+        if !installed {
+            eprintln!("skipping: PolarFormer artifacts are not installed on this host");
+            return;
+        }
+    };
+}
+
 fn create_executable_script(dir: &Path, name: &str, content: &str) -> PathBuf {
     let path = dir.join(name);
     {
@@ -243,6 +261,7 @@ async fn test_ffprobe_duration_invalid_before_gpu() {
 
 #[tokio::test]
 async fn test_polarformer_real_artifacts_pass_preflight_by_opening() {
+    require_polarformer_artifacts!();
     let env = TestSeparatorEnv::new();
     let (vocal_sep_bin, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
     let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
@@ -300,6 +319,7 @@ fn test_polarformer_artifacts_pure_validation_detects_missing_or_unreadable() {
 
 #[test]
 fn test_polarformer_env_overrides_ignored_by_config() {
+    require_polarformer_artifacts!();
     // Set fake override env vars that do not match the real wrapper paths
     unsafe {
         std::env::set_var("POLARFORMER_CHECKPOINT", "/nonexistent/fake.ckpt");
@@ -386,6 +406,7 @@ async fn test_coros_sequential_models_and_resolve_stem_excluding_vocal() {
 
 #[tokio::test]
 async fn test_instrumental_polarformer_success() {
+    require_polarformer_artifacts!();
     let env = TestSeparatorEnv::new();
     let (vocal_sep_bin, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
     let config = env.make_config(vocal_sep_bin, ffprobe_bin, ffmpeg_bin);
@@ -1188,6 +1209,7 @@ exit 0
 
 #[tokio::test]
 async fn test_two_concurrent_separations_serialized_without_vram_overlap() {
+    require_polarformer_artifacts!();
     let env = TestSeparatorEnv::new();
     let (_, ffprobe_bin, ffmpeg_bin) = env.setup_default_stubs();
 

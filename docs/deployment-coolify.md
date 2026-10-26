@@ -57,18 +57,27 @@ Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n /run/current-sys
 | `JOSHUA_PC_SSH_KEY` | `/home/shirley/.ssh/id_ed25519` | Ruta **dentro** del contenedor. |
 | `SSH_KEY_HOST_PATH` | `/opt/shirley/secrets/id_ed25519` | Ruta en el **host**. |
 | `JOSHUA_PC_WAKE_TIMEOUT_MINS` | `10` | Espera a que enciendan la PC. |
-| `JOSHUA_PC_IDLE_SHUTDOWN_MINS` | `60` | Apagado tras inactividad. |
+| `SHIRLEY_PUBLIC_BASE_URL` | `https://shirley.example.com` | Base del enlace del ticket que se envía por WhatsApp. Sin ella el enlace sale relativo y el comprador no puede abrirlo. |
 
-## 5. Red: `network_mode: host` y alternativas
+> `JOSHUA_PC_IDLE_SHUTDOWN_MINS` ya **no** existe: el código nunca la leyó. El
+> apagado por inactividad lo programa la propia app tras cada separación exitosa,
+> y el tiempo lo fija `JOSHUA_PC_WAKE_TIMEOUT_MINS` como margen de espera.
 
-El `compose.yaml` usa `network_mode: host` para alcanzar `tailscale0` sin NAT.
-Si Coolify/Traefik lo impide:
+## 5. Red: bridge con publicación en loopback
 
-- **Bridge + forwarding**: `sysctl -w net.ipv4.ip_forward=1` e iptables
-  MASQUERADE entre `docker0` y `tailscale0` (ver wiki de Tailscale + Docker).
+El `compose.yaml` usa **bridge** y publica `127.0.0.1:65529:3001`. El contenedor
+sale a `tailscale0` del host por NAT de Docker, que es el caso normal y no
+necesita nada extra.
+
+Si el contenedor no alcanza `100.73.247.39`:
+
+- **Verifica primero el host**: `ssh loonbac@100.73.247.39 true` desde el servidor.
+  Si el host no llega, el contenedor tampoco.
+- **Forwarding**: `sysctl -w net.ipv4.ip_forward=1` e iptables MASQUERADE entre
+  `docker0` y `tailscale0` (ver wiki de Tailscale + Docker).
 - **Sidecar**: añade `tailscale/tailscale` con `TS_AUTHKEY` y usa
-  `network_mode: service:tailscale` (requiere quitar `network_mode: host`
-  y exponer el puerto 3000 por el sidecar).
+  `network_mode: service:tailscale` en el servicio de la app. El sidecar debe
+  publicar el puerto, no la app.
 
 ## 6. Proxy y timeouts largos
 
@@ -83,8 +92,14 @@ docker compose up -d --build
 curl http://127.0.0.1:65529/api/presentations
 ```
 
-Datos en el volumen `shirley-data` (`/app/data`: SQLite + audios).
+Datos en el volumen `shirley-data` (`/app/data`: SQLite, audios, posters).
 Healthcheck: `GET /api/presentations`.
+
+El puerto publicado es **65529** en el host hacia **3001** dentro del contenedor.
+El 3100 de `.env.example` es el valor de desarrollo local, no el del contenedor.
+
+Para desplegar con **koro-panel** en lugar de Compose, ver
+`docs/deployment-koro-panel.md`.
 
 ## 8. Sin GPU remota
 

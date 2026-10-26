@@ -458,17 +458,20 @@ impl TicketingTransactions for SqliteTicketingRepository {
         now: &str,
     ) -> Result<CheckInOutcome, AppError> {
         let trimmed = codigo_qr.trim();
+        // The scanned QR secret is the only credential, and it is 128 bits wide.
+        // Accepting a shorter prefix would reduce it to a guessable 32-bit code.
         if trimmed.len() != 32 || !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
             return Ok(CheckInOutcome::Invalida {
                 motivo: "Formato de código inválido".to_string(),
             });
         }
-        let normalized_qr = trimmed.to_ascii_lowercase();
 
         let mut conn = self.pool.get().map_err(db_err)?;
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(db_err)?;
+
+        let normalized_qr = trimmed.to_ascii_lowercase();
 
         // Conditional atomic update
         let rows_affected = tx
