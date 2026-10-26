@@ -76,9 +76,17 @@ def is_target_stem(label):
     # '(Instrumental)', '(no_vocals)', or '(accompaniment)', while vocals are '(Vocals)' or '(Lead Vocal)'.
     if not label:
         return False
+    # Check the explicit non-vocal names first: "(no_vocals)" contains the
+    # substring "vocal" and would otherwise be classified as a vocal stem.
+    if label in ("no_vocals", "accompaniment"):
+        return True
     if "vocal" in label:
         return False
-    return "instrumental" in label or label == "no_vocals" or label == "accompaniment"
+    return "instrumental" in label
+
+def is_vocal_stem(label):
+    # "(no_vocals)" is an instrumental label, not a vocal one.
+    return "vocal" in label and label != "no_vocals"
 
 work_dir = Path("/content/colab_sep_work")
 work_dir.mkdir(parents=True, exist_ok=True)
@@ -106,7 +114,7 @@ for i, model in enumerate(MODELS, 1):
     targets = [w for w in wavs if is_target_stem(get_parenthetical_label(w))]
     if len(targets) != 1:
         # Fallback if label is slightly different but still contains no vocal inside parentheses
-        targets = [w for w in wavs if "vocal" not in get_parenthetical_label(w)]
+        targets = [w for w in wavs if not is_vocal_stem(get_parenthetical_label(w))]
     if len(targets) != 1:
         raise RuntimeError(f"Unexpected stems for {{model}}: {{[w.name for w in wavs]}}")
     stems.append(targets[0])

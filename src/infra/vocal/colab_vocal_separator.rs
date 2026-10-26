@@ -187,10 +187,27 @@ impl ColabVocalSeparator {
         Ok(hash.to_lowercase())
     }
 
-    async fn stop_session(&self, session_id: &str) {
+    /// Stops the session and reports whether the shutdown was confirmed.
+    async fn stop_session(&self, session_id: &str) -> bool {
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
         cmd.args(["stop", "--session", session_id]);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+        matches!(
+            tokio::time::timeout(Duration::from_secs(30), cmd.status()).await,
+            Ok(Ok(status)) if status.success()
+        )
+    }
+
+    /// Stops every runtime owned by this account. Used when `colab start`
+    /// succeeded but we could not identify the session it created: the GPU is
+    /// already allocated, so it must be released before returning an error.
+    async fn stop_all_sessions(&self) {
+        let mut cmd = Command::new(&self.config.colab_bin);
+        cmd.kill_on_drop(true);
+        cmd.args(["stop"]);
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::null());
@@ -515,13 +532,21 @@ impl VocalSeparator for ColabVocalSeparator {
                 _ => return Err(VocalSeparationError::ColabUnavailable),
             };
 
-            let parsed: ColabStartOutput = serde_json::from_slice(&start_output.stdout)
-                .map_err(|_| VocalSeparationError::ColabUnavailable)?;
-
-            let session_id = parsed
-                .session
+            // `colab start` has already allocated a GPU at this point. When its
+            // output cannot be parsed we have no session id to stop, so every
+            // runtime is torn down before returning: leaving it running would
+            // burn quota with nobody holding the handle.
+            let session_id = match serde_json::from_slice::<ColabStartOutput>(&start_output.stdout)
+                .ok()
+                .and_then(|parsed| parsed.session)
                 .filter(|s| !s.trim().is_empty())
-                .ok_or(VocalSeparationError::ColabUnavailable)?;
+            {
+                Some(id) => id,
+                None => {
+                    this.stop_all_sessions().await;
+                    return Err(VocalSeparationError::ColabUnavailable);
+                }
+            };
 
             // 6. Wrap session in Drop guard to handle panic/cancellation
             let mut session_guard =
@@ -538,10 +563,18 @@ impl VocalSeparator for ColabVocalSeparator {
                 .await;
 
             // 8. Normal session teardown: ALWAYS stop session regardless of success/error/verification
-            session_guard.deactivate();
-            this.stop_session(&session_id).await;
+            // The Drop guard stays armed until the shutdown is confirmed, so a
+            // failed or cancelled stop still triggers the fallback instead of
+            // reporting success while the GPU stays allocated.
+            let stopped = this.stop_session(&session_id).await;
+            if stopped {
+                session_guard.deactivate();
+            }
             drop(permit);
 
+            if !stopped && pipeline_result.is_ok() {
+                return Err(VocalSeparationError::SeparationFailed);
+            }
             pipeline_result
         })
     }

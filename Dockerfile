@@ -18,8 +18,9 @@ RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && echo '' > src/lib.rs \
     && rm -rf src
 
 # Real sources. `--locked` keeps the build reproducible from Cargo.lock.
-# frontend/ and migrations/ are not compiled, but both are copied into the
-# runtime image below, so they have to be in this stage.
+# migrations/ must be present because migrate.rs embeds the SQL with
+# include_str!, so the schema ships inside the binary and the runtime image
+# does not need the directory. frontend/ is copied into the runtime image.
 COPY src ./src
 COPY migrations ./migrations
 COPY frontend ./frontend
@@ -39,6 +40,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates \
     && pip install --no-cache-dir --break-system-packages yt-dlp \
     && rm -rf /var/lib/apt/lists/*
+
+# colab-cli drives the Google Colab GPU used for vocal separation. Without it
+# every separation fails with colab_unavailable before spending GPU time.
+ARG COLAB_CLI_VERSION=v0.2.0
+RUN curl -fsSL -o /usr/local/bin/colab \
+        "https://github.com/xeodou/colab-cli/releases/download/${COLAB_CLI_VERSION}/colab-linux-amd64" \
+    && chmod +x /usr/local/bin/colab \
+    && colab --help >/dev/null
 
 # Non-root user. UID/GID 1000 matches the typical deploy host user, so a bind
 # mount of the data directory keeps the right owner.

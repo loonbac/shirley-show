@@ -685,3 +685,79 @@ async fn test_colab_vocal_separator_duration_exceeded_before_gpu() {
     assert_eq!(gpu.available_permits(), 1);
 }
 
+
+#[test]
+fn test_remote_script_treats_no_vocals_as_instrumental() {
+    let script = generate_remote_script(
+        VocalSeparationMode::Instrumental,
+        &INSTRUMENTAL_MODELS,
+        12,
+        "pw",
+        "/content/input.wav",
+    );
+    // "(no_vocals)" contains the substring "vocal"; it must still be accepted
+    // as a backing stem, in both the primary check and the fallback.
+    assert!(
+        script.contains("if label in (\"no_vocals\", \"accompaniment\")"),
+        "no_vocals must be classified before the vocal substring check"
+    );
+    assert!(
+        script.contains("label != \"no_vocals\""),
+        "the fallback must not discard no_vocals stems"
+    );
+}
+
+#[tokio::test]
+async fn test_start_with_unparseable_output_stops_every_runtime() {
+    let temp_dir = TempDir::new().unwrap();
+    let log_file = temp_dir.path().join("calls.log");
+    let colab_bin = temp_dir.path().join("mock_colab.sh");
+    let sample_wav = temp_dir.path().join("in.wav");
+    write_silence_wav(&sample_wav, 1);
+    let token_file = temp_dir.path().join("token.json");
+    std::fs::write(&token_file, r#"{"refresh_token":"t"}"#).unwrap();
+
+    // start reports success but prints something that is not JSON: the GPU is
+    // already allocated, so the adapter must issue a session-less stop.
+    let script = format!(
+        r#"#!/bin/sh
+echo "$@" >> "{}"
+if [ "$1" = "start" ]; then echo "not-json-at-all"; exit 0; fi
+exit 0
+"#,
+        log_file.display()
+    );
+    std::fs::write(&colab_bin, script).unwrap();
+    let mut perms = std::fs::metadata(&colab_bin).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&colab_bin, perms).unwrap();
+
+    let mut cfg = ColabVocalSeparatorConfig::from_env(
+        temp_dir.path().to_path_buf(),
+        Arc::new(Semaphore::new(1)),
+    );
+    cfg.colab_bin = colab_bin;
+    cfg.token_path = token_file;
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let req = VocalSeparationRequest {
+        source_path: sample_wav,
+        output_path: temp_dir.path().join("out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(30),
+    };
+
+    let result = sep.separate(req).await;
+    assert!(matches!(result, Err(VocalSeparationError::ColabUnavailable)));
+
+    let log = std::fs::read_to_string(&log_file).unwrap_or_default();
+    let stop_line = log
+        .lines()
+        .find(|l| l.starts_with("stop"))
+        .expect("a stop must be issued after an unparseable start");
+    assert!(
+        !stop_line.contains("--session"),
+        "the stop must be session-less when no id could be parsed, got: {stop_line}"
+    );
+}
+

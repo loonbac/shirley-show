@@ -4,8 +4,8 @@ La separación vocal corre en una GPU de Google Colab, no en la PC de Joshua. La
 
 ## Requisitos
 
-1. El binario colab (colab-cli) accesible en el PATH del contenedor.
-2. Un token OAuth en SHIRLEY_COLAB_TOKEN con access_token, refresh_token y expiry. El refresh_token permite renovarlo sin navegador.
+1. El binario colab (colab-cli) viene instalado en la imagen por el Dockerfile.
+2. Un token OAuth en SHIRLEY_COLAB_TOKEN con access_token, refresh_token y expiry. El refresh_token permite renovarlo sin navegador. Se monta como archivo de solo lectura en /home/shirley/.config/colab/token.json (ver compose.yaml).
 
 Sin token, la separación falla con colab_token_missing **antes** de encender la GPU.
 
@@ -42,6 +42,7 @@ Un guard con Drop lanza colab stop si el proceso entra en pánico o se cancela, 
 - colab exec descarta la salida de más de ~16 KB, así que el script remoto imprime una sola línea JSON.
 - El puerto 8080 del runtime lo ocupa el proxy de colab-cli.
 - Si litterbox no responde desde el nodo de Colab, la separación falla y la GPU se apaga igual.
+- Un SIGKILL, un OOM del contenedor o un abort del proceso saltan los destructores, así que el guard de Drop no llega a ejecutarse y el runtime puede seguir vivo hasta que Colab lo expire por inactividad. No hay forma de evitarlo desde el cliente. Tras un reinicio duro del contenedor, conviene ejecutar colab stop (o revisar colab quota) para no dejar la GPU consumiendo.
 
 ## Renovar el token
 
