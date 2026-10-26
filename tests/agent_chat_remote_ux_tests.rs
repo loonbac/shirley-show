@@ -769,7 +769,7 @@ async fn test_agent_chat_remote_pc_boots_mid_wait_same_turn_completes_separation
 }
 
 #[tokio::test]
-async fn test_agent_gpu_status_endpoint_local_mode() {
+async fn test_agent_gpu_status_endpoint_reports_remote_mode() {
     let (state, _tmp) = setup_test_state();
     let router = shirley_show::router::create_router(state);
 
@@ -787,7 +787,8 @@ async fn test_agent_gpu_status_endpoint_local_mode() {
         .unwrap()
         .to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["mode"], "local");
+    // S1: separation always runs on Colab, so the endpoint never reports local mode.
+    assert_eq!(json["mode"], "remote");
     assert_eq!(json["pc_online"], true);
 }
 

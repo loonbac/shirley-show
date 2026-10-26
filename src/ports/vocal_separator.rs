@@ -51,6 +51,10 @@ pub enum VocalSeparationError {
     RemoteSudoDenied,
     #[error("La clave SSH para conectar con la PC remota no existe o no es legible")]
     SshKeyMissing,
+    #[error("El archivo de credenciales de Google Colab no existe o no contiene un token válido")]
+    ColabTokenMissing,
+    #[error("Google Colab no está disponible o la cuota de GPU está agotada")]
+    ColabUnavailable,
     #[error("Falló el proceso de separación vocal")]
     SeparationFailed,
 }
@@ -71,6 +75,8 @@ impl VocalSeparationError {
             Self::PcWakeTimeout => "pc_wake_timeout",
             Self::RemoteSudoDenied => "remote_sudo_denied",
             Self::SshKeyMissing => "ssh_key_missing",
+            Self::ColabTokenMissing => "colab_token_missing",
+            Self::ColabUnavailable => "colab_unavailable",
             Self::SeparationFailed => "separation_failed",
         }
     }
@@ -107,6 +113,12 @@ impl VocalSeparationError {
             }
             Self::SshKeyMissing => {
                 "La clave SSH para conectar con la PC remota no existe o no es legible"
+            }
+            Self::ColabTokenMissing => {
+                "El archivo de credenciales de Google Colab no existe o no contiene un token válido"
+            }
+            Self::ColabUnavailable => {
+                "Google Colab no está disponible o la cuota de GPU está agotada"
             }
             Self::SeparationFailed => "Falló el proceso de separación vocal",
         }
