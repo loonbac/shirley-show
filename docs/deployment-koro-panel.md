@@ -168,3 +168,73 @@ y el usuario del contenedor es `shirley` (UID 1000).
 lo refresca con el `refresh_token` y reescribe el archivo. Por eso el montaje es
 de lectura-escritura. Si el archivo del host es de `root`, el refresco falla con
 un error de permisos que la app reporta como `colab_unavailable`.
+
+## 9. Dónde se construye la imagen
+
+**No en el servidor.** El VPS tiene 1,9 GB de RAM; un `cargo build --release` ahí
+puede agotar la memoria y arrastrar a los otros contenedores. Por eso el TOML
+declara `image` en lugar de `build`: la imagen se construye fuera y se carga en
+el demonio del servidor.
+
+### Entorno de build
+
+Se usa una caja de instabox con la plantilla `universal` (trae git, Node, Python,
+Go, Rust, toolchain C y Docker). Dos añadidos que no vienen de fábrica:
+
+```sh
+# ffmpeg: la plantilla no lo trae y lo necesita un test de MP3
+sudo apt-get update && sudo apt-get install -y ffmpeg
+
+# dependencias de test del frontend (pnpm es el único gestor permitido)
+pnpm install --frozen-lockfile
+```
+
+Sin `ffmpeg`, `test_encode_mp3_320k_success` falla con `IoError(NotFound)`. Sin
+`pnpm install`, `test_frontend_node_unit_tests` no encuentra `qrcode`.
+
+### Despliegue, paso a paso
+
+```sh
+# 1. copiar el árbol (sin build, sin dependencias, sin datos)
+tar czf - --exclude=./target --exclude=./.git --exclude=./node_modules \
+  --exclude=./data --exclude=./.pi --exclude=./.env --exclude=./audio \
+  . | instabox ssh <caja> -- 'rm -rf /data/workspace/build && mkdir -p /data/workspace/build && tar xzf - -C /data/workspace/build'
+
+# 2. construir en la caja
+instabox ssh <caja> -- 'cd /data/workspace/build && docker build -t shirley-show:<commit> .'
+
+# 3. transferir al servidor
+instabox ssh <caja> -- 'docker save shirley-show:<commit> | gzip -1' \
+  | ssh -i ~/.ssh/id_elastika root@<vps> 'gunzip | docker load'
+
+# 4. recrear el contenedor con la misma configuración que usa el panel
+ssh -i ~/.ssh/id_elastika root@<vps> '
+  docker rm -f panel-app-shir
+  docker run -d --name panel-app-shir \
+    --label panel.project=app-shir \
+    --restart unless-stopped \
+    --memory 768m --memory-swap 1536m \
+    --env-file /srv/panel/projects/app-shir.env \
+    -v /srv/shirley/data:/app/data \
+    -v /srv/shirley/secrets/colab-token.json:/home/shirley/.config/colab/token.json \
+    -p 127.0.0.1:65529:3001 \
+    shirley-show:<commit>'
+
+# 5. verificar de verdad
+curl -sS http://127.0.0.1:65529/api/agent/gpu-status   # {"mode":"remote","pc_online":true}
+docker exec panel-app-shir colab quota
+```
+
+Actualiza después `image` en el TOML; si no, la interfaz del panel muestra una
+imagen distinta de la que está corriendo.
+
+### Revertir
+
+Antes de recrear, guarda el TOML y la configuración:
+
+```sh
+cp /srv/panel/projects/app-shir.toml /root/app-shir.toml.bak-$(date +%F-%H%M)
+docker inspect panel-app-shir > /root/panel-app-shir.backup-$(date +%F-%H%M).json
+```
+
+Revertir es cargar la imagen anterior y repetir el paso 4 con ese tag.
