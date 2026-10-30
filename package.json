@@ -1,0 +1,15 @@
+{
+  "name": "shirley-show-frontend-tests",
+  "private": true,
+  "packageManager": "pnpm@11.27.0",
+  "description": "Test-only dependencies for the browser-side test suite. The application ships no bundler.",
+  "scripts": {
+    "test:door": "node --test frontend/test/door-controller.test.js",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "pngjs": "5.0.0",
+    "qrcode": "1.5.4"
+  }
+}

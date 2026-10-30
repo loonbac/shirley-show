@@ -12,9 +12,7 @@ use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
 use crate::infra::sqlite::ticketing_repository::SqliteTicketingRepository;
-use crate::infra::vocal::{
-    ProcessVocalSeparator, ProcessVocalSeparatorConfig, SshVocalSeparator, SshVocalSeparatorConfig,
-};
+use crate::infra::vocal::{ColabVocalSeparator, ColabVocalSeparatorConfig};
 use crate::infra::youtube::{ProcessYoutubeDownloader, ProcessYoutubeDownloaderConfig};
 use crate::ports::chat_completion_provider::ChatCompletionProvider;
 use crate::ports::ticketing::EventRepository;
@@ -153,25 +151,18 @@ impl AppState {
         ));
 
         let gpu_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        let vocal_separator: Arc<dyn VocalSeparator> = match config.joshua_pc {
-            Some(ref jpc) => Arc::new(SshVocalSeparator::new(SshVocalSeparatorConfig::new(
-                jpc.clone(),
-                gpu_semaphore.clone(),
-            ))),
-            None => Arc::new(ProcessVocalSeparator::new(
-                ProcessVocalSeparatorConfig::from_env(
-                    storage.vocal_work_dir().to_path_buf(),
-                    gpu_semaphore.clone(),
-                ),
-            )),
-        };
-
-        let is_remote = config.joshua_pc.is_some();
-        let separation_timeout = if is_remote {
-            std::time::Duration::from_secs(config.remote_separation_timeout_secs)
-        } else {
-            std::time::Duration::from_secs(config.separation_timeout_secs.min(600))
-        };
+        // Separation always runs on Colab (S1). The Joshua PC and local process
+        // backends are retired from the production path.
+        let colab_config = ColabVocalSeparatorConfig::from_env(
+            storage.vocal_work_dir().to_path_buf(),
+            gpu_semaphore.clone(),
+        );
+        // The Colab GPU is only alive while a separation runs, so the timeout must
+        // cover session startup plus the whole ensemble, not just one model.
+        let separation_timeout = std::time::Duration::from_secs(colab_config.timeout_secs);
+        let vocal_separator: Arc<dyn VocalSeparator> =
+            Arc::new(ColabVocalSeparator::new(colab_config));
+        let is_remote = true;
 
         let separate_vocals = Arc::new(
             SeparateVocals::new(

@@ -14,6 +14,56 @@ import {
 } from './ticket-photo.js';
 
 /**
+ * Resiliently parses human or browser-provided date strings into an ISO-8601 string.
+ * Supports:
+ * - "YYYY-MM-DDTHH:MM" (native datetime-local)
+ * - "YYYY-MM-DD HH:MM"
+ * - "YYYY-MM-DD" (defaults to 20:00:00 local time)
+ * - "DD/MM/YYYY [HH:MM]", "DD-MM-YYYY [HH:MM]" (Latin/Peruvian format)
+ * Returns null if invalid.
+ * @param {string} raw
+ * @returns {string | null}
+ */
+export function parseEventDate(raw) {
+  if (!raw || typeof raw !== 'string' || !raw.trim()) return null;
+  const str = raw.trim();
+
+  // 1. Native datetime-local: "2026-11-15T20:00"
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/.test(str)) {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // 2. YYYY-MM-DD HH:MM(:SS)
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?$/.test(str)) {
+    const d = new Date(str.replace(/\s+/, 'T'));
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // 3. Date only: YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const d = new Date(`${str}T20:00:00`);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // 4. Latin format: DD/MM/YYYY or DD-MM-YYYY with optional time
+  const latinMatch = str.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (latinMatch) {
+    const [, day, month, year, hours = '20', mins = '00', secs = '00'] = latinMatch;
+    const pad = (n) => String(n).padStart(2, '0');
+    const isoString = `${year}-${pad(month)}-${pad(day)}T${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+    const d = new Date(isoString);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+
+  // 5. Fallback Date constructor
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) return d.toISOString();
+
+  return null;
+}
+
+/**
  * Creates an accessible modal dialog for creating or editing an event.
  * @param {{
  *   event?: any,
@@ -87,6 +137,7 @@ export function createEventFormDialog(props) {
           placeholder: 'Tipo (ej. General)',
           value: t.nombre,
           required: 'true',
+          onInput: (e) => { t.nombre = e.target.value.trim(); },
           onChange: (e) => { t.nombre = e.target.value.trim(); },
         }),
         createElement('input', {
@@ -97,6 +148,7 @@ export function createEventFormDialog(props) {
           min: '0',
           value: String(t.precio),
           required: 'true',
+          onInput: (e) => { t.precio = parseFloat(e.target.value) || 0; },
           onChange: (e) => { t.precio = parseFloat(e.target.value) || 0; },
         }),
         createElement('input', {
@@ -107,6 +159,7 @@ export function createEventFormDialog(props) {
           min: '1',
           value: String(t.capacidad),
           required: 'true',
+          onInput: (e) => { t.capacidad = parseInt(e.target.value, 10) || 1; },
           onChange: (e) => { t.capacidad = parseInt(e.target.value, 10) || 1; },
         }),
         ticketTypes.length > 1
@@ -163,7 +216,7 @@ export function createEventFormDialog(props) {
     submitBtn.el,
   ]);
 
-  const formEl = createElement('form', { class: 'events-form' }, [
+  const formEl = createElement('form', { class: 'events-form', novalidate: true }, [
     nombreInput.el,
     lugarInput.el,
     fechaInput.el,
@@ -202,20 +255,52 @@ export function createEventFormDialog(props) {
       errorEl.style.display = 'block';
       return;
     }
-    if (ticketTypes.length === 0) {
+    // Read directly from DOM rows to guarantee fidelity with what user typed
+    const rows = typesContainer.querySelectorAll('.events-type-row');
+    const parsedTypes = Array.from(rows).map((row) => {
+      const name = (row.querySelector('.events-type-name')?.value || '').trim();
+      const price = parseFloat(row.querySelector('.events-type-price')?.value) || 0;
+      const cap = parseInt(row.querySelector('.events-type-cap')?.value, 10) || 0;
+      return { nombre: name, precio: price, capacidad: cap };
+    });
+
+    if (parsedTypes.length === 0) {
       errorEl.textContent = 'Debe configurar al menos un tipo de entrada.';
       errorEl.style.display = 'block';
       return;
     }
 
-    const isoDate = new Date(fechaVal).toISOString();
+    for (const t of parsedTypes) {
+      if (!t.nombre) {
+        errorEl.textContent = 'El nombre del tipo de entrada no puede estar vacío.';
+        errorEl.style.display = 'block';
+        return;
+      }
+      if (t.capacidad <= 0) {
+        errorEl.textContent = `La capacidad para "${t.nombre}" debe ser de al menos 1.`;
+        errorEl.style.display = 'block';
+        return;
+      }
+      if (t.precio < 0) {
+        errorEl.textContent = `El precio para "${t.nombre}" no puede ser negativo.`;
+        errorEl.style.display = 'block';
+        return;
+      }
+    }
+
+    const isoDate = parseEventDate(fechaVal);
+    if (!isoDate) {
+      errorEl.textContent = 'Fecha u hora inválida. Selecciona una fecha válida o usa el formato AAAA-MM-DD HH:MM.';
+      errorEl.style.display = 'block';
+      return;
+    }
 
     try {
       await onSave({
         nombre,
         lugar,
         fecha_hora: isoDate,
-        tipos_de_entrada: ticketTypes,
+        tipos_de_entrada: parsedTypes,
       });
     } catch (err) {
       errorEl.textContent = (err && err.message) || 'Error al guardar el evento.';

@@ -51,7 +51,13 @@ PORT=$(node -e '
   });
 ')
 
-SERVER_BIN="$REPO_ROOT/target/debug/shirley-show"
+# El directorio de artefactos puede estar fuera del repo (cargo lo resuelve por
+# workspace), así que se pregunta en lugar de asumir <repo>/target.
+TARGET_DIR="$(cd "$REPO_ROOT" && cargo metadata --format-version 1 --no-deps 2>/dev/null \
+  | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' || true)"
+[ -n "$TARGET_DIR" ] || TARGET_DIR="$REPO_ROOT/target"
+
+SERVER_BIN="$TARGET_DIR/debug/shirley-show"
 if [ ! -f "$SERVER_BIN" ]; then
   echo "Binario $SERVER_BIN no encontrado. Compilando..."
   cargo build --manifest-path "$REPO_ROOT/Cargo.toml"
