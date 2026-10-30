@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ticketing::ticket::Ticket;
+use crate::domain::ticketing::ticket::{PaymentStatus, Ticket};
 use crate::domain::ticketing::{
     Event, EventSummary, Expense, ExpenseCategoryBreakdown, Money, PaymentMethodBreakdown,
     TicketType,
@@ -243,13 +243,20 @@ pub struct TicketDto {
     pub estado_checkin: String,
     pub hora_ingreso: Option<String>,
     pub qr_svg: Option<String>,
+    pub codigo_qr: Option<String>,
     pub fecha_creacion: String,
     pub fecha_actualizacion: String,
 }
 
 impl TicketDto {
     pub fn from_domain(t: &Ticket, include_qr: bool) -> Self {
+        let is_paid = t.estado_pago == PaymentStatus::Pagado;
         let qr_svg = if include_qr { t.render_qr_svg() } else { None };
+        let codigo_qr = if include_qr && is_paid {
+            Some(t.codigo_qr.as_str().to_string())
+        } else {
+            None
+        };
         let ticket_path = format!("#/ticket/{}", t.scan_token.as_str());
 
         Self {
@@ -267,6 +274,7 @@ impl TicketDto {
             estado_checkin: t.estado_checkin.as_str().to_string(),
             hora_ingreso: t.hora_ingreso.clone(),
             qr_svg,
+            codigo_qr,
             fecha_creacion: t.fecha_creacion.clone(),
             fecha_actualizacion: t.fecha_actualizacion.clone(),
         }

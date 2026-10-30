@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::domain::ticketing::ticket::Ticket;
+use crate::domain::ticketing::ticket::{PaymentStatus, Ticket};
 use crate::error::AppError;
 use crate::ports::ticketing::{
     CredentialGenerator, EventRepository, SellTicketsInput, TicketRepository, TicketingTransactions,
@@ -72,6 +72,7 @@ pub struct PublicTicketDto {
     pub estado_pago: String,
     pub estado_checkin: String,
     pub qr_svg: Option<String>,
+    pub codigo_qr: Option<String>,
 }
 
 #[derive(Clone)]
@@ -109,7 +110,13 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
             }
         };
 
+        let is_paid = ticket.estado_pago == PaymentStatus::Pagado;
         let qr_svg = ticket.render_qr_svg();
+        let codigo_qr = if is_paid {
+            Some(ticket.codigo_qr.as_str().to_string())
+        } else {
+            None
+        };
 
         Ok(PublicTicketDto {
             nombre_evento: event.nombre,
@@ -121,6 +128,7 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
             estado_pago: ticket.estado_pago.as_str().to_string(),
             estado_checkin: ticket.estado_checkin.as_str().to_string(),
             qr_svg,
+            codigo_qr,
         })
     }
 }
