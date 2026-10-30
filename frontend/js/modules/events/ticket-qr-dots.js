@@ -779,42 +779,55 @@ export function parseSvgModules(svgString) {
   const matches = [...svgString.matchAll(/M(\d+)\s+(\d+)h(\d+)v(\d+)/g)];
   if (matches.length === 0) return null;
 
-  const step = parseInt(matches[0][3], 10) || 6;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
+  let minHeight = Infinity;
 
   for (const m of matches) {
     const x = parseInt(m[1], 10);
     const y = parseInt(m[2], 10);
+    const w = parseInt(m[3], 10);
+    const h = parseInt(m[4], 10);
     if (x < minX) minX = x;
     if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
+    if (x + w > maxX) maxX = x + w;
+    if (y + h > maxY) maxY = y + h;
+    if (h > 0 && h < minHeight) minHeight = h;
   }
 
-  const size = Math.round((maxX - minX) / step) + 1;
+  const step = minHeight > 0 && isFinite(minHeight) ? minHeight : 1;
+  const size = Math.round((maxX - minX) / step);
   const darkSet = new Set();
+
   for (const m of matches) {
-    const col = Math.round((parseInt(m[1], 10) - minX) / step);
-    const row = Math.round((parseInt(m[2], 10) - minY) / step);
-    darkSet.add(`${row}-${col}`);
+    const left = parseInt(m[1], 10);
+    const top = parseInt(m[2], 10);
+    const w = parseInt(m[3], 10);
+    const row = Math.round((top - minY) / step);
+    for (let x = left; x < left + w; x += step) {
+      const col = Math.round((x - minX) / step);
+      darkSet.add(row + "-" + col);
+    }
   }
 
   return {
     size,
-    dark: (r, c) => darkSet.has(`${r}-${c}`),
+    dark: (r, c) => darkSet.has(r + "-" + c),
   };
 }
 
 // --- Matriz y Geometría Musical NotasQR ---
 
-const MARGEN = 2; // zona de silencio (módulos) alrededor del QR
+const MARGEN = 3; // zona de silencio (módulos) alrededor del QR
 
 /**
  * Genera la matriz del QR con corrección de error de nivel H.
  * Soporta valor textual directo o cadena SVG rasterizable.
+ * Fija un mínimo de Versión 8 (49x49 = 2,401 módulos) para otorgar alta
+ * densidad musical ("más puntos al QR") y permitir un logo Shirley Show
+ * amplio, nítido y legible sin comprometer la capacidad de corrección.
  * @param {string} valor 
  * @returns {{ size: number, dark: (r: number, c: number) => boolean }}
  */
@@ -825,9 +838,22 @@ export function generarMatriz(valor) {
     if (parsed) return parsed;
   }
 
-  const qr = new QRCode(0, QRErrorCorrectLevel.H);
-  qr.addData(str);
-  qr.make();
+  let qr = null;
+  // Intentar Versión 8 (49x49 módulos) para máxima densidad y logo amplio; escalar si los datos lo exigen.
+  for (const typeNum of [8, 9, 10, 0]) {
+    try {
+      const candidate = new QRCode(typeNum, QRErrorCorrectLevel.H);
+      candidate.addData(str);
+      candidate.make();
+      qr = candidate;
+      break;
+    } catch {}
+  }
+  if (!qr) {
+    qr = new QRCode(0, QRErrorCorrectLevel.H);
+    qr.addData(str);
+    qr.make();
+  }
   const size = qr.getModuleCount();
   return {
     size,
@@ -848,8 +874,8 @@ export function esEsquinaDeteccion(r, c, size) {
 }
 
 /**
- * Calcula el lienzo, las notas a dibujar (excluye esquinas de detección)
- * y el recuadro del logo central (exactamente como en NotasQR.jsx).
+ * Calcula el lienzo, las notas a dibujar (excluye esquinas de detección y área del logo)
+ * y el recuadro del logo central Shirley Show.
  *
  * @param {string} valor 
  * @returns {{
@@ -863,16 +889,18 @@ export function construir(valor) {
   const { size, dark } = generarMatriz(valor);
   const lienzo = size + MARGEN * 2;
 
-  const logoMods = Math.round(size * 0.25);
+  // Logo al ~28% del ancho del QR (~14 módulos en V8, ~168px en canvas 660px)
+  const logoMods = Math.round(size * 0.28);
   const desde = Math.floor((size - logoMods) / 2);
+  const enLogo = (r, c) => r >= desde && r < desde + logoMods && c >= desde && c < desde + logoMods;
 
-  // Dibujamos todas las notas excluyendo únicamente las esquinas de detección
+  // Dibujamos las notas excluyendo esquinas de detección y el área protegida del logo
   const notas = [];
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
       if (!dark(r, c)) continue;
-      if (esEsquinaDeteccion(r, c, size)) continue;
-      notas.push({ k: `${r}-${c}`, x: c + MARGEN, y: r + MARGEN });
+      if (esEsquinaDeteccion(r, c, size) || enLogo(r, c)) continue;
+      notas.push({ k: r + "-" + c, x: c + MARGEN, y: r + MARGEN });
     }
   }
   const logo = { o: desde + MARGEN, s: logoMods };
@@ -881,8 +909,8 @@ export function construir(valor) {
 
 /**
  * Dibuja el QR musical sobre un CanvasRenderingContext2D:
- * puntitos con degradado de marca (#0f1b2e -> #c0246f), esquinas de detección sólidas
- * y el logo de la marca al centro.
+ * puntitos con degradado de marca (#0f1b2e -> #c0246f), esquinas de detección estándar
+ * con proporción 1:1:3:1:1, escudo blanco protector y logo Shirley Show amplio y visible.
  *
  * @param {CanvasRenderingContext2D} ctx 
  * @param {string} valor 
@@ -906,38 +934,46 @@ export function dibujarQR(ctx, valor, x, y, px, logoQR) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, lienzo, lienzo);
 
-  // Esquinas de detección (misma geometría que Finder en NotasQR.jsx)
+  // Esquinas de detección estándar 7x7, 5x5, 3x3 con sutil redondeo (preserva 1:1:3:1:1 para los lectores)
   for (const [r0, c0] of [
     [margen, margen],
     [margen, margen + size - 7],
     [margen + size - 7, margen],
   ]) {
     ctx.fillStyle = grad;
-    trazarRedondeado(ctx, c0 + 0.1, r0 + 0.1, 6.8, 6.8, 1.8);
+    trazarRedondeado(ctx, c0, r0, 7, 7, 0.8);
     ctx.fill();
     ctx.fillStyle = "#ffffff";
-    trazarRedondeado(ctx, c0 + 1.1, r0 + 1.1, 4.8, 4.8, 1.2);
+    trazarRedondeado(ctx, c0 + 1, r0 + 1, 5, 5, 0.6);
     ctx.fill();
     ctx.fillStyle = grad;
-    trazarRedondeado(ctx, c0 + 2, r0 + 2, 3, 3, 0.9);
+    trazarRedondeado(ctx, c0 + 2, r0 + 2, 3, 3, 0.4);
     ctx.fill();
   }
 
-  // Módulos de datos como puntitos (mismo radio que Punto en NotasQR.jsx)
+  // Módulos de datos como notas musicales / puntitos con radio 0.48 (alta legibilidad en jsQR y ZXing)
   ctx.fillStyle = grad;
   ctx.beginPath();
   for (const n of notas) {
-    ctx.moveTo(n.x + 0.92, n.y + 0.5);
-    ctx.arc(n.x + 0.5, n.y + 0.5, 0.42, 0, Math.PI * 2);
+    ctx.moveTo(n.x + 0.5 + 0.48, n.y + 0.5);
+    ctx.arc(n.x + 0.5, n.y + 0.5, 0.48, 0, Math.PI * 2);
   }
   ctx.fill();
 
-  // Logo de marca al centro, encajado en su recuadro (preserveAspectRatio meet)
+  // Escudo blanco redondeado protector para el logo Shirley Show
+  ctx.fillStyle = "#ffffff";
+  trazarRedondeado(ctx, logo.o - 0.25, logo.o - 0.25, logo.s + 0.5, logo.s + 0.5, 1.2);
+  ctx.fill();
+
+  // Logo de marca Shirley Show al centro, amplio y nítidamente visible
   if (logoQR && logoQR.width && logoQR.height) {
-    const escala = Math.min(logo.s / logoQR.width, logo.s / logoQR.height);
+    const pad = 0.35;
+    const targetW = logo.s - pad * 2;
+    const targetH = logo.s - pad * 2;
+    const escala = Math.min(targetW / logoQR.width, targetH / logoQR.height);
     const w = logoQR.width * escala;
     const h = logoQR.height * escala;
-    ctx.drawImage(logoQR, logo.o + (logo.s - w) / 2, logo.o + (logo.s - h) / 2, w, h);
+    ctx.drawImage(logoQR, logo.o + pad + (targetW - w) / 2, logo.o + pad + (targetH - h) / 2, w, h);
   }
   ctx.restore();
 }

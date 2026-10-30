@@ -654,16 +654,23 @@ export function createDoorController(deps = {}) {
     const trimmed = String(code).trim();
     if (!trimmed) return;
 
+    // Acepta el secreto de 32 hex directo o contenido en una URL de entrada
+    let secret = trimmed;
+    const hexMatch = trimmed.match(/[0-9a-fA-F]{32}/);
+    if (hexMatch) {
+      secret = hexMatch[0].toLowerCase();
+    }
+
     // Only the full 32-hex QR secret reaches the backend. Anything else is
     // rejected locally so the operator sees it immediately.
-    if (!/^[0-9a-fA-F]{32}$/.test(trimmed)) {
+    if (!/^[0-9a-fA-F]{32}$/.test(secret)) {
       view.update({
         result: { resultado: 'Invalida', motivo: 'Formato de código inválido' },
       });
       return;
     }
 
-    await submitCheckin(trimmed);
+    await submitCheckin(secret);
   }
 
   async function submitCheckin(secret) {
