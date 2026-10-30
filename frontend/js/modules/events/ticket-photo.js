@@ -15,6 +15,7 @@
  */
 
 import { dibujarQR, trazarRedondeado } from "./ticket-qr-dots.js";
+import { decodeCanvasWithZXing } from "./camera-qr-scanner.js";
 
 const ANCHO = 1080;
 const MARGEN = 70;
@@ -133,6 +134,35 @@ export function partirLineas(ctx, texto, maxAncho) {
  * @param {any} [evento] Datos del evento (nombre, fecha_hora, lugar)
  * @returns {Promise<Blob>} Blob con imagen PNG lista para compartir o descargar
  */
+/**
+ * Extrae el código secreto de 32 hex desde un string SVG renderizado por el backend.
+ * Rasteriza temporalmente el SVG a canvas y lo decodifica con ZXing de manera síncrona.
+ * @param {string} svgString
+ * @returns {Promise<string>}
+ */
+export async function extraerSecretoDeSvg(svgString) {
+  if (!svgString || typeof svgString !== "string") return "";
+  try {
+    const doc = typeof document !== "undefined" ? document : null;
+    if (!doc || typeof doc.createElement !== "function") return "";
+    const img = new Image();
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+    const c = doc.createElement("canvas");
+    c.width = 300;
+    c.height = 300;
+    const ctx = c.getContext("2d");
+    if (!ctx) return "";
+    ctx.drawImage(img, 0, 0, 300, 300);
+    return decodeCanvasWithZXing(c) || "";
+  } catch {
+    return "";
+  }
+}
+
 export async function generarFotoEntrada(entrada, evento) {
   if (!entrada) {
     throw new Error("Entrada requerida para generar la foto.");
@@ -143,13 +173,23 @@ export async function generarFotoEntrada(entrada, evento) {
   }
 
   // Valor a codificar en el QR: el mismo que valida la puerta (codigo_qr)
-  const valorQR =
+  let valorQR =
     entrada.codigo_qr ||
     entrada.qr ||
-    (typeof entrada.qr_svg === "string" ? entrada.qr_svg : "") ||
-    entrada.scan_token ||
-    entrada.id ||
     "";
+
+  // Si no viene codigo_qr explícito pero viene qr_svg, extraer el secreto decodificando el SVG
+  if (!valorQR && typeof entrada.qr_svg === "string" && entrada.qr_svg.includes("<svg")) {
+    valorQR = await extraerSecretoDeSvg(entrada.qr_svg);
+  }
+
+  if (!valorQR) {
+    valorQR =
+      (typeof entrada.qr_svg === "string" ? entrada.qr_svg : "") ||
+      entrada.scan_token ||
+      entrada.id ||
+      "";
+  }
 
   if (!valorQR) {
     throw new Error("Código QR no disponible para esta entrada.");
