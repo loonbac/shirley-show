@@ -53,6 +53,7 @@ impl ColabVocalSeparatorConfig {
 
         let timeout_secs = std::env::var("SHIRLEY_COLAB_TIMEOUT_SECS")
             .ok()
+            .or_else(|| std::env::var("SHIRLEY_SEPARATION_TIMEOUT_SECS").ok())
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(1800);
 
