@@ -24,16 +24,20 @@ export function createTextInput(props = {}) {
   const {
     label = '',
     name = '',
+    type = 'text',
     value = '',
     placeholder = '',
     required = false,
     error = null,
+    min,
+    max,
+    step,
     onInput,
     onChange,
   } = props;
 
-  const inputEl = createElement('input', {
-    type: 'text',
+  const inputAttrs = {
+    type,
     name,
     value,
     placeholder,
@@ -49,7 +53,13 @@ export function createTextInput(props = {}) {
         onChange(inputEl.value, e);
       }
     },
-  });
+  };
+
+  if (min !== undefined && min !== null) inputAttrs.min = String(min);
+  if (max !== undefined && max !== null) inputAttrs.max = String(max);
+  if (step !== undefined && step !== null) inputAttrs.step = String(step);
+
+  const inputEl = createElement('input', inputAttrs);
 
   const hintEl = createElement(
     'span',
