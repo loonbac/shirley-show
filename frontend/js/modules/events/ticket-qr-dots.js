@@ -839,8 +839,8 @@ export function generarMatriz(valor) {
   }
 
   let qr = null;
-  // Intentar Versión 8 (49x49 módulos) para máxima densidad y logo amplio; escalar si los datos lo exigen.
-  for (const typeNum of [8, 9, 10, 0]) {
+  // Intentar Versión 9 (53x53 módulos = 2,809 puntos) para máxima densidad y logo amplio; escalar si los datos lo exigen.
+  for (const typeNum of [9, 10, 8, 0]) {
     try {
       const candidate = new QRCode(typeNum, QRErrorCorrectLevel.H);
       candidate.addData(str);
@@ -889,8 +889,8 @@ export function construir(valor) {
   const { size, dark } = generarMatriz(valor);
   const lienzo = size + MARGEN * 2;
 
-  // Logo al ~28% del ancho del QR (~14 módulos en V8, ~168px en canvas 660px)
-  const logoMods = Math.round(size * 0.28);
+  // Logo al ~32% del ancho del QR (~17 módulos en V9, ~190px en canvas 660px)
+  const logoMods = Math.round(size * 0.32);
   const desde = Math.floor((size - logoMods) / 2);
   const enLogo = (r, c) => r >= desde && r < desde + logoMods && c >= desde && c < desde + logoMods;
 
@@ -960,20 +960,12 @@ export function dibujarQR(ctx, valor, x, y, px, logoQR) {
   }
   ctx.fill();
 
-  // Escudo blanco redondeado protector para el logo Shirley Show
-  ctx.fillStyle = "#ffffff";
-  trazarRedondeado(ctx, logo.o - 0.25, logo.o - 0.25, logo.s + 0.5, logo.s + 0.5, 1.2);
-  ctx.fill();
-
-  // Logo de marca Shirley Show al centro, amplio y nítidamente visible
+  // Logo de marca Shirley Show al centro, amplio y con fondo transparente natural (sin borde blanco)
   if (logoQR && logoQR.width && logoQR.height) {
-    const pad = 0.35;
-    const targetW = logo.s - pad * 2;
-    const targetH = logo.s - pad * 2;
-    const escala = Math.min(targetW / logoQR.width, targetH / logoQR.height);
+    const escala = Math.min(logo.s / logoQR.width, logo.s / logoQR.height);
     const w = logoQR.width * escala;
     const h = logoQR.height * escala;
-    ctx.drawImage(logoQR, logo.o + pad + (targetW - w) / 2, logo.o + pad + (targetH - h) / 2, w, h);
+    ctx.drawImage(logoQR, logo.o + (logo.s - w) / 2, logo.o + (logo.s - h) / 2, w, h);
   }
   ctx.restore();
 }
