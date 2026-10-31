@@ -1260,6 +1260,7 @@ body.door-mode-active .shell-main {
   height: 100%;
   object-fit: cover;
   display: block;
+  pointer-events: none;
 }
 
 .door-camera-guide {
@@ -1829,9 +1830,14 @@ body.door-mode-active .shell-main {
   align-items: center;
   justify-content: center;
   padding: 4px 0 2px;
-  cursor: pointer;
+  cursor: grab;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  touch-action: none;
+}
+
+.door-log-handle:active {
+  cursor: grabbing;
 }
 
 .door-log-handle-pill {
@@ -1858,6 +1864,7 @@ body.door-mode-active .shell-main {
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+  touch-action: none;
 }
 
 .door-log-header-left {

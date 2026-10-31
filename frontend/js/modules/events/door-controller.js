@@ -12,6 +12,7 @@ import { toEvent } from '../../router/navigate.js';
 import * as defaultApi from './api.js';
 import { isBarcodeDetectorSupported, isCameraSupported, createCameraQrScanner } from './camera-qr-scanner.js';
 import { formatPublicDateTime } from './public-ticket-controller.js';
+import { bindBottomSheetDrag } from '../../behaviors/bind-bottom-sheet-drag.js';
 
 /**
  * Resolves the ticket type to use for door sales.
@@ -144,6 +145,7 @@ export function createDoorView(props) {
   });
 
   let isHistoryExpanded = false;
+  let activeBottomSheetDrag = null;
 
   function onGlobalKeyDown(e) {
     if (e.key === 'Escape' && isHistoryExpanded) {
@@ -168,6 +170,10 @@ export function createDoorView(props) {
   }
 
   function render() {
+    if (activeBottomSheetDrag) {
+      activeBottomSheetDrag.destroy();
+      activeBottomSheetDrag = null;
+    }
     container.innerHTML = '';
 
     // Header bar
@@ -450,13 +456,17 @@ export function createDoorView(props) {
     }
     updateHistoryHeader();
 
+    let bottomSheetDrag = null;
+
     handleBar.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (bottomSheetDrag && bottomSheetDrag.isJustDragged()) return;
       setHistoryExpanded(!isHistoryExpanded);
     });
 
     headerAffordanceBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (bottomSheetDrag && bottomSheetDrag.isJustDragged()) return;
       setHistoryExpanded(!isHistoryExpanded);
     });
 
@@ -468,6 +478,7 @@ export function createDoorView(props) {
       headerAffordanceBtn,
     ]);
     logHeader.addEventListener('click', () => {
+      if (bottomSheetDrag && bottomSheetDrag.isJustDragged()) return;
       setHistoryExpanded(!isHistoryExpanded);
     });
 
@@ -525,25 +536,18 @@ export function createDoorView(props) {
       logSection.appendChild(logList);
     }
 
-    // Gestos táctiles directos en el tirador y cabecera (sin interferir con el scroll de la lista)
-    let touchStartY = 0;
-
-    handleBar.addEventListener('touchstart', (e) => {
-      if (e.touches && e.touches.length === 1) {
-        touchStartY = e.touches[0].clientY;
-      }
-    }, { passive: true });
-
-    handleBar.addEventListener('touchmove', (e) => {
-      if (!e.touches || e.touches.length !== 1) return;
-      const currentY = e.touches[0].clientY;
-      const deltaY = currentY - touchStartY;
-      if (!isHistoryExpanded && deltaY < -20) {
-        setHistoryExpanded(true);
-      } else if (isHistoryExpanded && deltaY > 25) {
-        setHistoryExpanded(false);
-      }
-    }, { passive: true });
+    // Arrastre táctil interactivo en tiempo real (1:1 siguiendo el dedo)
+    bottomSheetDrag = bindBottomSheetDrag({
+      sheetEl: logSection,
+      dragHandles: [handleBar, logHeader],
+      scrollEl: logSection.querySelector('.door-scan-log-list'),
+      backdropEl: historyBackdrop,
+      getIsExpanded: () => isHistoryExpanded,
+      onExpandChange: (expanded) => {
+        setHistoryExpanded(expanded);
+      },
+    });
+    activeBottomSheetDrag = bottomSheetDrag;
 
     // Espaciador que reserva el lugar exacto del historial acoplado en el flujo del scanPane
     const logSpacer = createElement('div', { class: 'door-scan-log-spacer' });
@@ -847,6 +851,10 @@ export function createDoorView(props) {
     if (typeof window !== 'undefined') {
       window.removeEventListener('keydown', onGlobalKeyDown);
     }
+    if (activeBottomSheetDrag) {
+      activeBottomSheetDrag.destroy();
+      activeBottomSheetDrag = null;
+    }
     container.innerHTML = '';
   }
 
@@ -975,10 +983,11 @@ export function createDoorController(deps = {}) {
   loadEvent();
 
   // La cámara es lo primero: arranca sola al entrar al modo puerta.
+  let autoStartCameraTimer = null;
   if (isCameraSupported()) {
-    setTimeout(() => {
+    autoStartCameraTimer = setTimeout(() => {
       if (!destroyed && !isCameraActive) startCamera();
-    }, 300);
+    }, 150);
   }
 
   function handleTabChange(tab) {
@@ -1211,6 +1220,10 @@ export function createDoorController(deps = {}) {
 
   function destroy() {
     destroyed = true;
+    if (autoStartCameraTimer) {
+      clearTimeout(autoStartCameraTimer);
+      autoStartCameraTimer = null;
+    }
     stopCamera();
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.remove('door-mode-active');
