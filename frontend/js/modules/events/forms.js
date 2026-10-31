@@ -132,42 +132,61 @@ export function createEventFormDialog(props) {
     typesContainer.innerHTML = '';
     ticketTypes.forEach((t, idx) => {
       const row = createElement('div', { class: 'events-type-row' }, [
-        createElement('input', {
-          type: 'text',
-          class: 'text-input events-type-name',
-          placeholder: 'Tipo (ej. General)',
-          value: t.nombre,
-          required: 'true',
-          onInput: (e) => { t.nombre = e.target.value.trim(); },
-          onChange: (e) => { t.nombre = e.target.value.trim(); },
-        }),
-        createElement('input', {
-          type: 'number',
-          class: 'text-input events-type-price',
-          placeholder: 'Precio S/',
-          step: '0.5',
-          min: '0',
-          value: String(t.precio),
-          required: 'true',
-          onInput: (e) => { t.precio = parseFloat(e.target.value) || 0; },
-          onChange: (e) => { t.precio = parseFloat(e.target.value) || 0; },
-        }),
-        createElement('input', {
-          type: 'number',
-          class: 'text-input events-type-cap',
-          placeholder: 'Capacidad',
-          step: '1',
-          min: '1',
-          value: String(t.capacidad),
-          required: 'true',
-          onInput: (e) => { t.capacidad = parseInt(e.target.value, 10) || 1; },
-          onChange: (e) => { t.capacidad = parseInt(e.target.value, 10) || 1; },
-        }),
+        createElement('div', { class: 'events-type-field events-type-field-name' }, [
+          createElement('label', { class: 'events-type-field-label' }, ['Tipo / Zona']),
+          createElement('input', {
+            type: 'text',
+            class: 'text-input events-type-name',
+            placeholder: 'Ej. General, VIP, Platea',
+            value: t.nombre,
+            required: 'true',
+            'aria-label': 'Nombre del tipo de entrada',
+            onInput: (e) => { t.nombre = e.target.value.trim(); },
+            onChange: (e) => { t.nombre = e.target.value.trim(); },
+          }),
+        ]),
+        createElement('div', { class: 'events-type-field events-type-field-price' }, [
+          createElement('label', { class: 'events-type-field-label' }, ['Precio (S/)']),
+          createElement('div', { class: 'events-input-with-prefix' }, [
+            createElement('span', { class: 'events-input-prefix' }, ['S/']),
+            createElement('input', {
+              type: 'number',
+              class: 'text-input events-type-price tabular-nums',
+              placeholder: '0.00',
+              step: '0.5',
+              min: '0',
+              value: String(t.precio),
+              required: 'true',
+              'aria-label': 'Precio en soles',
+              onInput: (e) => { t.precio = parseFloat(e.target.value) || 0; },
+              onChange: (e) => { t.precio = parseFloat(e.target.value) || 0; },
+            }),
+          ]),
+        ]),
+        createElement('div', { class: 'events-type-field events-type-field-cap' }, [
+          createElement('label', { class: 'events-type-field-label' }, ['Capacidad (aforo)']),
+          createElement('div', { class: 'events-input-with-suffix' }, [
+            createElement('input', {
+              type: 'number',
+              class: 'text-input events-type-cap tabular-nums',
+              placeholder: '50',
+              step: '1',
+              min: '1',
+              value: String(t.capacidad),
+              required: 'true',
+              'aria-label': 'Capacidad en número de entradas',
+              onInput: (e) => { t.capacidad = parseInt(e.target.value, 10) || 1; },
+              onChange: (e) => { t.capacidad = parseInt(e.target.value, 10) || 1; },
+            }),
+            createElement('span', { class: 'events-input-suffix' }, ['entradas']),
+          ]),
+        ]),
         ticketTypes.length > 1
           ? createElement('button', {
               type: 'button',
               class: 'btn btn-ghost btn-sm events-type-del-btn',
-              'aria-label': 'Eliminar tipo',
+              'aria-label': 'Eliminar tipo de entrada',
+              title: 'Eliminar este tipo de entrada',
               onClick: () => {
                 ticketTypes.splice(idx, 1);
                 renderTypes();
