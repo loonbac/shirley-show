@@ -839,8 +839,8 @@ export function generarMatriz(valor) {
   }
 
   let qr = null;
-  // Intentar Versión 9 (53x53 módulos = 2,809 puntos) para máxima densidad y logo amplio; escalar si los datos lo exigen.
-  for (const typeNum of [9, 10, 8, 0]) {
+  // Intentar Versión 10 (57x57 módulos = 3,249 puntos) para máxima densidad y logo extra amplio; escalar si los datos lo exigen.
+  for (const typeNum of [10, 11, 9, 8, 0]) {
     try {
       const candidate = new QRCode(typeNum, QRErrorCorrectLevel.H);
       candidate.addData(str);
@@ -889,8 +889,8 @@ export function construir(valor) {
   const { size, dark } = generarMatriz(valor);
   const lienzo = size + MARGEN * 2;
 
-  // Logo al ~32% del ancho del QR (~17 módulos en V9, ~190px en canvas 660px)
-  const logoMods = Math.round(size * 0.32);
+  // Logo al ~40% del ancho del QR (~23 módulos en V10, ~241px en canvas 660px)
+  const logoMods = Math.round(size * 0.40);
   const desde = Math.floor((size - logoMods) / 2);
   const enLogo = (r, c) => r >= desde && r < desde + logoMods && c >= desde && c < desde + logoMods;
 
