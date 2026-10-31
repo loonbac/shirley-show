@@ -1,7 +1,7 @@
 /**
  * Pure SVG Icon registry and creator.
  * @param {{
- *   name: 'play' | 'pause' | 'plus' | 'trash' | 'edit' | 'arrow-up' | 'arrow-down' | 'back' | 'track' | 'lyrics' | 'note' | 'check' | 'close' | 'grip' | 'sparkles' | 'send' | 'paperclip' | 'bot' | 'download',
+ *   name: 'play' | 'pause' | 'plus' | 'trash' | 'edit' | 'arrow-up' | 'arrow-down' | 'back' | 'track' | 'lyrics' | 'note' | 'check' | 'close' | 'grip' | 'sparkles' | 'send' | 'paperclip' | 'bot' | 'download' | 'camera' | 'ticket' | 'smartphone' | 'alert-triangle' | 'chevron-up' | 'chevron-down' | 'history',
  *   size?: 'sm' | 'base' | 'lg' | 'xl',
  *   className?: string,
  * }} props 
@@ -79,6 +79,27 @@ export function createIcon(props = {}) {
       break;
     case 'download':
       svg.innerHTML = '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>';
+      break;
+    case 'camera':
+      svg.innerHTML = '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle>';
+      break;
+    case 'ticket':
+      svg.innerHTML = '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"></path><line x1="13" y1="5" x2="13" y2="19"></line>';
+      break;
+    case 'smartphone':
+      svg.innerHTML = '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line>';
+      break;
+    case 'alert-triangle':
+      svg.innerHTML = '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>';
+      break;
+    case 'chevron-up':
+      svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+      break;
+    case 'chevron-down':
+      svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+      break;
+    case 'history':
+      svg.innerHTML = '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>';
       break;
     default:
       svg.innerHTML = '<circle cx="12" cy="12" r="10"></circle>';
