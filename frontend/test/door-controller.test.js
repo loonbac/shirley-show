@@ -354,11 +354,11 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
     api: mockApi,
   });
 
-  // Click camera toggle button in topbar
-  const camBtn = controller.viewEl.querySelector('.door-camera-toggle-btn');
-  assert.ok(camBtn, 'Camera button must be rendered in topbar');
+  // Tap camera viewfinder section directly (redundant topbar button removed)
+  const camSection = controller.viewEl.querySelector('.door-camera-section');
+  assert.ok(camSection, 'Camera section must be rendered');
 
-  camBtn.dispatchEvent(new Event('click'));
+  camSection.dispatchEvent(new Event('click'));
   await new Promise((r) => setTimeout(r, 40));
 
   // Banner must now show Invalida with legible permission error
@@ -1006,6 +1006,71 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   // Segundo tap en el visor: desactiva la cámara para ahorrar batería
   activeSection.dispatchEvent(new Event('click'));
   assert.equal(toggled, 2, 'Segundo tap en el visor debe disparar onToggleCamera para pausar');
+
+  view.destroy();
+}
+
+// 13. DOOR-MODAL-SVGS: Emojis reemplazados por SVGs, eliminación de botón redundante y modal transparente de historial
+{
+  const view = createDoorView({
+    eventName: 'Evento SVGs y Modal',
+    isCameraActive: false,
+    turno: {
+      numero: 1,
+      nombre: 'Turno Prueba',
+      iniciadoEn: '10:00',
+      ingresados: 2,
+      alertas: 1,
+      ventas: 0,
+    },
+    historialEscaneos: [
+      { hora: '10:05', nombre: 'Juan Pérez', tipo: 'General', resultado: 'Valida' },
+      { hora: '10:10', nombre: 'Juan Pérez', tipo: 'General', resultado: 'Ya Usada' },
+    ],
+  });
+
+  // 1. Verificar que el botón redundante de cámara en el topbar fue eliminado
+  assert.equal(
+    view.el.querySelector('.door-camera-toggle-btn'),
+    null,
+    'El botón redundante de cámara en el topbar debe estar ausente'
+  );
+
+  // 2. Verificar que se usan SVGs (etiquetas svg presentes en banners, standby y badges)
+  const svgs = view.el.querySelectorAll('svg');
+  assert.ok(svgs.length >= 3, 'Debe renderizar iconos SVG para estado, banners e historial');
+
+  // Verificar que el standby icon usa SVG
+  const standbyIcon = view.el.querySelector('.door-camera-standby-icon');
+  assert.ok(standbyIcon && standbyIcon.querySelector('svg'), 'El icono de cámara en standby debe ser un SVG');
+
+  // Verificar que no hay emojis comunes en el texto visible
+  const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+  assert.equal(
+    emojiRegex.test(view.el.textContent || ''),
+    false,
+    'No debe haber emojis en el contenido textual del Modo Puerta'
+  );
+
+  // 3. Verificar modal transparente de historial
+  const logSection = view.el.querySelector('.door-scan-log-section');
+  const backdrop = view.el.querySelector('.door-history-backdrop');
+  assert.ok(logSection, 'Debe existir la sección de historial');
+  assert.ok(backdrop, 'Debe existir el backdrop del modal de historial');
+  assert.equal(logSection.classList.contains('is-expanded'), false, 'Inicialmente el historial debe estar acoplado');
+
+  // Expandir modal mediante el botón o header
+  const expandBtn = view.el.querySelector('.door-log-expand-btn');
+  assert.ok(expandBtn, 'Debe existir el control para expandir el historial');
+  expandBtn.dispatchEvent(new Event('click'));
+
+  assert.equal(logSection.classList.contains('is-expanded'), true, 'Al hacer clic debe expandirse a modal');
+  assert.equal(backdrop.classList.contains('is-visible'), true, 'El backdrop debe ser visible');
+
+  // Colapsar modal haciendo clic en el backdrop
+  backdrop.dispatchEvent(new Event('click'));
+  assert.equal(logSection.classList.contains('is-expanded'), false, 'Al hacer clic en backdrop debe volver a acoplarse');
+  assert.equal(backdrop.classList.contains('is-visible'), false, 'El backdrop debe ocultarse');
 
   view.destroy();
 }

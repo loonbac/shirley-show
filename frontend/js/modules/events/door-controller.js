@@ -7,6 +7,7 @@
 
 import { createElement } from '../../utils/dom/create-element.js';
 import { createButton } from '../../components/atoms/button.js';
+import { createIcon } from '../../components/atoms/icon.js';
 import { toEvent } from '../../router/navigate.js';
 import * as defaultApi from './api.js';
 import { isBarcodeDetectorSupported, isCameraSupported, createCameraQrScanner } from './camera-qr-scanner.js';
@@ -142,6 +143,19 @@ export function createDoorView(props) {
     playsinline: 'true',
   });
 
+  let isHistoryExpanded = false;
+
+  function onGlobalKeyDown(e) {
+    if (e.key === 'Escape' && isHistoryExpanded) {
+      isHistoryExpanded = false;
+      render();
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', onGlobalKeyDown);
+  }
+
   function render() {
     container.innerHTML = '';
 
@@ -158,24 +172,10 @@ export function createDoorView(props) {
       createElement('div', { class: 'door-header-event text-muted font-bold' }, [state.eventName]),
     ]);
 
-    const camBtnAtom = (state.activeTab === 'scan' && state.canUseCamera)
-      ? createButton({
-          text: state.isCameraActive ? 'Pausar Cámara' : 'Activar Cámara',
-          variant: state.isCameraActive ? 'secondary' : 'primary',
-          size: 'sm',
-          onClick: onToggleCamera || (() => {}),
-        })
-      : null;
-    if (camBtnAtom) {
-      camBtnAtom.el.classList.add('door-camera-toggle-btn');
-    }
-    const camBtn = camBtnAtom ? camBtnAtom.el : null;
-
     const topbar = createElement('div', { class: 'door-topbar' }, [
       backBtn.el,
       headerTitle,
-      camBtn,
-    ].filter(Boolean));
+    ]);
 
     // Tabs Nav (Escanear / Vender)
     const scanTabBtn = createElement('button', {
@@ -222,7 +222,8 @@ export function createDoorView(props) {
     const isDesktop = typeof window !== 'undefined' && window.innerWidth > 768;
     if (isDesktop) {
       const deviceNotice = createElement('div', { class: 'door-device-notice' }, [
-        '📱 Recomendación: Usa un teléfono móvil para escanear con mayor agilidad en la puerta.',
+        createIcon({ name: 'smartphone', size: 'sm', className: 'door-notice-icon' }),
+        createElement('span', {}, ['Recomendación: Usa un teléfono móvil para escanear con mayor agilidad en la puerta.']),
       ]);
       scanPane.appendChild(deviceNotice);
     }
@@ -230,7 +231,10 @@ export function createDoorView(props) {
     // Barra de Turno y Control de Sesión
     const shiftSummaryBar = createElement('div', { class: 'door-shift-bar' }, [
       createElement('div', { class: 'door-shift-info' }, [
-        createElement('span', { class: 'door-shift-badge' }, [`🟢 ${state.turno.nombre || 'Turno Activo'}`]),
+        createElement('span', { class: 'door-shift-badge' }, [
+          createElement('span', { class: 'door-status-dot is-active' }),
+          createElement('span', { class: 'door-shift-badge-text' }, [state.turno.nombre || 'Turno Activo']),
+        ]),
         createElement('span', { class: 'door-shift-time text-muted' }, [`Inicio: ${state.turno.iniciadoEn || '--:--'}`]),
       ]),
       createButton({
@@ -285,10 +289,13 @@ export function createDoorView(props) {
       createElement('div', { class: 'door-camera-hud' }, [
         state.isCameraActive
           ? createElement('span', { class: 'door-camera-pill' }, [
-              '🟢 En vivo • Toca para pausar (Ahorro batería)',
+              createElement('span', { class: 'door-status-dot is-live' }),
+              createElement('span', {}, ['En vivo • Toca para pausar']),
             ])
           : createElement('div', { class: 'door-camera-standby' }, [
-              createElement('span', { class: 'door-camera-standby-icon' }, ['📷']),
+              createElement('span', { class: 'door-camera-standby-icon' }, [
+                createIcon({ name: 'camera', size: 'lg', className: 'door-camera-standby-svg' }),
+              ]),
               createElement('strong', { class: 'door-camera-standby-title' }, ['Toca para activar la cámara']),
               createElement('span', { class: 'door-camera-standby-sub' }, ['Ahorro de batería activo']),
             ]),
@@ -303,7 +310,9 @@ export function createDoorView(props) {
 
     if (!res) {
       bannerEl = createElement('div', { class: 'door-banner door-banner-idle' }, [
-        createElement('div', { class: 'door-banner-icon' }, ['🎟️']),
+        createElement('div', { class: 'door-banner-icon' }, [
+          createIcon({ name: 'ticket', size: 'lg', className: 'door-banner-svg' }),
+        ]),
         createElement('div', { class: 'door-banner-content' }, [
           createElement('h3', { class: 'door-banner-title' }, ['Listo para Validar']),
           createElement('p', { class: 'door-banner-sub' }, ['Apunta al código QR o toca la cámara']),
@@ -311,7 +320,9 @@ export function createDoorView(props) {
       ]);
     } else if (res.resultado === 'Valida') {
       bannerEl = createElement('div', { class: 'door-banner door-banner-valid' }, [
-        createElement('div', { class: 'door-banner-icon' }, ['✓']),
+        createElement('div', { class: 'door-banner-icon' }, [
+          createIcon({ name: 'check', size: 'lg', className: 'door-banner-svg' }),
+        ]),
         createElement('div', { class: 'door-banner-content' }, [
           createElement('h2', { class: 'door-banner-title' }, ['ENTRADA VÁLIDA']),
           createElement('div', { class: 'door-banner-details' }, [
@@ -327,7 +338,9 @@ export function createDoorView(props) {
       ]);
     } else if (res.resultado === 'Ya Usada') {
       bannerEl = createElement('div', { class: 'door-banner door-banner-used' }, [
-        createElement('div', { class: 'door-banner-icon' }, ['⚠️']),
+        createElement('div', { class: 'door-banner-icon' }, [
+          createIcon({ name: 'alert-triangle', size: 'lg', className: 'door-banner-svg' }),
+        ]),
         createElement('div', { class: 'door-banner-content' }, [
           createElement('h2', { class: 'door-banner-title' }, ['YA FUE USADA']),
           createElement('div', { class: 'door-banner-details' }, [
@@ -342,7 +355,9 @@ export function createDoorView(props) {
     } else {
       // Invalida
       bannerEl = createElement('div', { class: 'door-banner door-banner-invalid' }, [
-        createElement('div', { class: 'door-banner-icon' }, ['✕']),
+        createElement('div', { class: 'door-banner-icon' }, [
+          createIcon({ name: 'close', size: 'lg', className: 'door-banner-svg' }),
+        ]),
         createElement('div', { class: 'door-banner-content' }, [
           createElement('h2', { class: 'door-banner-title' }, ['ENTRADA INVÁLIDA']),
           createElement('div', { class: 'door-banner-details' }, [
@@ -363,15 +378,98 @@ export function createDoorView(props) {
       ])
     );
 
-    // Bitácora en vivo de escaneos del turno
-    const logSection = createElement('div', { class: 'door-scan-log-section' }, [
-      createElement('div', { class: 'door-scan-log-header' }, [
-        createElement('strong', {}, [`Historial del Turno (${state.historialEscaneos.length})`]),
-        state.historialEscaneos.length > 0
-          ? createElement('span', { class: 'door-scan-log-sub text-muted font-bold' }, ['Últimos accesos'])
-          : null,
-      ].filter(Boolean)),
+    // Backdrop para el modal transparente de historial expandido
+    const historyBackdrop = createElement('div', { class: 'door-history-backdrop' });
+
+    function setHistoryExpanded(expanded) {
+      isHistoryExpanded = !!expanded;
+      if (logSection) {
+        if (isHistoryExpanded) {
+          logSection.classList.add('is-expanded');
+          historyBackdrop.classList.add('is-visible');
+        } else {
+          logSection.classList.remove('is-expanded');
+          historyBackdrop.classList.remove('is-visible');
+        }
+        updateHistoryHeader();
+      }
+    }
+
+    historyBackdrop.addEventListener('click', () => {
+      setHistoryExpanded(false);
+    });
+
+    // Bitácora en vivo de escaneos del turno (Deslizable a modal transparente)
+    const handleBar = createElement('div', {
+      class: 'door-log-handle',
+      role: 'button',
+      tabindex: '0',
+      'aria-label': 'Expandir o contraer historial del turno',
+    }, [
+      createElement('span', { class: 'door-log-handle-pill' }),
     ]);
+
+    const headerIcon = createIcon({
+      name: 'history',
+      size: 'sm',
+      className: 'door-log-header-icon',
+    });
+
+    const headerTitleText = createElement('strong', { class: 'door-log-title' }, [
+      `Historial del Turno (${state.historialEscaneos.length})`,
+    ]);
+
+    const headerAffordanceBtn = createElement('button', {
+      type: 'button',
+      class: 'door-log-expand-btn',
+      'aria-label': 'Expandir o contraer historial',
+    });
+
+    function updateHistoryHeader() {
+      headerAffordanceBtn.innerHTML = '';
+      if (isHistoryExpanded) {
+        headerAffordanceBtn.appendChild(createIcon({ name: 'chevron-down', size: 'sm' }));
+        headerAffordanceBtn.appendChild(createElement('span', {}, ['Cerrar']));
+        headerTitleText.textContent = `Historial Completo (${state.historialEscaneos.length})`;
+      } else {
+        headerAffordanceBtn.appendChild(createIcon({ name: 'chevron-up', size: 'sm' }));
+        headerAffordanceBtn.appendChild(createElement('span', {}, ['Ver todo']));
+        headerTitleText.textContent = `Historial del Turno (${state.historialEscaneos.length})`;
+      }
+    }
+    updateHistoryHeader();
+
+    handleBar.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setHistoryExpanded(!isHistoryExpanded);
+    });
+
+    headerAffordanceBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setHistoryExpanded(!isHistoryExpanded);
+    });
+
+    const logHeader = createElement('div', { class: 'door-scan-log-header' }, [
+      createElement('div', { class: 'door-log-header-left' }, [
+        headerIcon,
+        headerTitleText,
+      ]),
+      headerAffordanceBtn,
+    ]);
+    logHeader.addEventListener('click', () => {
+      setHistoryExpanded(!isHistoryExpanded);
+    });
+
+    const logSection = createElement('div', {
+      class: `door-scan-log-section ${isHistoryExpanded ? 'is-expanded' : ''}`,
+    }, [
+      handleBar,
+      logHeader,
+    ]);
+
+    if (isHistoryExpanded) {
+      historyBackdrop.classList.add('is-visible');
+    }
 
     if (state.historialEscaneos.length === 0) {
       logSection.appendChild(
@@ -381,13 +479,22 @@ export function createDoorView(props) {
       );
     } else {
       const logList = createElement('div', { class: 'door-scan-log-list' });
-      state.historialEscaneos.slice(0, 20).forEach((item) => {
+      state.historialEscaneos.forEach((item) => {
         const badgeClass =
           item.resultado === 'Valida'
             ? 'events-badge-success'
             : item.resultado === 'Ya Usada'
             ? 'events-badge-warning'
             : 'events-badge-danger';
+
+        const resultIconName =
+          item.resultado === 'Valida'
+            ? 'check'
+            : item.resultado === 'Ya Usada'
+            ? 'alert-triangle'
+            : 'close';
+
+        const badgeIcon = createIcon({ name: resultIconName, size: 'sm', className: 'door-badge-icon' });
 
         const row = createElement('div', {
           class: `door-scan-log-row door-log-${String(item.resultado || '').toLowerCase().replace(/\s+/g, '-')}`,
@@ -397,12 +504,62 @@ export function createDoorView(props) {
             createElement('strong', { class: 'door-log-name' }, [item.nombre || 'Asistente']),
             item.tipo ? createElement('span', { class: 'door-log-type text-muted' }, [item.tipo]) : null,
           ].filter(Boolean)),
-          createElement('span', { class: `events-badge ${badgeClass} door-log-badge font-bold` }, [item.resultado]),
+          createElement('span', { class: `events-badge ${badgeClass} door-log-badge font-bold` }, [
+            badgeIcon,
+            createElement('span', {}, [item.resultado]),
+          ]),
         ]);
         logList.appendChild(row);
       });
       logSection.appendChild(logList);
     }
+
+    // Gestos táctiles y de rueda para expandir y colapsar el modal de historial
+    let touchStartY = 0;
+    let touchStartX = 0;
+
+    logSection.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches.length === 1) {
+        touchStartY = e.touches[0].clientY;
+        touchStartX = e.touches[0].clientX;
+      }
+    }, { passive: true });
+
+    logSection.addEventListener('touchmove', (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const currentY = e.touches[0].clientY;
+      const deltaY = currentY - touchStartY;
+      const deltaX = Math.abs(e.touches[0].clientX - touchStartX);
+
+      if (Math.abs(deltaY) < deltaX) return;
+
+      if (!isHistoryExpanded && deltaY < -20) {
+        // Deslizar HACIA ARRIBA en el contenedor acoplado -> expandir a modal transparente
+        setHistoryExpanded(true);
+      } else if (isHistoryExpanded && deltaY > 30) {
+        // Deslizar HACIA ABAJO en el modal expandido -> colapsar al llegar al inicio de la lista
+        const listEl = logSection.querySelector('.door-scan-log-list');
+        if (!listEl || listEl.scrollTop <= 0) {
+          setHistoryExpanded(false);
+        }
+      }
+    }, { passive: true });
+
+    logSection.addEventListener('wheel', (e) => {
+      if (!isHistoryExpanded && e.deltaY > 10) {
+        // Scroll hacia abajo (contenido sube) en vista acoplada -> expandir
+        e.preventDefault();
+        setHistoryExpanded(true);
+      } else if (isHistoryExpanded && e.deltaY < -10) {
+        // Scroll hacia arriba cuando estamos al tope de la lista -> colapsar
+        const listEl = logSection.querySelector('.door-scan-log-list');
+        if (!listEl || listEl.scrollTop <= 0) {
+          e.preventDefault();
+          setHistoryExpanded(false);
+        }
+      }
+    }, { passive: false });
+
     scanPane.appendChild(logSection);
 
     // Build Sell Pane
@@ -417,7 +574,9 @@ export function createDoorView(props) {
 
     if (!selectedType) {
       const noTypesBanner = createElement('div', { class: 'door-banner door-banner-invalid door-sell-error' }, [
-        createElement('div', { class: 'door-banner-icon' }, ['✕']),
+        createElement('div', { class: 'door-banner-icon' }, [
+          createIcon({ name: 'close', size: 'lg', className: 'door-banner-svg' }),
+        ]),
         createElement('h2', { class: 'door-banner-title' }, ['VENTA NO DISPONIBLE']),
         createElement('div', { class: 'door-banner-details' }, [
           createElement('p', { class: 'door-banner-sub font-bold' }, [
@@ -447,7 +606,9 @@ export function createDoorView(props) {
         const feed = state.sellFeedback;
         if (feed.type === 'success') {
           const successBanner = createElement('div', { class: 'door-banner door-banner-valid door-sell-feedback' }, [
-            createElement('div', { class: 'door-banner-icon' }, ['✓']),
+            createElement('div', { class: 'door-banner-icon' }, [
+              createIcon({ name: 'check', size: 'lg', className: 'door-banner-svg' }),
+            ]),
             createElement('h2', { class: 'door-banner-title' }, ['VENTA REGISTRADA']),
             createElement('div', { class: 'door-banner-details' }, [
               createElement('p', { class: 'door-banner-buyer font-bold' }, [
@@ -461,7 +622,9 @@ export function createDoorView(props) {
           sellSection.appendChild(successBanner);
         } else {
           const errorBanner = createElement('div', { class: 'door-banner door-banner-invalid door-sell-feedback' }, [
-            createElement('div', { class: 'door-banner-icon' }, ['✕']),
+            createElement('div', { class: 'door-banner-icon' }, [
+              createIcon({ name: 'close', size: 'lg', className: 'door-banner-svg' }),
+            ]),
             createElement('h2', { class: 'door-banner-title' }, ['ERROR EN VENTA']),
             createElement('div', { class: 'door-banner-details' }, [
               createElement('p', { class: 'door-banner-sub font-bold' }, [
@@ -637,6 +800,7 @@ export function createDoorView(props) {
     container.appendChild(tabsNav);
     container.appendChild(scanPane);
     container.appendChild(sellPane);
+    container.appendChild(historyBackdrop);
 
     if (state.mostrarModalCierreTurno && state.reporteCierreTurno) {
       const rep = state.reporteCierreTurno;
@@ -692,6 +856,9 @@ export function createDoorView(props) {
   }
 
   function destroy() {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('keydown', onGlobalKeyDown);
+    }
     container.innerHTML = '';
   }
 

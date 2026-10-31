@@ -234,5 +234,28 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
     // 12. Verificar que la asistente Ressy (burbuja flotante y atajos) está completamente oculta/suprimida en Modo Puerta
     const ressyFloating = page.locator('.agent-chat-floating-trigger');
     await expect(ressyFloating).toBeHidden();
+
+    // 13. Verificar que se usan SVGs (sin emojis), sin botón redundante de cámara en el topbar, y modal transparente expandible de historial
+    await expect(page.locator('.door-camera-toggle-btn')).toHaveCount(0);
+    const svgsInView = await page.locator('.door-container svg').count();
+    expect(svgsInView).toBeGreaterThanOrEqual(2);
+
+    const logSection = page.locator('.door-scan-log-section');
+    const backdrop = page.locator('.door-history-backdrop');
+
+    // Inicialmente acoplado al fondo
+    await expect(logSection).not.toHaveClass(/is-expanded/);
+    await expect(backdrop).not.toHaveClass(/is-visible/);
+
+    // Al tocar o deslizar hacia arriba el historial, se expande a modal transparente
+    await page.locator('.door-log-expand-btn').click();
+    await expect(logSection).toHaveClass(/is-expanded/);
+    await expect(backdrop).toHaveClass(/is-visible/);
+    await expect(page.locator('.door-log-title')).toContainText('Historial Completo');
+
+    // Al tocar el botón de cerrar o el backdrop, vuelve a su sitio acoplado
+    await page.locator('.door-log-expand-btn').click();
+    await expect(logSection).not.toHaveClass(/is-expanded/);
+    await expect(backdrop).not.toHaveClass(/is-visible/);
   });
 });
