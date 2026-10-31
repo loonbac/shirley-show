@@ -201,5 +201,34 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
     const summaryData = await summaryRes.json();
     expect(summaryData.resumen.entradas_ingresadas).toBe(1);
     expect(summaryData.resumen.entradas_emitidas).toBe(1);
+
+    // 11. Verificar experiencia móvil sin scroll vertical y tap-to-toggle para ahorro de batería
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    const scrollCheck = await page.evaluate(() => {
+      const container = document.querySelector('.door-container');
+      return {
+        bodyScrollHeight: document.body.scrollHeight,
+        bodyClientHeight: document.body.clientHeight,
+        hasDoorClass: document.body.classList.contains('door-mode-active'),
+        containerScrollHeight: container ? container.scrollHeight : 0,
+        containerClientHeight: container ? container.clientHeight : 0,
+      };
+    });
+
+    expect(scrollCheck.hasDoorClass).toBe(true);
+    // Cero scroll vertical en viewport móvil: la altura del contenido no excede la ventana
+    expect(scrollCheck.bodyScrollHeight).toBeLessThanOrEqual(scrollCheck.bodyClientHeight + 1);
+
+    // Probar tap-to-toggle: pausar la cámara con un tap para ahorro de batería
+    const camSection = page.locator('.door-camera-section');
+    await camSection.click();
+    await expect(camSection).toHaveClass(/is-paused/);
+    await expect(page.locator('.door-camera-standby-title')).toContainText('Toca para activar la cámara');
+
+    // Segundo tap en el visor: reactivar la cámara de inmediato
+    await camSection.click();
+    await expect(camSection).toHaveClass(/is-active/);
+    await expect(page.locator('.door-camera-pill')).toContainText('Toca para pausar');
   });
 });

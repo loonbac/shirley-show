@@ -160,7 +160,7 @@ export function createDoorView(props) {
 
     const camBtnAtom = (state.activeTab === 'scan' && state.canUseCamera)
       ? createButton({
-          text: state.isCameraActive ? 'Cerrar Cámara' : 'Abrir Cámara',
+          text: state.isCameraActive ? 'Pausar Cámara' : 'Activar Cámara',
           variant: state.isCameraActive ? 'secondary' : 'primary',
           size: 'sm',
           onClick: onToggleCamera || (() => {}),
@@ -267,36 +267,75 @@ export function createDoorView(props) {
     ]);
     scanPane.appendChild(metricsGrid);
 
-    // Unambiguous 3-State Feedback Banner
+    // Camera Viewfinder Section (Tap to Toggle: Active / Battery Saver)
+    const cameraSection = createElement('div', {
+      class: `door-camera-section ${state.isCameraActive ? 'is-active' : 'is-paused'}`,
+      role: 'button',
+      tabindex: '0',
+      'aria-label': state.isCameraActive ? 'Pausar cámara' : 'Activar cámara',
+      title: state.isCameraActive ? 'Toca para pausar la cámara (Ahorro de batería)' : 'Toca para activar la cámara',
+      onClick: () => {
+        if (typeof onToggleCamera === 'function') {
+          onToggleCamera();
+        }
+      },
+    }, [
+      videoEl,
+      createElement('div', { class: `door-camera-guide ${state.isCameraActive ? 'is-active' : 'is-paused'}` }),
+      createElement('div', { class: 'door-camera-hud' }, [
+        state.isCameraActive
+          ? createElement('span', { class: 'door-camera-pill' }, [
+              '🟢 En vivo • Toca para pausar (Ahorro batería)',
+            ])
+          : createElement('div', { class: 'door-camera-standby' }, [
+              createElement('span', { class: 'door-camera-standby-icon' }, ['📷']),
+              createElement('strong', { class: 'door-camera-standby-title' }, ['Toca para activar la cámara']),
+              createElement('span', { class: 'door-camera-standby-sub' }, ['Ahorro de batería activo']),
+            ]),
+      ]),
+    ]);
+    videoEl.style.display = state.isCameraActive ? 'block' : 'none';
+    scanPane.appendChild(cameraSection);
+
+    // Unambiguous 3-State Feedback Banner (Compact HUD docked bar)
     let bannerEl = null;
     const res = state.result;
 
     if (!res) {
       bannerEl = createElement('div', { class: 'door-banner door-banner-idle' }, [
         createElement('div', { class: 'door-banner-icon' }, ['🎟️']),
-        createElement('h3', { class: 'door-banner-title' }, ['Listo para Validar']),
-        createElement('p', {}, ['Apunta la cámara al código QR de la entrada.']),
+        createElement('div', { class: 'door-banner-content' }, [
+          createElement('h3', { class: 'door-banner-title' }, ['Listo para Validar']),
+          createElement('p', { class: 'door-banner-sub' }, ['Apunta al código QR o toca la cámara']),
+        ]),
       ]);
     } else if (res.resultado === 'Valida') {
       bannerEl = createElement('div', { class: 'door-banner door-banner-valid' }, [
         createElement('div', { class: 'door-banner-icon' }, ['✓']),
-        createElement('h2', { class: 'door-banner-title' }, ['ENTRADA VÁLIDA']),
-        createElement('div', { class: 'door-banner-details' }, [
-          createElement('p', { class: 'door-banner-buyer font-bold' }, [res.nombre_comprador || 'Asistente']),
-          createElement('p', { class: 'door-banner-type' }, [`Tipo: ${res.tipo_entrada || 'General'}`]),
-          createElement('p', { class: 'door-banner-time' }, [
-            `Ingreso: ${formatPublicDateTime(res.hora_ingreso)}`,
+        createElement('div', { class: 'door-banner-content' }, [
+          createElement('h2', { class: 'door-banner-title' }, ['ENTRADA VÁLIDA']),
+          createElement('div', { class: 'door-banner-details' }, [
+            createElement('span', { class: 'door-banner-buyer font-bold' }, [res.nombre_comprador || 'Asistente']),
+            createElement('span', { class: 'door-banner-sep' }, [' • ']),
+            createElement('span', { class: 'door-banner-type' }, [`Tipo: ${res.tipo_entrada || 'General'}`]),
+            createElement('span', { class: 'door-banner-sep' }, [' • ']),
+            createElement('span', { class: 'door-banner-time' }, [
+              `Ingreso: ${formatPublicDateTime(res.hora_ingreso)}`,
+            ]),
           ]),
         ]),
       ]);
     } else if (res.resultado === 'Ya Usada') {
       bannerEl = createElement('div', { class: 'door-banner door-banner-used' }, [
         createElement('div', { class: 'door-banner-icon' }, ['⚠️']),
-        createElement('h2', { class: 'door-banner-title' }, ['YA FUE USADA']),
-        createElement('div', { class: 'door-banner-details' }, [
-          createElement('p', { class: 'door-banner-sub' }, ['Esta entrada ya fue registrada anteriormente.']),
-          createElement('p', { class: 'door-banner-time' }, [
-            `Hora de primer ingreso: ${formatPublicDateTime(res.hora_ingreso)}`,
+        createElement('div', { class: 'door-banner-content' }, [
+          createElement('h2', { class: 'door-banner-title' }, ['YA FUE USADA']),
+          createElement('div', { class: 'door-banner-details' }, [
+            createElement('span', { class: 'door-banner-sub' }, ['Esta entrada ya fue registrada']),
+            createElement('span', { class: 'door-banner-sep' }, [' • ']),
+            createElement('span', { class: 'door-banner-time' }, [
+              `Ingreso: ${formatPublicDateTime(res.hora_ingreso)}`,
+            ]),
           ]),
         ]),
       ]);
@@ -304,24 +343,17 @@ export function createDoorView(props) {
       // Invalida
       bannerEl = createElement('div', { class: 'door-banner door-banner-invalid' }, [
         createElement('div', { class: 'door-banner-icon' }, ['✕']),
-        createElement('h2', { class: 'door-banner-title' }, ['ENTRADA INVÁLIDA']),
-        createElement('div', { class: 'door-banner-details' }, [
-          createElement('p', { class: 'door-banner-sub font-bold' }, [
-            res.motivo ? `Motivo: ${res.motivo}` : 'Código no reconocido',
+        createElement('div', { class: 'door-banner-content' }, [
+          createElement('h2', { class: 'door-banner-title' }, ['ENTRADA INVÁLIDA']),
+          createElement('div', { class: 'door-banner-details' }, [
+            createElement('span', { class: 'door-banner-sub font-bold' }, [
+              res.motivo ? `Motivo: ${res.motivo}` : 'Código no reconocido',
+            ]),
           ]),
         ]),
       ]);
     }
     scanPane.appendChild(bannerEl);
-
-    // Camera Section (rendered only when active)
-    if (state.isCameraActive) {
-      const cameraSection = createElement('div', { class: 'door-camera-section' }, [
-        videoEl,
-        createElement('div', { class: 'door-camera-guide' }),
-      ]);
-      scanPane.appendChild(cameraSection);
-    }
 
     // Check-in happens only by scanning the QR. There is no manual code entry:
     // typing a short prefix would turn the 128-bit secret into a guessable code.
@@ -693,6 +725,10 @@ export function createDoorController(deps = {}) {
     audioController.stop();
   }
 
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.classList.add('door-mode-active');
+  }
+
   let eventData = null;
   let scanner = null;
   let isCameraActive = false;
@@ -1021,6 +1057,9 @@ export function createDoorController(deps = {}) {
   function destroy() {
     destroyed = true;
     stopCamera();
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.remove('door-mode-active');
+    }
     if (scanner) {
       scanner.destroy();
       scanner = null;

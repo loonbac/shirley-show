@@ -1011,37 +1011,79 @@
   color: var(--color-brand-primary, #d97706);
 }
 
-/* --- Door Mode Mobile Styles --- */
+/* --- Door Mode Zero-Scroll Fullscreen Architecture --- */
+
+body.door-mode-active {
+  overflow: hidden !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.door-mode-active .shell-layout {
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+}
+
+body.door-mode-active .shell-header {
+  display: none !important;
+}
+
+body.door-mode-active .shell-main {
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+}
+
 .door-container {
+  width: 100%;
   max-width: 600px;
   margin: 0 auto;
-  padding: var(--space-3) 0;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  overflow: hidden;
+  padding: var(--space-2, 8px);
+  box-sizing: border-box;
+  gap: 6px;
 }
 
 .door-topbar {
   display: flex;
-  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: 4px var(--space-2);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  min-height: 56px;
+  min-height: 44px;
+  flex-shrink: 0;
 }
 
 .door-header-text {
   text-align: center;
   flex: 1;
   min-width: 0;
+  line-height: 1.2;
+}
+
+.door-header-text strong {
+  font-size: var(--font-size-sm, 14px);
+  display: block;
 }
 
 .door-header-event {
-  font-size: var(--font-size-xs);
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1049,42 +1091,38 @@
 }
 
 .door-device-notice {
-  background: var(--color-surface-hover);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  text-align: center;
+  display: none;
 }
 
 .door-banner {
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  text-align: center;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: var(--space-2);
-  transition: all 0.2s ease-in-out;
+  gap: 8px;
+  min-height: 48px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  text-align: left;
 }
 
 .door-banner-valid {
-  background: #16a34a;
+  background: #15803d;
   color: #ffffff;
-  border: 2px solid #15803d;
+  border: 1px solid #16a34a;
 }
 
 .door-banner-used {
-  background: #d97706;
+  background: #b45309;
   color: #ffffff;
-  border: 2px solid #b45309;
+  border: 1px solid #d97706;
 }
 
 .door-banner-invalid {
-  background: #dc2626;
+  background: #b91c1c;
   color: #ffffff;
-  border: 2px solid #b91c1c;
+  border: 1px solid #dc2626;
 }
 
 .door-banner-idle {
@@ -1094,55 +1132,169 @@
 }
 
 .door-banner-icon {
-  font-size: 3rem;
+  font-size: 1.6rem;
   line-height: 1;
+  flex-shrink: 0;
+}
+
+.door-banner-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
 }
 
 .door-banner-title {
-  font-size: var(--font-size-2xl);
+  font-size: 13px;
   font-weight: var(--font-weight-bold);
   margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
+  line-height: 1.1;
 }
 
-.door-banner-buyer {
-  font-size: var(--font-size-lg);
-  margin: var(--space-1) 0;
+.door-banner-details {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
 }
 
+.door-banner-sep {
+  opacity: 0.6;
+}
+
+.door-banner-buyer,
 .door-banner-type,
 .door-banner-time,
 .door-banner-sub {
-  font-size: var(--font-size-sm);
-  margin: var(--space-1) 0;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
+/* --- Camera Viewfinder Section (Tap-To-Toggle) --- */
 .door-camera-section {
   position: relative;
-  background: #000000;
+  background: #09090b;
   border-radius: var(--radius-lg);
   overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 200px;
+  flex: 1 1 0;
+  min-height: 140px;
+  max-height: 42vh;
+  width: 100%;
+  cursor: pointer;
+  border: 2px solid var(--color-border);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.2s ease, opacity 0.15s ease;
+}
+
+.door-camera-section:active {
+  opacity: 0.94;
+}
+
+.door-camera-section.is-active {
+  border-color: #10b981;
+}
+
+.door-camera-section.is-paused {
+  border-color: var(--color-border);
+  background: radial-gradient(circle at center, #18181b 0%, #09090b 100%);
 }
 
 .door-camera-video {
   width: 100%;
-  max-height: 280px;
+  height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 .door-camera-guide {
   position: absolute;
-  width: 200px;
-  height: 200px;
-  border: 2px solid rgba(255, 255, 255, 0.7);
+  width: 180px;
+  height: 180px;
+  max-width: 65%;
+  max-height: 65%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
   border-radius: var(--radius-md);
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
   pointer-events: none;
+  transition: all 0.2s ease;
+}
+
+.door-camera-section.is-paused .door-camera-guide {
+  border-color: rgba(255, 255, 255, 0.25);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.door-camera-hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  pointer-events: none;
+}
+
+.door-camera-pill {
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  padding: 4px 10px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.02em;
+}
+
+.door-camera-standby {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: auto;
+  text-align: center;
+  color: #ffffff;
+}
+
+.door-camera-standby-icon {
+  font-size: 2rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6));
+}
+
+.door-camera-standby-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  padding: 4px 12px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.door-camera-standby-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .door-manual-fallback {
@@ -1237,15 +1389,23 @@
 }
 
 .door-tab-pane {
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 6px;
+  overflow: hidden;
   width: 100%;
 }
 
 .door-tab-pane[hidden],
 .door-tab-pane.is-hidden {
   display: none !important;
+}
+
+.door-sell-pane {
+  overflow-y: auto;
+  padding-bottom: 24px;
 }
 
 .door-sell-section {
@@ -1445,42 +1605,36 @@
 .door-shift-info {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .door-shift-badge {
-  font-size: var(--font-size-xs);
+  font-size: 11px;
   font-weight: var(--font-weight-bold);
   background: #ecfdf5;
   color: #065f46;
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: 9999px;
   border: 1px solid #a7f3d0;
 }
 
 .door-shift-time {
-  font-size: var(--font-size-xs);
+  font-size: 10px;
   color: var(--color-text-muted);
 }
 
 .door-metrics-kpis {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-2);
-}
-
-@media (min-width: 480px) {
-  .door-metrics-kpis {
-    grid-template-columns: repeat(4, 1fr);
-  }
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .door-kpi-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
+  padding: 3px 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1488,29 +1642,35 @@
 }
 
 .door-kpi-num {
-  font-size: var(--font-size-lg);
+  font-size: 13px;
   font-weight: var(--font-weight-bold);
-  line-height: 1.2;
+  line-height: 1.1;
 }
 
 .door-kpi-title {
-  font-size: var(--font-size-xs);
+  font-size: 9px;
   color: var(--color-text-muted);
-  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
-/* --- Scan Log Section --- */
+/* --- Scan Log Section (Docked & Scrollable Internally Only) --- */
 
 .door-scan-log-section {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  padding: 4px 8px;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  max-height: 280px;
+  gap: 4px;
+  flex: 0 1 80px;
+  max-height: 85px;
+  min-height: 44px;
   overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .door-scan-log-header {

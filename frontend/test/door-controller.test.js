@@ -976,4 +976,38 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   view.destroy();
 }
 
+
+// 12. DOOR-BATTERY: Tap-to-Toggle Cámara y Ahorro de Batería en el Visor
+{
+  let toggled = 0;
+  const view = createDoorView({
+    eventName: 'Evento Batería',
+    isCameraActive: false,
+    onToggleCamera: () => { toggled++; },
+  });
+
+  // Estado inicial: pausado (ahorro de batería)
+  const camSection = view.el.querySelector('.door-camera-section');
+  assert.ok(camSection, 'Debe renderizar la sección de visor de cámara');
+  assert.ok(camSection.classList.contains('is-paused'), 'Debe iniciar con clase is-paused');
+  assert.ok(view.el.querySelector('.door-camera-standby-title'), 'Debe mostrar el título de standby');
+  assert.ok(view.el.querySelector('.door-camera-guide'), 'Debe mantener el marco de guía en el DOM');
+
+  // Primer tap en el visor: activa la cámara
+  camSection.dispatchEvent(new Event('click'));
+  assert.equal(toggled, 1, 'Tap en el visor debe disparar onToggleCamera');
+
+  // Actualizar a estado activo
+  view.update({ isCameraActive: true });
+  const activeSection = view.el.querySelector('.door-camera-section');
+  assert.ok(activeSection.classList.contains('is-active'), 'Debe tener clase is-active al encenderse');
+  assert.ok(view.el.querySelector('.door-camera-pill'), 'Debe mostrar la píldora flotante de cámara activa');
+
+  // Segundo tap en el visor: desactiva la cámara para ahorrar batería
+  activeSection.dispatchEvent(new Event('click'));
+  assert.equal(toggled, 2, 'Segundo tap en el visor debe disparar onToggleCamera para pausar');
+
+  view.destroy();
+}
+
 console.log('Door Mode tests passed successfully.');
