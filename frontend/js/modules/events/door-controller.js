@@ -148,7 +148,18 @@ export function createDoorView(props) {
   function onGlobalKeyDown(e) {
     if (e.key === 'Escape' && isHistoryExpanded) {
       isHistoryExpanded = false;
-      render();
+      const logSec = container.querySelector('.door-scan-log-section');
+      const backdrop = container.querySelector('.door-history-backdrop');
+      if (logSec) logSec.classList.remove('is-expanded');
+      if (backdrop) backdrop.classList.remove('is-visible');
+      const affordance = container.querySelector('.door-log-expand-btn');
+      const titleText = container.querySelector('.door-log-title');
+      if (affordance && titleText) {
+        affordance.innerHTML = '';
+        affordance.appendChild(createIcon({ name: 'chevron-up', size: 'sm' }));
+        affordance.appendChild(createElement('span', {}, ['Ver todo']));
+        titleText.textContent = `Historial del Turno (${state.historialEscaneos.length})`;
+      }
     }
   }
 
@@ -514,52 +525,29 @@ export function createDoorView(props) {
       logSection.appendChild(logList);
     }
 
-    // Gestos táctiles y de rueda para expandir y colapsar el modal de historial
+    // Gestos táctiles directos en el tirador y cabecera (sin interferir con el scroll de la lista)
     let touchStartY = 0;
-    let touchStartX = 0;
 
-    logSection.addEventListener('touchstart', (e) => {
+    handleBar.addEventListener('touchstart', (e) => {
       if (e.touches && e.touches.length === 1) {
         touchStartY = e.touches[0].clientY;
-        touchStartX = e.touches[0].clientX;
       }
     }, { passive: true });
 
-    logSection.addEventListener('touchmove', (e) => {
+    handleBar.addEventListener('touchmove', (e) => {
       if (!e.touches || e.touches.length !== 1) return;
       const currentY = e.touches[0].clientY;
       const deltaY = currentY - touchStartY;
-      const deltaX = Math.abs(e.touches[0].clientX - touchStartX);
-
-      if (Math.abs(deltaY) < deltaX) return;
-
       if (!isHistoryExpanded && deltaY < -20) {
-        // Deslizar HACIA ARRIBA en el contenedor acoplado -> expandir a modal transparente
         setHistoryExpanded(true);
-      } else if (isHistoryExpanded && deltaY > 30) {
-        // Deslizar HACIA ABAJO en el modal expandido -> colapsar al llegar al inicio de la lista
-        const listEl = logSection.querySelector('.door-scan-log-list');
-        if (!listEl || listEl.scrollTop <= 0) {
-          setHistoryExpanded(false);
-        }
+      } else if (isHistoryExpanded && deltaY > 25) {
+        setHistoryExpanded(false);
       }
     }, { passive: true });
 
-    logSection.addEventListener('wheel', (e) => {
-      if (!isHistoryExpanded && e.deltaY > 10) {
-        // Scroll hacia abajo (contenido sube) en vista acoplada -> expandir
-        e.preventDefault();
-        setHistoryExpanded(true);
-      } else if (isHistoryExpanded && e.deltaY < -10) {
-        // Scroll hacia arriba cuando estamos al tope de la lista -> colapsar
-        const listEl = logSection.querySelector('.door-scan-log-list');
-        if (!listEl || listEl.scrollTop <= 0) {
-          e.preventDefault();
-          setHistoryExpanded(false);
-        }
-      }
-    }, { passive: false });
-
+    // Espaciador que reserva el lugar exacto del historial acoplado en el flujo del scanPane
+    const logSpacer = createElement('div', { class: 'door-scan-log-spacer' });
+    scanPane.appendChild(logSpacer);
     scanPane.appendChild(logSection);
 
     // Build Sell Pane
