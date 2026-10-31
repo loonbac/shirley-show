@@ -205,6 +205,7 @@ fn test_triangulate_edge_cases() {
         100,
         10,
         15,
+        4,
         PaymentMethodBreakdown::default(),
         ExpenseCategoryBreakdown::default(),
     );

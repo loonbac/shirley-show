@@ -201,6 +201,7 @@ pub struct EventSummaryDto {
     pub capacidad_total: u32,
     pub entradas_emitidas: u32,
     pub aforo_proyectado: u32,
+    pub entradas_ingresadas: u32,
     pub desglose_metodos_pago: PaymentMethodBreakdownDto,
     pub desglose_gastos: ExpenseCategoryBreakdownDto,
 }
@@ -216,6 +217,7 @@ impl EventSummaryDto {
             capacidad_total: s.capacidad_total,
             entradas_emitidas: s.entradas_emitidas,
             aforo_proyectado: s.aforo_proyectado,
+            entradas_ingresadas: s.entradas_ingresadas,
             desglose_metodos_pago: PaymentMethodBreakdownDto::from_domain(&s.metodos_pago),
             desglose_gastos: ExpenseCategoryBreakdownDto::from_domain(&s.categorias_gasto),
         }

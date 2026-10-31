@@ -1428,3 +1428,219 @@
   color: var(--color-text-muted);
   padding: var(--space-2) 0;
 }
+
+/* --- Door Shift & Attendance Management --- */
+
+.door-shift-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-2);
+}
+
+.door-shift-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.door-shift-badge {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  background: #ecfdf5;
+  color: #065f46;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid #a7f3d0;
+}
+
+.door-shift-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.door-metrics-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+}
+
+@media (min-width: 480px) {
+  .door-metrics-kpis {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.door-kpi-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.door-kpi-num {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.2;
+}
+
+.door-kpi-title {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* --- Scan Log Section --- */
+
+.door-scan-log-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.door-scan-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding-bottom: var(--space-1);
+  font-size: var(--font-size-sm);
+}
+
+.door-scan-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.door-scan-log-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
+  border-left: 3px solid var(--color-border);
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+}
+
+.door-scan-log-row.door-log-valida {
+  border-left-color: #10b981;
+}
+
+.door-scan-log-row.door-log-ya-usada {
+  border-left-color: #f59e0b;
+}
+
+.door-scan-log-row.door-log-invalida {
+  border-left-color: #ef4444;
+}
+
+.door-log-time {
+  color: var(--color-text-muted);
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.door-log-person {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.door-log-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text);
+}
+
+.door-log-type {
+  font-size: 11px;
+}
+
+.door-log-badge {
+  flex-shrink: 0;
+}
+
+/* --- Shift Closure Modal --- */
+
+.door-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-3);
+  backdrop-filter: blur(2px);
+}
+
+.door-modal-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  max-width: 440px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.door-modal-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  text-align: center;
+}
+
+.door-modal-period {
+  text-align: center;
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.door-modal-stats {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.door-modal-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--font-size-sm);
+}
+
+.door-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+

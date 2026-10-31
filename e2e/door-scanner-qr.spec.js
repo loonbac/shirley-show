@@ -173,5 +173,33 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
     });
     const retryData = await retryRes.json();
     expect(retryData.resultado).toBe('Ya Usada');
+
+    // 8. Verificar que la vista de Modo Puerta muestra la barra de turno y contadores
+    await expect(page.locator('.door-shift-badge')).toContainText('Turno 1');
+    await expect(page.locator('.door-kpi-turno .door-kpi-title')).toContainText('En este Turno');
+    await expect(page.locator('.door-kpi-total .door-kpi-title')).toContainText('Asistencia Total');
+    await expect(page.locator('.door-scan-log-header')).toContainText('Historial del Turno');
+
+    // 9. Probar el flujo de Cierre de Turno en la interfaz
+    const cerrarTurnoBtn = page.locator('button:has-text("Cerrar Turno")');
+    await expect(cerrarTurnoBtn).toBeVisible();
+    await cerrarTurnoBtn.click();
+
+    // Modal de Cierre de Turno visible con resumen consolidado
+    await expect(page.locator('.door-modal-overlay')).toBeVisible();
+    await expect(page.locator('.door-modal-title')).toContainText('Cierre de Turno 1');
+    await expect(page.locator('.door-modal-stats')).toContainText('Total ingresados en el turno:');
+
+    // Iniciar Siguiente Turno
+    const siguienteTurnoBtn = page.locator('button:has-text("Iniciar Siguiente Turno")');
+    await siguienteTurnoBtn.click();
+    await expect(page.locator('.door-modal-overlay')).not.toBeVisible();
+    await expect(page.locator('.door-shift-badge')).toContainText('Turno 2');
+
+    // 10. Verificar que el resumen del evento en el sistema registra la asistencia en puerta
+    const summaryRes = await request.get(`/api/eventos/${evento.id}/resumen`);
+    const summaryData = await summaryRes.json();
+    expect(summaryData.resumen.entradas_ingresadas).toBe(1);
+    expect(summaryData.resumen.entradas_emitidas).toBe(1);
   });
 });
