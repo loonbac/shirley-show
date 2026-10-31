@@ -28,3 +28,7 @@
   text-align: center;
 }
 
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+

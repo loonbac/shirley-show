@@ -228,10 +228,10 @@ export function createAgentChatPanel(props) {
   );
 
   // Empty state element (created once)
-  const emptyIcon = createIcon({ name: 'sparkles', size: 'lg' });
-  const emptyTitle = createElement('p', { class: 'agent-chat-empty-title' }, ['¡Hola! Soy Ressy']);
+  const emptyIcon = createIcon({ name: 'bot', size: 'lg' });
+  const emptyTitle = createElement('p', { class: 'agent-chat-empty-title' }, ['Ressy']);
   const emptyDesc = createElement('p', { class: 'agent-chat-empty-desc' }, [
-    'Puedo ayudarte a crear shows, agregar letras, notas o pistas de audio con playback listo.',
+    'Asistente de repertorio. Crea presentaciones, agrega letras, notas o pistas de audio con reproducción en vivo.',
   ]);
   const emptyEl = createElement('div', { class: 'agent-chat-empty-state' }, [emptyIcon, emptyTitle, emptyDesc]);
 

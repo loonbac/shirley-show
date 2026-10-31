@@ -65,9 +65,9 @@ export function createPresentationsView(props) {
 
     // Always render the Ressy AI Chat Hero at the top
     const welcomeHeader = createWelcomeHeader({
-      greeting: '¡Hola, Shirley!',
-      subtitle: 'Tu asistente personal para el escenario',
-      phrase: 'Pídeme lo que necesites como si me escribieras por WhatsApp: crear presentaciones, preparar canciones o buscar letras.',
+      greeting: 'Shirley Show',
+      subtitle: 'Repertorio y escenario',
+      phrase: 'Crea presentaciones, organiza canciones o consulta letras para tus presentaciones en vivo.',
       totalPresentations,
       totalTracks,
       onCreatePresentation: onCreateClick,

@@ -1,6 +1,7 @@
 import { createElement } from '../../utils/dom/create-element.js';
 import { createButton } from '../../components/atoms/button.js';
 import { createSpinner } from '../../components/atoms/spinner.js';
+import { createIcon } from '../../components/atoms/icon.js';
 
 /**
  * Formats an ISO date string into a friendly localized date and time in Peru (es-PE).
@@ -125,7 +126,7 @@ export function createEventsCatalogView(props) {
         });
       } else {
         posterEl = createElement('div', { class: 'events-card-poster-placeholder' }, [
-          createElement('span', { class: 'events-poster-icon' }, ['🎭']),
+          createIcon({ name: 'ticket', size: 'lg', className: 'events-poster-svg' }),
         ]);
       }
 
@@ -137,11 +138,11 @@ export function createEventsCatalogView(props) {
 
       const titleEl = createElement('h3', { class: 'events-card-title' }, [event.nombre]);
       const dateEl = createElement('div', { class: 'events-card-meta' }, [
-        createElement('span', { class: 'events-card-icon' }, ['📅']),
+        createIcon({ name: 'calendar', size: 'sm', className: 'events-meta-svg' }),
         createElement('span', {}, [formatEventDateTime(event.fecha_hora)]),
       ]);
       const venueEl = createElement('div', { class: 'events-card-meta' }, [
-        createElement('span', { class: 'events-card-icon' }, ['📍']),
+        createIcon({ name: 'map-pin', size: 'sm', className: 'events-meta-svg' }),
         createElement('span', {}, [event.lugar]),
       ]);
 
@@ -334,18 +335,19 @@ export function createEventDetailView(props) {
     const titleEl = createElement('h2', { class: 'events-hero-title' }, [event.nombre]);
     const metaEl = createElement('div', { class: 'events-hero-meta' }, [
       createElement('div', { class: 'events-hero-meta-item' }, [
-        createElement('span', {}, ['📅 ']),
+        createIcon({ name: 'calendar', size: 'sm', className: 'events-meta-svg' }),
         createElement('strong', {}, [formatEventDateTime(event.fecha_hora)]),
       ]),
       createElement('div', { class: 'events-hero-meta-item' }, [
-        createElement('span', {}, ['📍 ']),
+        createIcon({ name: 'map-pin', size: 'sm', className: 'events-meta-svg' }),
         createElement('span', {}, [event.lugar]),
       ]),
     ]);
 
     // Primary action: Door mode
     const doorBtn = createButton({
-      text: '🚪 Modo Puerta',
+      text: 'Modo Puerta',
+      icon: createIcon({ name: 'door', size: 'sm', className: 'btn-icon' }),
       variant: 'primary',
       onClick: onOpenDoor,
     });
@@ -381,10 +383,10 @@ export function createEventDetailView(props) {
     const { activeTab = 'resumen', tickets = [], interests = [], expenses = [], onTabChange } = state;
 
     const tabs = [
-      { id: 'resumen', label: '📊 Resumen' },
-      { id: 'entradas', label: `🎟️ Entradas (${tickets.length})` },
-      { id: 'interesados', label: `👥 Interesados (${interests.length})` },
-      { id: 'gastos', label: `💸 Gastos (${expenses.length})` },
+      { id: 'resumen', label: 'Resumen', icon: 'bar-chart' },
+      { id: 'entradas', label: `Entradas (${tickets.length})`, icon: 'ticket' },
+      { id: 'interesados', label: `Interesados (${interests.length})`, icon: 'users' },
+      { id: 'gastos', label: `Gastos (${expenses.length})`, icon: 'dollar-sign' },
     ];
 
     const tabButtons = tabs.map((t) => {
@@ -402,7 +404,10 @@ export function createEventDetailView(props) {
             }
           },
         },
-        [t.label]
+        [
+          createIcon({ name: t.icon, size: 'sm', className: 'events-tab-icon' }),
+          createElement('span', { class: 'events-tab-label' }, [t.label]),
+        ]
       );
     });
 
@@ -424,7 +429,8 @@ export function createEventDetailView(props) {
     let alertBanner = null;
     if (overCapacity) {
       alertBanner = createElement('div', { class: 'events-alert-banner' }, [
-        createElement('strong', {}, ['⚠️ Alerta de Sobrecapacidad: ']),
+        createIcon({ name: 'alert-triangle', size: 'sm', className: 'events-alert-icon' }),
+        createElement('strong', {}, ['Alerta de sobrecapacidad: ']),
         createElement('span', {}, [
           `El aforo proyectado (${summary.aforo_proyectado} personas) supera la capacidad total configurada (${summary.capacidad_total} lugares).`,
         ]),
@@ -467,13 +473,15 @@ export function createEventDetailView(props) {
           `${summary.aforo_proyectado}`,
         ]),
       ]),
-      createElement('div', { class: 'events-metric-card events-metric-attendance' }, [
-        createElement('span', { class: 'events-metric-label' }, ['Asistencia en Puerta']),
-        createElement('span', { class: 'events-metric-value text-success' }, [
-          `${summary.entradas_ingresadas || 0} / ${summary.entradas_emitidas || 0}`,
-        ]),
-      ]),
-    ]);
+      typeof summary.entradas_ingresadas === 'number'
+        ? createElement('div', { class: 'events-metric-card events-metric-attendance' }, [
+            createElement('span', { class: 'events-metric-label' }, ['Asistencia en Puerta']),
+            createElement('span', { class: 'events-metric-value text-success' }, [
+              `${summary.entradas_ingresadas} / ${summary.entradas_emitidas || 0}`,
+            ]),
+          ])
+        : null,
+    ].filter(Boolean));
 
     // Payment methods breakdown
     const methods = summary.por_medio_pago || {};
