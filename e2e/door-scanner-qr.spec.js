@@ -222,6 +222,7 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
 
     // Probar tap-to-toggle: pausar la cámara con un tap para ahorro de batería
     const camSection = page.locator('.door-camera-section');
+    await expect(camSection).toHaveClass(/is-active/);
     await camSection.click();
     await expect(camSection).toHaveClass(/is-paused/);
     await expect(page.locator('.door-camera-standby-title')).toContainText('Toca para activar la cámara');
@@ -255,6 +256,52 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
 
     // Al tocar el botón de cerrar o el backdrop, vuelve a su sitio acoplado
     await page.locator('.door-log-expand-btn').click();
+    await expect(logSection).not.toHaveClass(/is-expanded/);
+    await expect(backdrop).not.toHaveClass(/is-visible/);
+
+    // 14. Probar arrastre táctil interactivo 1:1 que sigue el dedo naturalmente
+    const handle = page.locator('.door-log-handle');
+
+    // Deslizar hacia arriba arrastrando el dedo: el bottom sheet sigue el movimiento en tiempo real
+    const dragUpResult = await page.evaluate(() => {
+      const h = document.querySelector('.door-log-handle');
+      const sheet = document.querySelector('.door-scan-log-section');
+      if (!h || !sheet) return null;
+
+      // Iniciar toque
+      const touchStart = new Touch({ identifier: 1, target: h, clientY: 620, clientX: 180 });
+      h.dispatchEvent(new TouchEvent('touchstart', { touches: [touchStart], changedTouches: [touchStart], bubbles: true }));
+
+      // Mover el dedo hacia arriba 200px
+      const touchMove = new Touch({ identifier: 1, target: h, clientY: 420, clientX: 180 });
+      h.dispatchEvent(new TouchEvent('touchmove', { touches: [touchMove], changedTouches: [touchMove], cancelable: true, bubbles: true }));
+
+      const transformDuringDrag = sheet.style.transform;
+
+      // Soltar dedo
+      const touchEnd = new Touch({ identifier: 1, target: h, clientY: 420, clientX: 180 });
+      h.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touchEnd], bubbles: true }));
+
+      return { transformDuringDrag };
+    });
+
+    expect(dragUpResult.transformDuringDrag).toContain('translate3d');
+    await expect(logSection).toHaveClass(/is-expanded/);
+    await expect(backdrop).toHaveClass(/is-visible/);
+
+    // Deslizar hacia abajo arrastrando el dedo: vuelve a colapsar
+    await page.evaluate(() => {
+      const h = document.querySelector('.door-log-handle');
+      const touchStart = new Touch({ identifier: 2, target: h, clientY: 80, clientX: 180 });
+      h.dispatchEvent(new TouchEvent('touchstart', { touches: [touchStart], changedTouches: [touchStart], bubbles: true }));
+
+      const touchMove = new Touch({ identifier: 2, target: h, clientY: 350, clientX: 180 });
+      h.dispatchEvent(new TouchEvent('touchmove', { touches: [touchMove], changedTouches: [touchMove], cancelable: true, bubbles: true }));
+
+      const touchEnd = new Touch({ identifier: 2, target: h, clientY: 350, clientX: 180 });
+      h.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touchEnd], bubbles: true }));
+    });
+
     await expect(logSection).not.toHaveClass(/is-expanded/);
     await expect(backdrop).not.toHaveClass(/is-visible/);
   });
