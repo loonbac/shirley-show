@@ -6,6 +6,7 @@
 
 import { createElement } from "../../utils/dom/create-element.js";
 import { createButton } from "../../components/atoms/button.js";
+import { createIcon } from "../../components/atoms/icon.js";
 import { generarFotoEntrada, descargarBlob, ensureTicketPhotoStyles } from "./ticket-photo.js";
 import * as defaultApi from "./api.js";
 
@@ -155,7 +156,10 @@ export function createPublicTicketView(initialState = {}) {
     } else {
       // Pending status: NEVER render QR box or SVG
       credentialSection = createElement("div", { class: "public-ticket-pending-banner" }, [
-        createElement("h4", { class: "public-ticket-pending-title" }, ["⚠️ Reserva Pendiente de Pago"]),
+        createElement("h4", { class: "public-ticket-pending-title" }, [
+          createElement("span", { class: "public-ticket-pending-dot" }),
+          createElement("span", {}, ["Reserva pendiente de pago"]),
+        ]),
         createElement("p", { class: "public-ticket-pending-msg" }, [
           `Esta entrada está reservada por S/ ${Number(ticket.precio || 0).toFixed(2)}. `,
           "Para habilitar tu código QR de acceso, realiza el pago coordinado (Yape o Efectivo) ",

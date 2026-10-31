@@ -24,9 +24,9 @@ import { createIcon } from '../atoms/icon.js';
  */
 export function createWelcomeHeader(props = {}) {
   let {
-    greeting = '¡Hola, Shirley!',
-    subtitle = 'Tu asistente personal para el escenario',
-    phrase = 'Pídeme lo que necesites como si me escribieras por WhatsApp: crear presentaciones, preparar canciones o buscar letras.',
+    greeting = 'Shirley Show',
+    subtitle = 'Repertorio y escenario',
+    phrase = 'Crea presentaciones, organiza canciones o consulta letras para tus presentaciones en vivo.',
     totalPresentations = 0,
     totalTracks = 0,
     onCreatePresentation,

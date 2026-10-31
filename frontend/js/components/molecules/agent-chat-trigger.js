@@ -56,7 +56,7 @@ export function createAgentFloatingTrigger(props = {}) {
       class: `agent-chat-floating-badge ${showBadge ? '' : 'is-dismissed'}`,
       'aria-label': 'Asistente Ressy disponible',
     },
-    ['✨ Ressy']
+    ['Ressy']
   );
 
   const srText = createElement('span', { class: 'agent-chat-floating-sr-only' }, [

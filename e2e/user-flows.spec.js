@@ -124,7 +124,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
     await sellDialog.locator('button[type="submit"]:has-text("Emitir")').click();
 
     // 5. Debe mostrarse la confirmación con las 2 entradas emitidas
-    await expect(sellDialog.locator('.events-dialog-title')).toContainText('¡Venta Realizada!');
+    await expect(sellDialog.locator('.events-dialog-title')).toContainText('Venta Realizada');
     const ticketCards = sellDialog.locator('.events-quick-ticket-card');
     await expect(ticketCards).toHaveCount(2);
 

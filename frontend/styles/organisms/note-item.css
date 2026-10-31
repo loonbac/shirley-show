@@ -41,8 +41,7 @@
   color: var(--color-surface);
   font-weight: var(--font-weight-bold);
   border-radius: var(--radius-sm);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: var(--font-weight-medium);
 }
 
 .note-body {

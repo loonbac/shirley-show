@@ -1,6 +1,7 @@
 import { createElement } from '../../utils/dom/create-element.js';
 import { createButton } from '../../components/atoms/button.js';
 import { createTextInput } from '../../components/atoms/text-input.js';
+import { createIcon } from '../../components/atoms/icon.js';
 import { bindDialogDismiss } from '../../behaviors/bind-dialog-dismiss.js';
 import { bindFormSubmit } from '../../behaviors/bind-form-submit.js';
 import { trimRequired } from '../../utils/validation/trim-required.js';
@@ -171,7 +172,7 @@ export function createEventFormDialog(props) {
                 ticketTypes.splice(idx, 1);
                 renderTypes();
               },
-            }, ['✕'])
+            }, [createIcon({ name: 'close', size: 'sm' })])
           : null,
       ].filter(Boolean));
       typesContainer.appendChild(row);
@@ -901,7 +902,7 @@ export function createSellTicketDialog(props) {
   const overlayEl = createElement('div', { class: 'dialog-overlay' }, [dialogCard]);
 
   function showIssuedTicketsView(issuedTickets, metadata) {
-    titleEl.textContent = `¡Venta Realizada! (${issuedTickets.length} ${issuedTickets.length === 1 ? 'entrada emitida' : 'entradas emitidas'})`;
+    titleEl.textContent = `Venta Realizada (${issuedTickets.length} ${issuedTickets.length === 1 ? 'entrada emitida' : 'entradas emitidas'})`;
 
     const contactText = metadata.contacto ? ` (${metadata.contacto})` : '';
     const subtitle = createElement('p', { class: 'events-dialog-subtitle' }, [
