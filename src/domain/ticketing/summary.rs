@@ -35,6 +35,7 @@ pub struct EventSummary {
     pub capacidad_total: u32,
     pub entradas_emitidas: u32,
     pub aforo_proyectado: u32,
+    pub entradas_ingresadas: u32,
     pub metodos_pago: PaymentMethodBreakdown,
     pub categorias_gasto: ExpenseCategoryBreakdown,
 }
@@ -48,6 +49,7 @@ impl EventSummary {
         capacidad_total: u32,
         entradas_emitidas: u32,
         aforo_proyectado: u32,
+        entradas_ingresadas: u32,
         metodos_pago: PaymentMethodBreakdown,
         categorias_gasto: ExpenseCategoryBreakdown,
     ) -> Self {
@@ -65,6 +67,7 @@ impl EventSummary {
             capacidad_total,
             entradas_emitidas,
             aforo_proyectado,
+            entradas_ingresadas,
             metodos_pago,
             categorias_gasto,
         }

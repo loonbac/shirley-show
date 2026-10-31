@@ -467,6 +467,12 @@ export function createEventDetailView(props) {
           `${summary.aforo_proyectado}`,
         ]),
       ]),
+      createElement('div', { class: 'events-metric-card events-metric-attendance' }, [
+        createElement('span', { class: 'events-metric-label' }, ['Asistencia en Puerta']),
+        createElement('span', { class: 'events-metric-value text-success' }, [
+          `${summary.entradas_ingresadas || 0} / ${summary.entradas_emitidas || 0}`,
+        ]),
+      ]),
     ]);
 
     // Payment methods breakdown

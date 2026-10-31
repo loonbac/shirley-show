@@ -896,4 +896,84 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   delete globalThis.window.jsQR;
 }
 
+
+// 11. DOOR-SHIFT: Gestión de Turnos, Conteo de Asistencia y Bitácora en Vivo
+{
+  let shiftClosed = false;
+  let nextShiftStarted = false;
+
+  const view = createDoorView({
+    eventName: 'Gran Noche de Gala',
+    turno: {
+      numero: 1,
+      nombre: 'Turno 1',
+      iniciadoEn: '08:00 p. m.',
+      ingresados: 15,
+      alertas: 2,
+      ventas: 3,
+      totalVentasSoles: 90,
+      porTipo: { General: 10, VIP: 5 },
+    },
+    historialEscaneos: [
+      { hora: '08:15 p. m.', nombre: 'María Castro', tipo: 'VIP', resultado: 'Valida' },
+      { hora: '08:14 p. m.', nombre: 'Entrada Ya Usada', tipo: '', resultado: 'Ya Usada' },
+    ],
+    totalEventoIngresados: 15,
+    totalEventoEmitidas: 40,
+    onCerrarTurno: () => { shiftClosed = true; },
+    onConfirmarNuevoTurno: () => { nextShiftStarted = true; },
+  });
+
+  // Verificar barra de turno
+  const shiftBadge = view.el.querySelector('.door-shift-badge');
+  assert.ok(shiftBadge && shiftBadge.textContent.includes('Turno 1'), 'Debe mostrar el badge de Turno 1');
+
+  // Verificar KPIs de asistencia
+  const kpis = view.el.querySelectorAll('.door-kpi-card');
+  assert.equal(kpis.length, 4, 'Debe renderizar 4 KPIs (Turno, Asistencia Total, Alertas, Ventas)');
+  assert.ok(view.el.querySelector('.door-kpi-turno').textContent.includes('15'), 'KPI Turno debe decir 15');
+  assert.ok(view.el.querySelector('.door-kpi-total').textContent.includes('15 / 40'), 'KPI Total debe decir 15 / 40');
+
+  // Verificar bitácora de escaneos
+  const logRows = view.el.querySelectorAll('.door-scan-log-row');
+  assert.equal(logRows.length, 2, 'Debe renderizar las 2 filas del historial');
+  assert.ok(logRows[0].textContent.includes('María Castro'), 'Primera fila debe tener a María Castro');
+  assert.ok(logRows[0].textContent.includes('Valida'), 'Primera fila debe tener badge Valida');
+  assert.ok(logRows[1].textContent.includes('Ya Usada'), 'Segunda fila debe tener badge Ya Usada');
+
+  // Probar botón Cerrar Turno
+  const closeBtn = Array.from(view.el.querySelectorAll('button')).find(b => b.textContent.includes('Cerrar Turno'));
+  assert.ok(closeBtn, 'Debe existir botón Cerrar Turno');
+  closeBtn.dispatchEvent(new Event('click'));
+  assert.ok(shiftClosed, 'Click en Cerrar Turno debe invocar onCerrarTurno');
+
+  // Renderizar modal de cierre de turno
+  view.update({
+    mostrarModalCierreTurno: true,
+    reporteCierreTurno: {
+      numero: 1,
+      nombre: 'Turno 1',
+      iniciadoEn: '08:00 p. m.',
+      cerradoEn: '09:30 p. m.',
+      ingresados: 15,
+      alertas: 2,
+      ventas: 3,
+      totalVentasSoles: 90,
+      porTipo: { General: 10, VIP: 5 },
+    },
+  });
+
+  const modal = view.el.querySelector('.door-modal-overlay');
+  assert.ok(modal, 'Debe renderizarse el modal de cierre de turno');
+  assert.ok(modal.textContent.includes('Total ingresados en el turno:'), 'Modal debe contener el total de ingresados');
+  assert.ok(modal.textContent.includes('15'), 'Modal debe mostrar 15 ingresados');
+
+  const nextBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('Iniciar Siguiente Turno'));
+  assert.ok(nextBtn, 'Modal debe incluir botón Iniciar Siguiente Turno');
+  nextBtn.dispatchEvent(new Event('click'));
+  assert.ok(nextShiftStarted, 'Iniciar Siguiente Turno debe invocar onConfirmarNuevoTurno');
+
+  view.destroy();
+}
+
 console.log('Door Mode tests passed successfully.');

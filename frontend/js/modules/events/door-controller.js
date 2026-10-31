@@ -104,6 +104,21 @@ export function createDoorView(props) {
     sessionSold: typeof props.sessionSold === 'number' ? props.sessionSold : 0,
     sellFeedback: props.sellFeedback || null,
     isSubmittingSell: Boolean(props.isSubmittingSell),
+    turno: props.turno || {
+      numero: 1,
+      nombre: 'Turno 1',
+      iniciadoEn: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+      ingresados: 0,
+      alertas: 0,
+      ventas: 0,
+      totalVentasSoles: 0,
+      porTipo: {},
+    },
+    historialEscaneos: Array.isArray(props.historialEscaneos) ? props.historialEscaneos : [],
+    totalEventoIngresados: typeof props.totalEventoIngresados === 'number' ? props.totalEventoIngresados : 0,
+    totalEventoEmitidas: typeof props.totalEventoEmitidas === 'number' ? props.totalEventoEmitidas : 0,
+    mostrarModalCierreTurno: Boolean(props.mostrarModalCierreTurno),
+    reporteCierreTurno: props.reporteCierreTurno || null,
   };
 
   const {
@@ -112,6 +127,9 @@ export function createDoorView(props) {
     onBack,
     onTabChange,
     onSell,
+    onCerrarTurno,
+    onConfirmarNuevoTurno,
+    onCerrarModalTurno,
   } = props;
 
   const container = createElement('div', { class: 'door-container' });
@@ -209,6 +227,46 @@ export function createDoorView(props) {
       scanPane.appendChild(deviceNotice);
     }
 
+    // Barra de Turno y Control de Sesión
+    const shiftSummaryBar = createElement('div', { class: 'door-shift-bar' }, [
+      createElement('div', { class: 'door-shift-info' }, [
+        createElement('span', { class: 'door-shift-badge' }, [`🟢 ${state.turno.nombre || 'Turno Activo'}`]),
+        createElement('span', { class: 'door-shift-time text-muted' }, [`Inicio: ${state.turno.iniciadoEn || '--:--'}`]),
+      ]),
+      createButton({
+        text: 'Cerrar Turno',
+        variant: 'secondary',
+        size: 'sm',
+        onClick: onCerrarTurno || (() => {}),
+      }).el,
+    ]);
+    scanPane.appendChild(shiftSummaryBar);
+
+    // Contadores en vivo de asistencia
+    const metricsGrid = createElement('div', { class: 'door-metrics-kpis' }, [
+      createElement('div', { class: 'door-kpi-card door-kpi-turno' }, [
+        createElement('span', { class: 'door-kpi-num text-success font-bold' }, [String(state.turno.ingresados || 0)]),
+        createElement('span', { class: 'door-kpi-title' }, ['En este Turno']),
+      ]),
+      createElement('div', { class: 'door-kpi-card door-kpi-total' }, [
+        createElement('span', { class: 'door-kpi-num font-bold' }, [
+          `${state.totalEventoIngresados || 0} / ${state.totalEventoEmitidas || state.totalEventoIngresados || 0}`,
+        ]),
+        createElement('span', { class: 'door-kpi-title' }, ['Asistencia Total']),
+      ]),
+      createElement('div', { class: 'door-kpi-card door-kpi-alertas' }, [
+        createElement('span', { class: `door-kpi-num font-bold ${(state.turno.alertas || 0) > 0 ? 'text-warning' : ''}` }, [
+          String(state.turno.alertas || 0),
+        ]),
+        createElement('span', { class: 'door-kpi-title' }, ['Alertas / Repetidos']),
+      ]),
+      createElement('div', { class: 'door-kpi-card door-kpi-ventas' }, [
+        createElement('span', { class: 'door-kpi-num font-bold' }, [String(state.turno.ventas || 0)]),
+        createElement('span', { class: 'door-kpi-title' }, ['Ventas Puerta']),
+      ]),
+    ]);
+    scanPane.appendChild(metricsGrid);
+
     // Unambiguous 3-State Feedback Banner
     let bannerEl = null;
     const res = state.result;
@@ -272,6 +330,48 @@ export function createDoorView(props) {
         'Apunta la cámara al código QR de la entrada.',
       ])
     );
+
+    // Bitácora en vivo de escaneos del turno
+    const logSection = createElement('div', { class: 'door-scan-log-section' }, [
+      createElement('div', { class: 'door-scan-log-header' }, [
+        createElement('strong', {}, [`Historial del Turno (${state.historialEscaneos.length})`]),
+        state.historialEscaneos.length > 0
+          ? createElement('span', { class: 'door-scan-log-sub text-muted font-bold' }, ['Últimos accesos'])
+          : null,
+      ].filter(Boolean)),
+    ]);
+
+    if (state.historialEscaneos.length === 0) {
+      logSection.appendChild(
+        createElement('p', { class: 'door-scan-log-empty text-muted text-center' }, [
+          'Aún no hay escaneos en este turno.',
+        ])
+      );
+    } else {
+      const logList = createElement('div', { class: 'door-scan-log-list' });
+      state.historialEscaneos.slice(0, 20).forEach((item) => {
+        const badgeClass =
+          item.resultado === 'Valida'
+            ? 'events-badge-success'
+            : item.resultado === 'Ya Usada'
+            ? 'events-badge-warning'
+            : 'events-badge-danger';
+
+        const row = createElement('div', {
+          class: `door-scan-log-row door-log-${String(item.resultado || '').toLowerCase().replace(/\s+/g, '-')}`,
+        }, [
+          createElement('span', { class: 'door-log-time' }, [item.hora || '']),
+          createElement('div', { class: 'door-log-person' }, [
+            createElement('strong', { class: 'door-log-name' }, [item.nombre || 'Asistente']),
+            item.tipo ? createElement('span', { class: 'door-log-type text-muted' }, [item.tipo]) : null,
+          ].filter(Boolean)),
+          createElement('span', { class: `events-badge ${badgeClass} door-log-badge font-bold` }, [item.resultado]),
+        ]);
+        logList.appendChild(row);
+      });
+      logSection.appendChild(logList);
+    }
+    scanPane.appendChild(logSection);
 
     // Build Sell Pane
     const sellPane = createElement('div', {
@@ -505,6 +605,51 @@ export function createDoorView(props) {
     container.appendChild(tabsNav);
     container.appendChild(scanPane);
     container.appendChild(sellPane);
+
+    if (state.mostrarModalCierreTurno && state.reporteCierreTurno) {
+      const rep = state.reporteCierreTurno;
+      const modalOverlay = createElement('div', { class: 'door-modal-overlay' }, [
+        createElement('div', { class: 'door-modal-card' }, [
+          createElement('h3', { class: 'door-modal-title' }, [`Cierre de ${rep.nombre}`]),
+          createElement('p', { class: 'door-modal-period text-muted font-bold' }, [
+            `Período: ${rep.iniciadoEn} a ${rep.cerradoEn}`,
+          ]),
+          createElement('div', { class: 'door-modal-stats' }, [
+            createElement('div', { class: 'door-modal-stat-row' }, [
+              createElement('span', {}, ['Total ingresados en el turno:']),
+              createElement('strong', { class: 'text-success' }, [String(rep.ingresados || 0)]),
+            ]),
+            createElement('div', { class: 'door-modal-stat-row' }, [
+              createElement('span', {}, ['Alertas (Ya Usadas / Inválidas):']),
+              createElement('strong', { class: 'text-warning' }, [String(rep.alertas || 0)]),
+            ]),
+            createElement('div', { class: 'door-modal-stat-row' }, [
+              createElement('span', {}, ['Entradas vendidas en puerta:']),
+              createElement('strong', {}, [`${rep.ventas || 0} (S/ ${(rep.totalVentasSoles || 0).toFixed(2)})`]),
+            ]),
+            createElement('div', { class: 'door-modal-stat-row' }, [
+              createElement('span', {}, ['Asistencia acumulada del evento:']),
+              createElement('strong', {}, [`${state.totalEventoIngresados || 0} ingresados`]),
+            ]),
+          ]),
+          createElement('div', { class: 'door-modal-actions' }, [
+            createButton({
+              text: 'Iniciar Siguiente Turno',
+              variant: 'primary',
+              fullWidth: true,
+              onClick: onConfirmarNuevoTurno || (() => {}),
+            }).el,
+            createButton({
+              text: 'Volver al Turno Actual',
+              variant: 'ghost',
+              fullWidth: true,
+              onClick: onCerrarModalTurno || (() => {}),
+            }).el,
+          ]),
+        ]),
+      ]);
+      container.appendChild(modalOverlay);
+    }
   }
 
   render();
@@ -554,24 +699,79 @@ export function createDoorController(deps = {}) {
   let sessionSold = 0;
   let destroyed = false;
 
+  const shiftKey = `shirley_door_shift_${eventId}`;
+  let turno = {
+    numero: 1,
+    nombre: 'Turno 1',
+    iniciadoEn: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+    ingresados: 0,
+    alertas: 0,
+    ventas: 0,
+    totalVentasSoles: 0,
+    porTipo: {},
+  };
+  let historialEscaneos = [];
+  let totalEventoIngresados = 0;
+  let totalEventoEmitidas = 0;
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(shiftKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.turno) {
+          turno = parsed.turno;
+          historialEscaneos = Array.isArray(parsed.historial) ? parsed.historial : [];
+        }
+      }
+    }
+  } catch {}
+
+  function saveShiftToStorage() {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(shiftKey, JSON.stringify({ turno, historial: historialEscaneos.slice(0, 50) }));
+      }
+    } catch {}
+  }
+
   const view = createDoorView({
     eventName: 'Cargando...',
     isCameraActive: false,
     sessionSold: 0,
+    turno,
+    historialEscaneos,
+    totalEventoIngresados,
+    totalEventoEmitidas,
     onBack: () => toEvent(eventId),
     onToggleCamera: handleToggleCamera,
     onSubmitCode: handleSubmitCode,
     onTabChange: handleTabChange,
     onSell: handleSellTickets,
+    onCerrarTurno: handleCerrarTurno,
+    onConfirmarNuevoTurno: handleConfirmarNuevoTurno,
+    onCerrarModalTurno: handleCerrarModalTurno,
   });
 
   async function loadEvent() {
     try {
-      const raw = await api.getEvent(eventId);
-      eventData = (raw && raw.evento) || raw;
+      const [rawEvent, rawSummary] = await Promise.all([
+        api.getEvent(eventId),
+        typeof api.getEventSummary === 'function' ? api.getEventSummary(eventId).catch(() => null) : null,
+      ]);
+      eventData = (rawEvent && rawEvent.evento) || rawEvent;
+      const sum = (rawSummary && rawSummary.resumen) || rawSummary;
+      if (sum) {
+        totalEventoIngresados = sum.entradas_ingresadas || 0;
+        totalEventoEmitidas = sum.entradas_emitidas || 0;
+      }
       view.update({
         eventName: eventData ? eventData.nombre : 'Evento',
         tiposDeEntrada: eventData ? (eventData.tipos_de_entrada || []) : [],
+        totalEventoIngresados,
+        totalEventoEmitidas,
+        turno: { ...turno },
+        historialEscaneos: [...historialEscaneos],
       });
     } catch {
       view.update({
@@ -676,7 +876,44 @@ export function createDoorController(deps = {}) {
   async function submitCheckin(secret) {
     try {
       const result = await api.checkInTicket(eventId, secret);
-      view.update({ result });
+      const horaStr = new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      if (result.resultado === 'Valida') {
+        turno.ingresados++;
+        totalEventoIngresados++;
+        const t = result.tipo_entrada || 'General';
+        turno.porTipo[t] = (turno.porTipo[t] || 0) + 1;
+        historialEscaneos.unshift({
+          hora: horaStr,
+          nombre: result.nombre_comprador || 'Asistente',
+          tipo: t,
+          resultado: 'Valida',
+        });
+      } else if (result.resultado === 'Ya Usada') {
+        turno.alertas++;
+        historialEscaneos.unshift({
+          hora: horaStr,
+          nombre: 'Entrada Ya Usada',
+          tipo: result.hora_ingreso ? `Ingresó: ${formatPublicDateTime(result.hora_ingreso)}` : '',
+          resultado: 'Ya Usada',
+        });
+      } else {
+        turno.alertas++;
+        historialEscaneos.unshift({
+          hora: horaStr,
+          nombre: 'Inválida',
+          tipo: result.motivo || 'No autorizada',
+          resultado: 'Invalida',
+        });
+      }
+
+      saveShiftToStorage();
+      view.update({
+        result,
+        turno: { ...turno },
+        historialEscaneos: [...historialEscaneos],
+        totalEventoIngresados,
+      });
     } catch (err) {
       view.update({
         result: {
@@ -685,6 +922,53 @@ export function createDoorController(deps = {}) {
         },
       });
     }
+  }
+
+  function handleCerrarTurno() {
+    const reporte = {
+      numero: turno.numero,
+      nombre: turno.nombre,
+      iniciadoEn: turno.iniciadoEn,
+      cerradoEn: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+      ingresados: turno.ingresados,
+      alertas: turno.alertas,
+      ventas: turno.ventas,
+      totalVentasSoles: turno.totalVentasSoles,
+      porTipo: { ...turno.porTipo },
+    };
+    view.update({
+      mostrarModalCierreTurno: true,
+      reporteCierreTurno: reporte,
+    });
+  }
+
+  function handleConfirmarNuevoTurno() {
+    const nextNum = (turno.numero || 1) + 1;
+    turno = {
+      numero: nextNum,
+      nombre: `Turno ${nextNum}`,
+      iniciadoEn: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+      ingresados: 0,
+      alertas: 0,
+      ventas: 0,
+      totalVentasSoles: 0,
+      porTipo: {},
+    };
+    historialEscaneos = [];
+    saveShiftToStorage();
+    view.update({
+      mostrarModalCierreTurno: false,
+      reporteCierreTurno: null,
+      turno: { ...turno },
+      historialEscaneos: [],
+    });
+  }
+
+  function handleCerrarModalTurno() {
+    view.update({
+      mostrarModalCierreTurno: false,
+      reporteCierreTurno: null,
+    });
   }
 
   async function handleSellTickets({ tipoEntrada, cantidad, medioPago }) {
@@ -707,6 +991,10 @@ export function createDoorController(deps = {}) {
       const unitPrice = selectedType ? (Number(selectedType.precio) || 0) : 0;
       const totalFormatted = (unitPrice * cantidad).toFixed(2);
 
+      turno.ventas += cantidad;
+      turno.totalVentasSoles += unitPrice * cantidad;
+      saveShiftToStorage();
+
       view.update({
         isSubmittingSell: false,
         sessionSold,
@@ -717,6 +1005,7 @@ export function createDoorController(deps = {}) {
           total: totalFormatted,
           medioPago,
         },
+        turno: { ...turno },
       });
     } catch (err) {
       view.update({

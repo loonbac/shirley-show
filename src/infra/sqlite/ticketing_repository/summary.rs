@@ -19,14 +19,15 @@ impl EventSummaryReader for SqliteTicketingRepository {
             ))
         })?;
 
-        // 1. Entradas metrics
-        let (cobrado_cents, pendiente_cents, entradas_emitidas): (i64, i64, u32) = {
+        // 1. Entradas metrics (incluyendo asistencia en puerta)
+        let (cobrado_cents, pendiente_cents, entradas_emitidas, entradas_ingresadas): (i64, i64, u32, u32) = {
             let mut stmt = conn
                 .prepare(
                     "SELECT
                         COALESCE(SUM(CASE WHEN estado_pago = 'Pagado' THEN precio_centimos ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN estado_pago = 'Pendiente' THEN precio_centimos ELSE 0 END), 0),
-                        COUNT(*)
+                        COUNT(*),
+                        COALESCE(SUM(CASE WHEN estado_checkin = 'Ingresó' THEN 1 ELSE 0 END), 0)
                      FROM entradas
                      WHERE evento_id = ?1;",
                 )
@@ -36,7 +37,8 @@ impl EventSummaryReader for SqliteTicketingRepository {
                 let cobrado: i64 = row.get(0)?;
                 let pendiente: i64 = row.get(1)?;
                 let count: u32 = row.get(2)?;
-                Ok((cobrado, pendiente, count))
+                let ingresadas: u32 = row.get(3)?;
+                Ok((cobrado, pendiente, count, ingresadas))
             })
             .map_err(|e| {
                 AppError::Database(format!("Failed to execute entradas summary query: {e}"))
@@ -190,6 +192,7 @@ impl EventSummaryReader for SqliteTicketingRepository {
             capacidad_total,
             entradas_emitidas,
             aforo_proyectado,
+            entradas_ingresadas,
             metodos_pago,
             categorias_gasto,
         ))
