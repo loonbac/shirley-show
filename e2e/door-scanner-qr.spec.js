@@ -99,11 +99,11 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
     });
 
     // Validar requerimientos del usuario:
-    // "agregas más puntos al QR": Versión 9 (53x53 = 2,809 módulos frente a 1,089 de V4)
-    expect(qrValidation.matrixSize).toBe(53);
-    // "el logo se ve muy pequeño...": logo amplio de 17 módulos (~190px en 660px) con fondo transparente
-    expect(qrValidation.logoMods).toBe(17);
-    expect(qrValidation.logoPx).toBeGreaterThanOrEqual(180);
+    // "agregas más puntos al QR": Versión 10 (57x57 = 3,249 módulos frente a 1,089 de V4)
+    expect(qrValidation.matrixSize).toBe(57);
+    // "el logo se ve muy pequeño...": logo extra grande de 23 módulos (~241px en 660px) con fondo transparente
+    expect(qrValidation.logoMods).toBe(23);
+    expect(qrValidation.logoPx).toBeGreaterThanOrEqual(230);
     // Decodificación perfecta en ZXing (completo y visor central)
     expect(qrValidation.zxingDecoded).toBe('e3b0c44298fc1c149afbf4c8996fb924');
     expect(qrValidation.cropDecoded).toBe('e3b0c44298fc1c149afbf4c8996fb924');
