@@ -106,6 +106,9 @@ function init() {
       shell.setHeader(activeController.headerEl);
       shell.setMain(activeController.viewEl);
     } else if (parsed.view === 'door') {
+      if (agentChatController && typeof agentChatController.close === 'function') {
+        agentChatController.close();
+      }
       const eventId = parsed.params.id;
       activeController = createDoorController({
         eventId,

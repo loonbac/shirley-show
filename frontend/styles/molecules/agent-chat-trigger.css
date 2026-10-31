@@ -173,8 +173,9 @@
   display: block;
 }
 
-/* Hidden state: Suppressed during Stage Mode live performance */
-.agent-chat-floating-trigger.is-hidden {
+/* Hidden state: Suppressed during Stage Mode live performance and Door Control Mode */
+.agent-chat-floating-trigger.is-hidden,
+body.door-mode-active .agent-chat-floating-trigger {
   display: none !important;
   pointer-events: none !important;
   visibility: hidden !important;
