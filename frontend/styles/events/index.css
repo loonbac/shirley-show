@@ -1032,6 +1032,16 @@ body.door-mode-active .shell-header {
   display: none !important;
 }
 
+/* Suppress Ressy AI Assistant completely in Door Control Mode */
+body.door-mode-active .agent-chat-floating-trigger,
+body.door-mode-active .agent-chat-panel,
+body.door-mode-active .agent-chat-trigger {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
 body.door-mode-active .shell-main {
   padding: 0 !important;
   margin: 0 !important;

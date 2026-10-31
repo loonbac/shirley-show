@@ -22,6 +22,11 @@ export function bindAgentChatShortcuts(options) {
         return;
       }
 
+      if (typeof document !== 'undefined' && document.body && document.body.classList.contains('door-mode-active')) {
+        // Suppress during Door Mode to prevent distraction while scanning
+        return;
+      }
+
       e.preventDefault();
       if (typeof onToggleChat === 'function') {
         onToggleChat();

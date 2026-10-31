@@ -230,5 +230,9 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
     await camSection.click();
     await expect(camSection).toHaveClass(/is-active/);
     await expect(page.locator('.door-camera-pill')).toContainText('Toca para pausar');
+
+    // 12. Verificar que la asistente Ressy (burbuja flotante y atajos) está completamente oculta/suprimida en Modo Puerta
+    const ressyFloating = page.locator('.agent-chat-floating-trigger');
+    await expect(ressyFloating).toBeHidden();
   });
 });
