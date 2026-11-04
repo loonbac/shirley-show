@@ -89,8 +89,12 @@ fn test_repository_frontend_graph_is_complete() {
     );
 }
 
-/// An unanchored "data/" in .dockerignore matches frontend/js/data/ and drops
-/// 14 modules from the image. The patterns must be anchored to the repo root.
+/// Anchoring the .dockerignore patterns is a precaution, not the fix for the
+/// blank-page incident: Docker matches these against the full path relative to
+/// the context root, so a bare "data/" only ever excluded the top-level
+/// directory. It is pinned because the anchoring costs nothing and keeps the
+/// intent obvious; the real protection against a truncated context is the guard
+/// asserted below.
 #[test]
 fn test_dockerignore_anchors_runtime_directories() {
     let content = fs::read_to_string(".dockerignore").expect("read .dockerignore");
@@ -142,9 +146,11 @@ fn test_guard_script_ships_into_the_build_context() {
     );
 }
 
-/// The same unanchored pattern in .gitignore hides a new module dropped into
-/// frontend/js/data/: it stays untracked and disappears from the next
-/// checkout, which is how a complete tree turns into a truncated one.
+/// This one fixes a real defect, and a different one from the incident: git,
+/// unlike Docker, applies ignore patterns at any depth, so a bare "data/" hides
+/// a new module dropped into frontend/js/data/. It never appears in git status
+/// and never gets committed. The modules lost in the incident were all tracked;
+/// this pattern would have eroded the tree over time instead.
 #[test]
 fn test_gitignore_anchors_runtime_directories() {
     let content = fs::read_to_string(".gitignore").expect("read .gitignore");

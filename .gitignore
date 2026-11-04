@@ -5,9 +5,11 @@
 target/
 .run/
 .env
-# Anchored on purpose: a bare "data/" or "production-data/" also matches a
-# nested path such as frontend/js/data/, so a new module dropped there stays
-# untracked and disappears from the next checkout.
+# Anchored on purpose. Unlike Docker, git matches ignore patterns at any
+# depth, so a bare "data/" also hides frontend/js/data/: a new module dropped
+# there never shows in git status and never gets committed. This is a real
+# defect, but a separate one: the modules lost in the blank-page incident were
+# all committed and tracked.
 /data/
 /production-data/
 secrets/*

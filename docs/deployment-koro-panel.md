@@ -199,9 +199,19 @@ Sin `ffmpeg`, `test_encode_mp3_320k_success` falla con `IoError(NotFound)`. Sin
 # 1. copiar el árbol desde un checkout limpio, sin build, sin dependencias ni datos.
 #    git archive parte de lo que git rastrea, así que no puede arrastrar
 #    target/, node_modules/ ni la base de datos. Preferirlo a un tar con
-#    --exclude escritos a mano: un "--exclude data/" sin anclar también borra
-#    frontend/js/data/, y la imagen resultante compila bien pero sirve una
-#    página en blanco.
+#    --exclude escritos a mano.
+#
+#    Cuidado con la semántica de los patrones, porque no coincide entre
+#    herramientas y un mismo texto hace cosas distintas:
+#      tar   --exclude='data'    -> casa a CUALQUIER profundidad: borra
+#                                   frontend/js/data/ (esto causó la página en
+#                                   blanco del commit 3414a23)
+#      tar   --exclude='./data'  -> solo la raíz
+#      rsync --exclude='data/'   -> casa a cualquier profundidad (mismo peligro)
+#      rsync --exclude='/data/'  -> solo la raíz
+#      docker .dockerignore data/ -> solo la raíz (Docker casa la ruta completa)
+#      git   .gitignore    data/  -> cualquier profundidad; oculta módulos nuevos
+#    Por eso el paso 1b no es opcional: comprueba el resultado, no la intención.
 git archive HEAD | tar x -C /tmp/build-src
 instabox ssh <caja> -- 'rm -rf /data/workspace/build && mkdir -p /data/workspace/build'
 rsync -a --exclude='/target/' --exclude='/node_modules/' --exclude='/.git/' --exclude='/.env' \

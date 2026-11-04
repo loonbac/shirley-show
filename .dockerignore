@@ -16,9 +16,12 @@ secrets/
 *id_rsa*
 
 # Runtime state and production data: the container gets a volume, never a copy.
-# Anchored with a leading slash on purpose: an unanchored "data/" also matches
-# frontend/js/data/, and dropping that directory builds cleanly but serves a
-# blank page. An anchored pattern only matches the repository root.
+# Anchored with a leading slash as a precaution. Docker already matches these
+# patterns against the full path relative to the context root, so a bare "data/"
+# only ever excluded the top-level directory and never frontend/js/data/. The
+# anchoring costs nothing and removes the ambiguity for anyone reading this.
+# It does NOT fix the blank-page incident: that came from tar, where an
+# unanchored --exclude='data' matches any path segment.
 /data/
 /production-data/
 /audio/
