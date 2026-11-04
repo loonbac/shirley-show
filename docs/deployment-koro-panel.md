@@ -260,12 +260,22 @@ ssh -i ~/.ssh/id_elastika root@<vps> \
 #    La URL no es loopback ni el puerto por defecto. El panel se ata a la IP de
 #    Tailscale y al puerto del unit, no a 127.0.0.1: comprobado en el VPS,
 #    koro-panel escucha en 100.82.97.118:9090 (PANEL_BIND + PANEL_PORT en
-#    /etc/koro-panel.env y el unit), mientras que 127.0.0.1:3000 lo ocupa
-#    DOCKERD. Apuntar ahí no falla con "connection refused": devuelve
-#    HTTP 405 Method Not Allowed, que se lee como si el panel hubiera
-#    contestado cuando en realidad no se habló con él. Y 127.0.0.1:9090 sí
-#    rehúsa la conexión, porque el panel no escucha en loopback.
-PANEL_URL=http://100.82.97.118:9090   # PANEL_BIND + PANEL_PORT del unit
+#    /etc/koro-panel.env y el unit). Y 127.0.0.1:9090 rehúsa la conexión,
+#    porque el panel no escucha en loopback.
+#
+#    Cuidado con 127.0.0.1:3000: NO es el panel. Lo publica el contenedor
+#    panel-korosoft-lead, la landing de korosoft.site. Apuntar ahí no falla con
+#    "connection refused" y ahí está el peligro:
+#      POST /api/v1/projects/app-shir/acciones/up  -> 405  (Allow: GET, HEAD)
+#      GET  /api/v1/projects/app-shir/acciones/up  -> 200  (fallback HTML)
+#    La landing sirve su SPA para cualquier ruta, así que un GET de
+#    "verificación" devuelve 200 y da el paso por bueno mientras se golpea otro
+#    sitio en producción. Verificar SIEMPRE con POST y con -f.
+#
+#    Que un puerto lo "posea" dockerd en ss -ltnp no dice qué lo sirve: dockerd
+#    figura como dueño de todo puerto publicado por un contenedor. Cruzar con
+#    docker ps --format '{{.Names}} {{.Ports}}' y con el contenido servido.
+PANEL_URL=http://100.82.97.118:9090   # PANEL_BIND + PANEL_PORT del unit; loopback cerrado
 #    -f hace que un 4xx salga como exit != 0 en vez de pasar silenciosamente.
 curl -sSf -X POST "$PANEL_URL/api/v1/projects/app-shir/acciones/up" \
   -H 'Authorization: Bearer <token>' | tee /dev/stderr | grep -q '"ok":true'
