@@ -25,3 +25,8 @@ node_modules/
 # Playwright test artifacts
 test-results/
 playwright-report/
+
+# Imágenes subidas (afiches) — datos de runtime, en el volumen
+data/media/
+tmp/
+.air.toml
