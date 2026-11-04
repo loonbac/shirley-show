@@ -152,7 +152,12 @@ async fn test_chat_api_unconfigured_key_returns_200_with_notice() {
     assert_eq!(json["actions_taken"], json!([]));
     assert_eq!(json["notice"]["code"], "agent_unconfigured");
     assert!(json["message"].as_str().unwrap().contains("GROQ_API_KEY"));
-    assert!(json["message"].as_str().unwrap().contains("CMD_API_KEY"));
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("OPENCODE_API_KEY")
+    );
 }
 
 #[tokio::test]

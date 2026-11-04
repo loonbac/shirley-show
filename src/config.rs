@@ -5,13 +5,16 @@ use std::time::Duration;
 
 pub const DEFAULT_GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
 pub const DEFAULT_GROQ_MODEL: &str = "openai/gpt-oss-120b";
-pub const DEFAULT_COMMAND_CODE_BASE_URL: &str = "https://api.commandcode.ai/provider/v1";
-pub const DEFAULT_COMMAND_CODE_MODEL: &str = "stealth/space-bunny-alpha";
+pub const DEFAULT_OPENCODE_BASE_URL: &str = "https://opencode.ai/inference/go/openai/v1";
+// Cheapest model that still completes a full multi-step tool flow. The Go plan
+// charges per token against a monthly cap; deepseek-v4.1-flash has the largest
+// cap of the cheap tier, so a long show day does not exhaust it.
+pub const DEFAULT_OPENCODE_MODEL: &str = "deepseek-v4.1-flash";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LlmProviderKind {
     #[default]
-    CommandCode,
+    OpenCode,
     Groq,
 }
 
@@ -47,9 +50,9 @@ impl Default for GroqConfig {
     fn default() -> Self {
         Self {
             api_key: None,
-            base_url: DEFAULT_COMMAND_CODE_BASE_URL.to_string(),
-            model: DEFAULT_COMMAND_CODE_MODEL.to_string(),
-            provider: LlmProviderKind::CommandCode,
+            base_url: DEFAULT_OPENCODE_BASE_URL.to_string(),
+            model: DEFAULT_OPENCODE_MODEL.to_string(),
+            provider: LlmProviderKind::OpenCode,
         }
     }
 }
@@ -57,13 +60,13 @@ impl Default for GroqConfig {
 impl GroqConfig {
     pub fn provider_name(&self) -> &'static str {
         match self.provider {
-            LlmProviderKind::CommandCode => "Command Code",
+            LlmProviderKind::OpenCode => "OpenCode Go",
             LlmProviderKind::Groq => "Groq",
         }
     }
 
-    pub fn is_command_code(&self) -> bool {
-        self.provider == LlmProviderKind::CommandCode
+    pub fn is_opencode(&self) -> bool {
+        self.provider == LlmProviderKind::OpenCode
     }
 
     pub fn normalize(&mut self) {
@@ -82,7 +85,7 @@ impl GroqConfig {
         }
         if trimmed_url.is_empty() {
             self.base_url = match self.provider {
-                LlmProviderKind::CommandCode => DEFAULT_COMMAND_CODE_BASE_URL.to_string(),
+                LlmProviderKind::OpenCode => DEFAULT_OPENCODE_BASE_URL.to_string(),
                 LlmProviderKind::Groq => DEFAULT_GROQ_BASE_URL.to_string(),
             };
         } else {
@@ -92,7 +95,7 @@ impl GroqConfig {
         let trimmed_model = self.model.trim();
         if trimmed_model.is_empty() {
             self.model = match self.provider {
-                LlmProviderKind::CommandCode => DEFAULT_COMMAND_CODE_MODEL.to_string(),
+                LlmProviderKind::OpenCode => DEFAULT_OPENCODE_MODEL.to_string(),
                 LlmProviderKind::Groq => DEFAULT_GROQ_MODEL.to_string(),
             };
         } else {
@@ -101,7 +104,10 @@ impl GroqConfig {
     }
 
     pub fn from_env() -> Self {
-        let cmd_key = env::var("CMD_API_KEY")
+        // Legacy names stay readable so an operator upgrading from the
+        // Command Code build does not lose the assistant silently.
+        let opencode_key = env::var("OPENCODE_API_KEY")
+            .or_else(|_| env::var("CMD_API_KEY"))
             .or_else(|_| env::var("COMMAND_CODE_API_KEY"))
             .ok()
             .and_then(|k| {
@@ -122,18 +128,18 @@ impl GroqConfig {
             }
         });
 
-        let mut config = if let Some(key) = cmd_key {
-            let base_url = env::var("CMD_BASE_URL")
-                .or_else(|_| env::var("COMMAND_CODE_BASE_URL"))
-                .unwrap_or_else(|_| DEFAULT_COMMAND_CODE_BASE_URL.to_string());
-            let model = env::var("CMD_MODEL")
-                .or_else(|_| env::var("COMMAND_CODE_MODEL"))
-                .unwrap_or_else(|_| DEFAULT_COMMAND_CODE_MODEL.to_string());
+        let mut config = if let Some(key) = opencode_key {
+            let base_url = env::var("OPENCODE_BASE_URL")
+                .or_else(|_| env::var("CMD_BASE_URL"))
+                .unwrap_or_else(|_| DEFAULT_OPENCODE_BASE_URL.to_string());
+            let model = env::var("OPENCODE_MODEL")
+                .or_else(|_| env::var("CMD_MODEL"))
+                .unwrap_or_else(|_| DEFAULT_OPENCODE_MODEL.to_string());
             Self {
                 api_key: Some(key),
                 base_url,
                 model,
-                provider: LlmProviderKind::CommandCode,
+                provider: LlmProviderKind::OpenCode,
             }
         } else if let Some(key) = groq_key {
             let base_url =
@@ -146,17 +152,17 @@ impl GroqConfig {
                 provider: LlmProviderKind::Groq,
             }
         } else {
-            let base_url = env::var("CMD_BASE_URL")
-                .or_else(|_| env::var("COMMAND_CODE_BASE_URL"))
-                .unwrap_or_else(|_| DEFAULT_COMMAND_CODE_BASE_URL.to_string());
-            let model = env::var("CMD_MODEL")
-                .or_else(|_| env::var("COMMAND_CODE_MODEL"))
-                .unwrap_or_else(|_| DEFAULT_COMMAND_CODE_MODEL.to_string());
+            let base_url = env::var("OPENCODE_BASE_URL")
+                .or_else(|_| env::var("CMD_BASE_URL"))
+                .unwrap_or_else(|_| DEFAULT_OPENCODE_BASE_URL.to_string());
+            let model = env::var("OPENCODE_MODEL")
+                .or_else(|_| env::var("CMD_MODEL"))
+                .unwrap_or_else(|_| DEFAULT_OPENCODE_MODEL.to_string());
             Self {
                 api_key: None,
                 base_url,
                 model,
-                provider: LlmProviderKind::CommandCode,
+                provider: LlmProviderKind::OpenCode,
             }
         };
 
