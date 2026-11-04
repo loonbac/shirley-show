@@ -204,7 +204,11 @@ impl ColabVocalSeparator {
             // Re-check ownership after sleeping.
             {
                 let guard = sessions.lock().await;
-                if !guard.should_release(generation) {
+                let owns = guard.should_release(generation);
+                if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                    eprintln!("[release] generation {generation} owns={owns}");
+                }
+                if !owns {
                     return;
                 }
             }
@@ -219,8 +223,8 @@ impl ColabVocalSeparator {
                 tokio::time::timeout(Duration::from_secs(60), cmd.status()).await,
                 Ok(Ok(st)) if st.success()
             );
-            if !ok && std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
-                eprintln!("[release] could not stop {session_id}; rerun colab stop");
+            if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                eprintln!("[release] stop {session_id} ok={ok}");
             }
         });
     }

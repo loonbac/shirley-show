@@ -335,3 +335,59 @@ fn test_youtube_link_without_destination_still_exposes_the_downloader() {
     };
     assert_eq!(audio_turn_kind(state), AudioTurnKind::Youtube);
 }
+
+// T17. El prompt de AttachedFile pedía un `track_id` que no puede existir: un
+// audio recién adjunto no es una pista. El código ya registra el adjunto y le da
+// un `staged_audio_id`, pero el prompt le decía al modelo que pidiera
+// `get_presentation` para obtener el `track_id` de la pista. El agente obedecía,
+// veía `tracks_count: 0` en una presentación vacía y se detenía con
+// `actions_taken: []`.
+//
+// Reportado en producción por la sesión de despliegue, con la cita textual.
+#[test]
+fn test_attached_file_prompt_uses_the_staged_id_not_a_track_id() {
+    use shirley_show::agent::tool_routing::{AudioTurnKind, audio_turn_instruction};
+
+    let prompt = audio_turn_instruction(AudioTurnKind::AttachedFile, true);
+    assert!(
+        prompt.contains("staged_audio_id"),
+        "el prompt debe nombrar el id que sí existe: {prompt}"
+    );
+    assert!(
+        !prompt.contains("track_id de la pista"),
+        "un audio adjunto no es una pista, así que no puede tener track_id: {prompt}"
+    );
+    assert!(
+        !prompt.contains("para obtener el track_id"),
+        "pedir get_presentation para obtener un track_id inexistente es lo que \
+         rompía el turno: {prompt}"
+    );
+}
+
+// T18. Un audio preparado sí es un id de staging, igual que el adjunto. El
+// prompt no debe hablarle de pistas tampoco.
+#[test]
+fn test_prepared_audio_prompt_uses_the_staged_id() {
+    use shirley_show::agent::tool_routing::{AudioTurnKind, audio_turn_instruction};
+
+    let prompt = audio_turn_instruction(AudioTurnKind::PreparedAudio, true);
+    assert!(prompt.contains("staged_audio_id"), "{prompt}");
+    assert!(!prompt.contains("track_id de la pista"), "{prompt}");
+}
+
+// T19. El caso de pista existente sí debe hablar de track_id: ahí es el único id
+// que hay. Es la razón por la que los prompts no pueden compartirse.
+#[test]
+fn test_existing_track_prompt_uses_track_id() {
+    use shirley_show::agent::tool_routing::{AudioTurnKind, audio_turn_instruction};
+
+    let prompt = audio_turn_instruction(AudioTurnKind::ExistingTrack, true);
+    assert!(
+        prompt.contains("track_id"),
+        "cuando la pista ya está en la presentación, ese es el id correcto: {prompt}"
+    );
+    assert!(
+        !prompt.contains("descargues"),
+        "no hay nada que descargar: {prompt}"
+    );
+}

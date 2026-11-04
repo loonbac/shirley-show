@@ -135,14 +135,20 @@ pub fn audio_turn_instruction(kind: AudioTurnKind, has_destination: bool) -> Str
             } else {
                 "El audio ya esta preparado y disponible temporalmente: no lo descargues ni lo pidas."
             };
+            // El id que existe aquí es de staging, no de pista: un audio recién
+            // adjunto no es una pista de la presentación. La versión anterior
+            // pedía `get_presentation` «para obtener el track_id de la pista»
+            // —un id que no puede existir—, así que el agente llamaba, veía
+            // `tracks_count: 0` y se detenía sin separar.
             format!(
                 "{source} Destino confirmado: {has_destination}. Si no esta confirmado, llama a \
                  list_presentations, identifica por el nombre escrito por la usuaria una unica \
-                 presentacion y llama a get_presentation con su ID. Despues llama a \
-                 get_presentation para obtener el track_id de la pista y llama a separate_vocals \
-                 con ese track_id. Para quitar solo la voz principal usa mode=chorus; para quitar \
-                 todas las voces usa mode=instrumental. Finalmente agrega el resultado con \
-                 add_track_from_staged."
+                 presentacion y llama a get_presentation con su ID. Para separar, llama a \
+                 separate_vocals SIN pasar track_id: el sistema ya conoce el audio adjunto y usa \
+                 su staged_audio_id automaticamente. No busques un track_id de pista, porque un \
+                 audio recien adjunto todavia no es una pista de la presentacion. Para quitar \
+                 solo la voz principal usa mode=chorus; para quitar todas las voces usa \
+                 mode=instrumental. Finalmente agrega el resultado con add_track_from_staged."
             )
         }
         AudioTurnKind::ExistingTrack => format!(
