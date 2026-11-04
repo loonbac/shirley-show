@@ -357,3 +357,78 @@ docker inspect panel-app-shir > /root/panel-app-shir.backup-$(date +%F-%H%M).jso
 ```
 
 Revertir es cargar la imagen anterior y repetir el paso 4 con ese tag.
+
+## 10. Guardas dentro del contenedor: tres reglas
+
+Las guardas de despliegue comprueban que la imagen es la correcta. Tres detalles las
+rompen en silencio, y los tres se descubrieron midiendo, no leyendo.
+
+### 10.1 Un binario ausente se parece a un fallo
+
+La imagen de runtime **no trae `strings`**. Un `docker exec … strings` devuelve
+`sh: 1: strings: not found` — y ese silencio es indistinguible de un símbolo
+ausente, que es justo lo que la guarda existe para detectar.
+
+Comprobar antes de usar, o usar la alternativa que sí está:
+
+```sh
+docker exec panel-app-shir sh -c 'command -v strings || echo AUSENTE'
+docker exec panel-app-shir sh -c 'grep -ac transfer_failed /app/shirley-show'
+```
+
+Presentes en la imagen: `grep`, `tr`, `od`, `awk`, `sed`, `curl`, `colab`,
+`ffprobe`, `openssl`, `ffmpeg`. Ausentes: `strings`, `wget`.
+
+### 10.2 La guarda usa un literal, no un nombre de módulo
+
+Los nombres de módulo y de tipo **no sobreviven al binario**: los elimina el
+compilador o los ofusca el enlazador. Los literales de cadena sí, porque están en
+los datos del ejecutable.
+
+```sh
+# NO sirve: grep -ac tool_routing /app/shirley-show        -> 0
+# NO sirve: grep -ac ExistingTrack /app/shirley-show       -> 0
+# SI sirve: un literal del código
+docker exec panel-app-shir sh -c \
+  'grep -ac "El audio esta adjunto en esta solicitud" /app/shirley-show'
+```
+
+### 10.3 `grep -c` devuelve exit 1 al contar cero
+
+Con `set -e` el script muere **sin decir por qué**: cero coincidencias es un
+fallo de `grep`, no un error de la guarda. Hay que absorberlo explícitamente:
+
+```sh
+set -e
+count=$(docker exec panel-app-shir sh -c \
+  'grep -ac transfer_failed /app/shirley-show' || true)
+if [ "${count:-0}" -lt 1 ]; then
+  echo "FALLO: la imagen no contiene el literal esperado"; exit 1
+fi
+```
+
+### 10.4 Comprobar el apagado de la GPU
+
+`colab status` **no es prueba de nada por sí solo**. Dos formas de leerlo mal:
+
+- El campo `Idle` puede pertenecer a una sesión **anterior**: ver
+  `Connected: true` con horas de inactividad no significa que la GPU de este turno
+  siga viva.
+- Una GPU recién arrancada **sin trabajo** la recoge Colab sola, así que responde
+  `No active runtime` aunque nadie la haya apagado.
+
+La evidencia válida es el log del release con su generación, o un `colab exec`
+que funciona antes del `stop` y falla después:
+
+```sh
+colab exec --session <id> -c 'print("VIVA")'   # funciona si está viva
+colab stop
+colab exec --session <id> -c 'print("VIVA")'   # "no active runtime with endpoint"
+```
+
+Con `SHIRLEY_COLAB_DEBUG_OUTPUT=1` el apagado diferido se registra:
+
+```text
+[release] generation 1 owns=true
+[release] stop gpu-g4-... ok=true
+```

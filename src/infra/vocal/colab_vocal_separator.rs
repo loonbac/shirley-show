@@ -323,6 +323,34 @@ impl ColabVocalSeparator {
         Ok(hash.to_lowercase())
     }
 
+    /// Arranca el vigilante que libera runtimes huérfanos.
+    ///
+    /// Cubre el caso en que el release falló en silencio. Se le pasa el semáforo
+    /// de GPU como señal de trabajo en curso: si no quedan permisos, hay una
+    /// separación corriendo y apagar mataría un trabajo ya pagado.
+    pub fn spawn_reaper(&self, interval: Duration) -> tokio::task::JoinHandle<()> {
+        let gpu = self.config.gpu.clone();
+        let sessions = self.sessions.clone();
+        let retention = crate::infra::vocal::colab_transfer::SESSION_IDLE_RETENTION;
+
+        let has_active_work = std::sync::Arc::new(move || gpu.available_permits() == 0);
+        let inside_retention = std::sync::Arc::new(move || {
+            sessions
+                .try_lock()
+                .map(|guard| {
+                    guard.release_deadline().is_some() && guard.reusable(retention).is_some()
+                })
+                .unwrap_or(true)
+        });
+
+        crate::infra::vocal::colab_orphan_reaper::spawn_periodic_reaper(
+            self.config.colab_bin.clone(),
+            interval,
+            has_active_work,
+            inside_retention,
+        )
+    }
+
     async fn stop_session(&self, session_id: &str) -> bool {
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);

@@ -730,3 +730,78 @@ fn test_release_survives_contention() {
     assert_ne!(gen_other, 0);
     assert_ne!(gen_main, gen_other);
 }
+
+// R3-005, el único riesgo de dinero que queda abierto. La tarea de release vive
+// dentro del proceso: si el proceso muere por SIGKILL, OOM o un reinicio duro,
+// nadie ejecuta `colab stop` y la GPU sigue facturando hasta que Colab expira la
+// sesión por inactividad. No hay destructor que cubra eso.
+//
+// La única defensa posible es desde fuera del turno: barrer runtimes huérfanos.
+// Dos momentos importan:
+//
+// 1. Al arrancar. El proceso nuevo es el primero que puede limpiar lo que dejó el
+//    anterior, y es exactamente el escenario del SIGKILL.
+// 2. Durante la vida del proceso, por si el release falló en silencio.
+//
+// El barrido apaga TODOS los runtimes de la cuenta, así que la condición para
+// hacerlo tiene que ser conservadora: nadie trabajando y nada que merezca
+// conservarse.
+#[test]
+fn test_reaper_never_stops_a_runtime_in_use() {
+    use shirley_show::infra::vocal::colab_orphan_reaper::{ReapDecision, reap_decision};
+
+    assert_eq!(
+        reap_decision(true, false),
+        ReapDecision::Keep,
+        "hay una separación en curso: apagar mataría el trabajo y perdería la GPU pagada"
+    );
+    assert_eq!(
+        reap_decision(true, true),
+        ReapDecision::Keep,
+        "aunque la caché esté vacía, un trabajo activo manda"
+    );
+}
+
+// Una sesión dentro de la ventana de retención se conserva: apagarla rompería la
+// reutilización que se pidió.
+#[test]
+fn test_reaper_keeps_a_session_inside_the_retention_window() {
+    use shirley_show::infra::vocal::colab_orphan_reaper::{ReapDecision, reap_decision};
+
+    assert_eq!(
+        reap_decision(false, true),
+        ReapDecision::Keep,
+        "nadie trabaja, pero la ventana de retención sigue abierta: se conserva"
+    );
+}
+
+// Sin trabajo y sin nada que conserve la sesión, es un huérfano: apagar.
+#[test]
+fn test_reaper_stops_a_true_orphan() {
+    use shirley_show::infra::vocal::colab_orphan_reaper::{ReapDecision, reap_decision};
+
+    assert_eq!(
+        reap_decision(false, false),
+        ReapDecision::Stop,
+        "sin trabajo y fuera de la ventana, cualquier runtime vivo está facturando \
+         sin dueño: hay que apagarlo"
+    );
+}
+
+// El barrido del arranque no espera ventana: si el proceso anterior murió, su
+// sesión no tiene dueño aunque acabe de crearse.
+#[test]
+fn test_boot_sweep_stops_regardless_of_retention() {
+    use shirley_show::infra::vocal::colab_orphan_reaper::{ReapDecision, boot_reap_decision};
+
+    assert_eq!(
+        boot_reap_decision(true),
+        ReapDecision::Keep,
+        "si ya hay trabajo arrancando, no se toca"
+    );
+    assert_eq!(
+        boot_reap_decision(false),
+        ReapDecision::Stop,
+        "al arrancar no hay ningún turno en curso, así que cualquier runtime es huérfano"
+    );
+}

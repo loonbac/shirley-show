@@ -23,6 +23,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("No exponer públicamente sin una capa de seguridad o proxy inverso.");
     eprintln!("====================================================================");
 
+    // Barrido de runtimes huérfanos al arrancar.
+    //
+    // Un SIGKILL, un OOM o un reinicio duro no ejecutan ningún destructor, así
+    // que la tarea de release que vive dentro del proceso nunca corre y la GPU
+    // sigue facturando hasta que Colab expira la sesión. El proceso nuevo es el
+    // primero que puede limpiarlo, y aquí no hay ningún turno en curso, así que
+    // cualquier runtime vivo lo dejó un proceso anterior.
+    {
+        let colab_bin = std::env::var("SHIRLEY_COLAB_BIN")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("colab"));
+        let decision = shirley_show::infra::vocal::colab_orphan_reaper::boot_reap_decision(false);
+        if decision == shirley_show::infra::vocal::colab_orphan_reaper::ReapDecision::Stop {
+            let stopped = shirley_show::infra::vocal::colab_orphan_reaper::stop_all_runtimes(
+                &colab_bin,
+                std::time::Duration::from_secs(60),
+            )
+            .await;
+            println!("Barrido de GPU al arrancar: runtimes huérfanos liberados={stopped}");
+        }
+    }
     let audio_dir = config.data_dir.join("audio");
     fs::create_dir_all(audio_dir.join("files"))?;
     fs::create_dir_all(audio_dir.join("staging"))?;
