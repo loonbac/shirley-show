@@ -1,10 +1,15 @@
 import { createElement } from '../../utils/dom/create-element.js';
+import { renderMarkdown } from '../../utils/markdown/render-markdown.js';
 import { createIcon } from '../atoms/icon.js';
 import { createAgentToolCard } from './agent-tool-card.js';
 
 /**
  * Renders an individual conversation turn message bubble.
- * Strictly sanitizes model content by creating plain text nodes to prevent XSS.
+ *
+ * Assistant replies are rendered as Markdown so headings, lists, tables and
+ * code blocks survive. The renderer returns DOM nodes and never parses an HTML
+ * string, so model output cannot inject markup. User messages stay plain text:
+ * they are typed input, not a document.
  *
  * @param {{
  *   message: {
@@ -33,8 +38,33 @@ export function createAgentMessageBubble(props) {
         createIcon({ name: 'sparkles', size: 'sm' }),
       ]);
 
-  // Plain text node creation strictly prevents script execution
-  const textEl = createElement('div', { class: 'agent-message-text' }, [message.content || '']);
+  const textEl = createElement('div', { class: 'agent-message-text' });
+
+  /** Fills the bubble body according to the message role. */
+  function fillText() {
+    while (textEl.firstChild) {
+      textEl.removeChild(textEl.firstChild);
+    }
+    textEl.className = isUser
+      ? 'agent-message-text'
+      : 'agent-message-text agent-message-text--markdown';
+
+    if (isUser) {
+      textEl.appendChild(document.createTextNode(message.content || ''));
+      return;
+    }
+
+    const rendered = renderMarkdown(message.content || '');
+    if (rendered.length === 0) {
+      textEl.appendChild(document.createTextNode(message.content || ''));
+      return;
+    }
+    for (const node of rendered) {
+      textEl.appendChild(node);
+    }
+  }
+
+  fillText();
 
   const metaChildren = [];
   if (message.attachment) {
@@ -79,7 +109,7 @@ export function createAgentMessageBubble(props) {
   function update(nextProps = {}) {
     if (nextProps.message) {
       message = nextProps.message;
-      textEl.textContent = message.content || '';
+      fillText();
     }
   }
 
