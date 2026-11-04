@@ -18,8 +18,19 @@ import { createElement } from '../dom/create-element.js';
 const SAFE_URL_SCHEMES = new Set(['http:', 'https:', 'mailto:', 'tel:']);
 
 /**
- * Returns true when the URL is safe to place in an href/src attribute.
- * Relative URLs are allowed; absolute URLs must use an allowed scheme.
+ * Resolves the URL the way a browser will, then allowlists its scheme.
+ *
+ * Parsing with `new URL` is the check itself, not a formality. A browser
+ * strips tabs, newlines and NULs while parsing, so `"java\tscript:alert(1)"`
+ * or `"\u0000javascript:alert(1)"` are genuinely `javascript:` URLs even
+ * though their raw text never matches a `^scheme:` pattern. Detecting the
+ * scheme by regex on the raw string and returning early for "no scheme" is
+ * exactly the bypass this function has to survive, so every URL goes through
+ * the parser and is judged on the parsed protocol.
+ *
+ * Relative URLs (paths, anchors, queries) resolve against the base and inherit
+ * its `https:` protocol, which is allowlisted.
+ *
  * @param {string} url
  * @returns {boolean}
  */
@@ -28,20 +39,13 @@ export function isSafeUrl(url) {
   const trimmed = url.trim();
   if (trimmed === '') return false;
 
-  // Any explicit scheme must be allowlisted. A scheme is `word:` before any
-  // path, query, or fragment separator.
-  const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(trimmed);
-  if (!schemeMatch) {
-    // No scheme: relative path, anchor, or query. Safe.
-    return true;
-  }
-
   let parsed;
   try {
     parsed = new URL(trimmed, 'https://example.invalid/');
   } catch {
     return false;
   }
+
   return SAFE_URL_SCHEMES.has(parsed.protocol.toLowerCase());
 }
 

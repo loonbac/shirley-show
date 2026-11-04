@@ -180,12 +180,41 @@ function findByTag(nodes, tag) {
   assert.equal(anchors[0].getAttribute('target'), '_blank');
 }
 
-// 13. Unsafe URLs never become clickable
+// 13. Unsafe URLs never become clickable, including ones only a browser's
+// own parser normalizes into a dangerous scheme.
 {
-  for (const bad of ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'data:text/html,<script>alert(1)</script>', 'vbscript:msgbox(1)']) {
+  const badUrls = [
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+    'vbscript:msgbox(1)',
+    'file:///etc/passwd',
+    'blob:https://x/y',
+    'about:blank',
+    // Whitespace and control characters that a browser strips while parsing,
+    // turning the raw text into a real javascript: URL.
+    '\u0000javascript:alert(1)',
+    'java\tscript:alert(1)',
+    'java\nscript:alert(1)',
+    '  javascript:alert(1)',
+    '\tjavascript:alert(1)',
+    '\njavascript:alert(1)',
+  ];
+  for (const bad of badUrls) {
     const nodes = render(`[x](${bad})`);
     const anchors = findByTag(nodes, 'a');
-    assert.equal(anchors.length, 0, `${bad} must not become a link`);
+    assert.equal(anchors.length, 0, `${JSON.stringify(bad)} must not become a link`);
+  }
+}
+
+// 13b. Safe destinations still work, including relative and mailto forms
+{
+  for (const good of ['https://ejemplo.com', 'http://x.y/z?a=1', 'mailto:a@b.c', 'tel:+51999', '/rel/path', '#ancla']) {
+    const nodes = render(`[x](${good})`);
+    const anchors = findByTag(nodes, 'a');
+    assert.equal(anchors.length, 1, `${good} must stay clickable`);
+    assert.equal(anchors[0].getAttribute('href'), good);
   }
 }
 
