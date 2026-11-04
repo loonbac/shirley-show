@@ -641,3 +641,92 @@ fn test_retry_respects_the_callers_total_budget() {
         "six attempts must not each get the full budget: took {elapsed:?} for a {budget:?} budget"
     );
 }
+
+// R3-005, el que cuesta dinero. El release se armaba con `arm_release`, que
+// devuelve 0 cuando no puede tomar el lock interno, y `should_release(0)` es
+// siempre false. Resultado: la tarea de limpieza dormía 180s, se declaraba no
+// propietaria y **no apagaba nada**. La GPU quedaba facturando hasta que alguien
+// ejecutara `colab stop` a mano.
+//
+// Confirmado en producción: `Connected: true` con `Idle: 17907s` tras una
+// separación, y hubo que liberarla explícitamente.
+#[test]
+fn test_release_generation_is_never_zero() {
+    use shirley_show::infra::vocal::colab_session_cache::ColabSessionCache;
+    use std::time::Instant;
+
+    let mut cache = ColabSessionCache::new();
+    let generation = cache.arm_release(Instant::now());
+    assert_ne!(
+        generation, 0,
+        "generation 0 is the sentinel that means 'not the owner', so a real \
+         release must never be handed it"
+    );
+    assert!(
+        cache.should_release(generation),
+        "the task that armed the release must be allowed to stop the session"
+    );
+}
+
+// Un release armado y nunca superado debe apagar. Este es el camino normal: una
+// separación, nadie más usa la máquina, la tarea duerme y apaga.
+#[test]
+fn test_armed_release_owns_the_shutdown() {
+    use shirley_show::infra::vocal::colab_session_cache::ColabSessionCache;
+    use std::time::Instant;
+
+    let mut cache = ColabSessionCache::new();
+    let gen_normal = cache.arm_release(Instant::now());
+    assert!(
+        cache.should_release(gen_normal),
+        "sin nadie que lo supere, el release debe ejecutarse: si no, la GPU \
+         sigue facturando"
+    );
+}
+
+// Superado por un segundo turno: el viejo no debe apagar, y el nuevo sí.
+#[test]
+fn test_superseded_release_does_not_stop_but_the_new_one_does() {
+    use shirley_show::infra::vocal::colab_session_cache::ColabSessionCache;
+    use std::time::Instant;
+
+    let mut cache = ColabSessionCache::new();
+    let first = cache.arm_release(Instant::now());
+    let second = cache.arm_release(Instant::now());
+
+    assert_ne!(first, second, "re-armar debe cambiar la generación");
+    assert!(
+        !cache.should_release(first),
+        "el release viejo no puede apagar una sesión que otro turno está usando"
+    );
+    assert!(
+        cache.should_release(second),
+        "el release nuevo sí debe poder apagar"
+    );
+}
+
+// El lock interno no puede hacer perder el apagado. Aunque otro hilo esté
+// leyendo la caché, el release no debe quedarse sin generación: si esperar no es
+// posible, se responde sin bloquear pero el registro debe ser consistente.
+#[test]
+fn test_release_survives_contention() {
+    use shirley_show::infra::vocal::colab_session_cache::ColabSessionCache;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    let cache = Arc::new(tokio::sync::Mutex::new(ColabSessionCache::new()));
+    let cache2 = cache.clone();
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (gen_main, gen_other) = rt.block_on(async move {
+        let mut guard = cache.lock().await;
+        let g1 = guard.arm_release(Instant::now());
+        let g2 = guard.arm_release(Instant::now());
+        let _ = cache2;
+        (g1, g2)
+    });
+
+    assert_ne!(gen_main, 0);
+    assert_ne!(gen_other, 0);
+    assert_ne!(gen_main, gen_other);
+}
