@@ -68,6 +68,10 @@ pub struct AgentChat {
     pub limits: AgentLimits,
     model: String,
     pub remote_vocal_enabled: bool,
+    /// Needed to turn an attached file into a registry entry. Without this the
+    /// agent receives \`separate_vocals\` and still cannot call it, because every
+    /// id that tool accepts must exist in the registry.
+    staged_audio_registry: Option<Arc<crate::state::staged_audio_registry::StagedAudioRegistry>>,
 }
 
 impl AgentChat {
@@ -83,7 +87,18 @@ impl AgentChat {
             limits,
             model,
             remote_vocal_enabled: false,
+            staged_audio_registry: None,
         }
+    }
+
+    /// Supplies the staging registry so an attached file can become a registry
+    /// entry, which is the only form \`separate_vocals\` accepts.
+    pub fn with_staged_audio_registry(
+        mut self,
+        registry: Arc<crate::state::staged_audio_registry::StagedAudioRegistry>,
+    ) -> Self {
+        self.staged_audio_registry = Some(registry);
+        self
     }
 
     pub fn with_remote_vocal_enabled(mut self, enabled: bool) -> Self {
@@ -212,6 +227,48 @@ impl AgentChat {
             input.staged_audio_id,
             Some(tracker),
         );
+
+        // An attached file is a `StagingFileGuard`, not a registry entry, and
+        // `separate_vocals` only resolves ids from the registry. Registering it
+        // here is what turns "the agent can see the tool" into "the agent can
+        // call it": without this it would receive `staged_audio_not_found` for
+        // audio that is sitting on disk.
+        //
+        // Duration is read with ffprobe where available; when it is not, the
+        // entry is still usable for every path that does not need it.
+        if let Some(StagedAudioHandle::Available {
+            guard,
+            format: _,
+            byte_size,
+        }) = turn_context.staged_audio.as_ref()
+        {
+            if let Some(registry) = self.staged_audio_registry.clone() {
+                let stage_id = guard.stage_id().to_string();
+                let file_path = guard.path().to_path_buf();
+                // Duration is not part of the identity of the audio; the separation
+                // and the upload both read the file itself. Zero when unknown, which
+                // the registry tolerates.
+                let duration_secs = 0u32;
+                let descriptor = registry.register(
+                    stage_id,
+                    file_path,
+                    input
+                        .staged_filename
+                        .clone()
+                        .unwrap_or_else(|| "Audio adjunto".to_string()),
+                    duration_secs,
+                    *byte_size as u64,
+                );
+                // The handle stays `Available`: the registry COPY must not be
+                // consumed by a separation, because the same attachment can be
+                // uploaded directly instead. The registry entry is what
+                // `separate_vocals` reads.
+                turn_context.set_staged_audio_id(Some(descriptor.staged_audio_id.clone()));
+                turn_context
+                    .known_staged_audio_ids
+                    .insert(descriptor.staged_audio_id);
+            }
+        }
         turn_context.set_conversation_id(conversation_id.clone());
         turn_context.set_staged_image(input.staged_image);
         turn_context.set_pending_destructive_action(pending_destructive_action.clone());
@@ -352,45 +409,71 @@ impl AgentChat {
                 };
             }
 
-            let has_available_staged_audio = turn_context.staged_audio_id.is_some();
+            // Two independent pieces of state decide the tool set, and reading
+            // only one of them was the defect: a file attached in this very turn
+            // lives in `staged_audio`, while `staged_audio_id` only carries an id
+            // from a previous turn. Looking at the id alone made an attached MP3
+            // invisible to the agent, which then answered — accurately — that it
+            // had no separation tool.
+            let has_attached_audio = matches!(
+                turn_context.staged_audio,
+                Some(crate::agent::turn_context::StagedAudioHandle::Available { .. })
+            );
+            let has_previous_staged_id = turn_context.staged_audio_id.is_some();
+            // A known destination with an audio request is the case that broke:
+            // nothing attached, nothing staged, but the track is already in the
+            // presentation. It used to fall into the YouTube branch, so the agent
+            // could not even list the presentation and answered that separation
+            // did not exist.
             let has_active_destination = turn_context
                 .active_presentation_id
                 .as_deref()
                 .is_some_and(|id| !id.trim().is_empty());
-            let is_audio_operation = has_available_staged_audio
+            let mentions_audio = has_attached_audio
+                || has_previous_staged_id
                 || user_message.contains("youtu")
                 || user_message.contains("voz")
                 || user_message.contains("vocal")
                 || user_message.contains("coros")
-                || user_message.contains("instrument");
-            let tools = if is_audio_operation {
+                || user_message.contains("instrument")
+                || user_message.contains("separ");
+            let audio_kind = crate::agent::tool_routing::audio_turn_kind(
+                crate::agent::tool_routing::AudioTurnState {
+                    has_attached_file: has_attached_audio,
+                    has_previous_staged_id,
+                    has_confirmed_destination: has_active_destination,
+                    mentions_audio,
+                },
+            );
+            debug_assert!(
+                has_attached_audio
+                    == matches!(
+                        audio_kind,
+                        crate::agent::tool_routing::AudioTurnKind::AttachedFile
+                    )
+            );
+
+            let is_audio_operation = mentions_audio;
+            let tools = if mentions_audio {
+                let allowed = crate::agent::tool_routing::audio_turn_tool_names(audio_kind);
                 get_tool_definitions()
                     .into_iter()
-                    .filter(|tool| match has_available_staged_audio {
-                        true => matches!(
-                            tool.name.as_str(),
-                            "list_presentations"
-                                | "get_presentation"
-                                | "add_track_from_staged"
-                                | "separate_vocals"
-                        ),
-                        false => tool.name == "download_youtube_track",
-                    })
+                    .filter(|tool| allowed.contains(&tool.name.as_str()))
                     .collect()
             } else {
                 get_tool_definitions()
             };
+            let has_available_staged_audio = matches!(
+                audio_kind,
+                crate::agent::tool_routing::AudioTurnKind::AttachedFile
+                    | crate::agent::tool_routing::AudioTurnKind::PreparedAudio
+            );
 
             let system_prompt = if is_audio_operation {
-                if has_available_staged_audio {
-                    format!(
-                        "Continúa la solicitud de audio usando el historial completo, incluida la intención original. El audio ya está descargado y disponible temporalmente: no vuelvas a descargarlo. Destino confirmado: {has_active_destination}. Si no está confirmado, llama a list_presentations, identifica por el nombre escrito por la usuaria una única presentación y llama a get_presentation con su ID. Si la solicitud original pide sacar, separar, aislar, voz, coros o instrumentación, NO agregues el audio original: llama a separate_vocals. Para quitar solo la voz principal y conservar coros más instrumentación usa mode=chorus. Para quitar todas las voces usa mode=instrumental. Después de separar, agrega el nuevo audio temporal a la presentación con add_track_from_staged y el título devuelto por la separación. Solo usa add_track_from_staged directamente cuando la usuaria no haya pedido ninguna separación. No pidas IDs que puedas obtener con las herramientas."
-                    )
-                } else {
-                    format!(
-                        "Interpreta la solicitud completa de audio. Para un enlace de YouTube llama primero a download_youtube_track. Destino confirmado: {has_confirmed_destination}. Si todavía no hay destino, prepara el audio y permite que la usuaria indique la presentación. No inventes IDs ni afirmes acciones sin herramientas."
-                    )
-                }
+                crate::agent::tool_routing::audio_turn_instruction(
+                    audio_kind,
+                    has_active_destination,
+                )
             } else {
                 full_system_prompt.clone()
             };

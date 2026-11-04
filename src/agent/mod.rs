@@ -1,6 +1,7 @@
 pub mod destructive_confirmation;
 pub mod system_prompt;
 pub mod tool_dispatcher;
+pub mod tool_routing;
 pub mod tool_schemas;
 pub mod tool_signature;
 pub mod turn_context;
