@@ -160,8 +160,17 @@ impl AppState {
         // The Colab GPU is only alive while a separation runs, so the timeout must
         // cover session startup plus the whole ensemble, not just one model.
         let separation_timeout = std::time::Duration::from_secs(colab_config.timeout_secs);
-        let vocal_separator: Arc<dyn VocalSeparator> =
-            Arc::new(ColabVocalSeparator::new(colab_config));
+        let colab_separator = Arc::new(ColabVocalSeparator::new(colab_config));
+
+        // Vigilante de runtimes huérfanos: si el release falla en silencio, nadie
+        // reintenta el apagado y la GPU sigue facturando hasta que Colab la
+        // expire. Se le pasa el semáforo de GPU como señal de trabajo en curso.
+        colab_separator.spawn_reaper(std::time::Duration::from_secs(60));
+
+        let vocal_separator: Arc<dyn VocalSeparator> = colab_separator;
+        // Vigilante de runtimes huérfanos: si el release falla en silencio, nadie
+        // reintenta el apagado y la GPU sigue facturando hasta que Colab la
+        // expire. Se le pasa el semáforo de GPU como señal de trabajo en curso.
         let is_remote = true;
 
         let separate_vocals = Arc::new(
