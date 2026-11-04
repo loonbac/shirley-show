@@ -217,7 +217,8 @@ impl AppState {
                 limits.clone(),
                 DEFAULT_GROQ_MODEL.to_string(),
             )
-            .with_remote_vocal_enabled(is_remote),
+            .with_remote_vocal_enabled(is_remote)
+            .with_staged_audio_registry(staged_audio_registry.clone()),
         );
 
         let agent_runtime = AgentRuntime {
@@ -300,7 +301,8 @@ impl AppState {
         let is_remote = self.agent_chat.is_remote_vocal_enabled();
         let agent_chat = Arc::new(
             AgentChat::new(provider, dispatcher, limits.clone(), model)
-                .with_remote_vocal_enabled(is_remote),
+                .with_remote_vocal_enabled(is_remote)
+                .with_staged_audio_registry(self.staged_audio_registry.clone()),
         );
         self.agent_runtime = AgentRuntime {
             agent_chat: agent_chat.clone(),
