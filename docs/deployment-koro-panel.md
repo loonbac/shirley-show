@@ -225,9 +225,23 @@ instabox ssh <caja> -- 'cd /data/workspace/build && sh scripts/verify-frontend-g
 # 2. construir en la caja
 instabox ssh <caja> -- 'cd /data/workspace/build && docker build -t shirley-show:<commit> .'
 
-# 3. transferir al servidor
+# 3. transferir al servidor.
+#    El image ID cambia al cruzar daemons y NO es corrupción: Docker recalcula
+#    el ID sobre el manifiesto del daemon de destino, y la versión del motor
+#    afecta a ese manifiesto. Un mismo artefacto puede aparecer como 948 MB en
+#    un daemon y 665 MB en otro. Comparar IDs entre daemons es un falso
+#    positivo de integridad; comparar contenido:
+#      docker exec panel-app-shir sha256sum /app/shirley-show
+#      docker exec panel-app-shir sh -c 'cd /app/frontend && find . -type f \
+#        | LC_ALL=C sort | xargs sha256sum | sha256sum'
+#    Ambos hashes deben coincidir con los de la imagen en la caja.
 instabox ssh <caja> -- 'docker save shirley-show:<commit> | gzip -1' \
   | ssh -i ~/.ssh/id_elastika root@<vps> 'gunzip | docker load'
+
+# 3b. confirmar el contenido EN EL DAEMON DE DESTINO antes de tocar producción.
+#     Si esto no da 14, abortar: producción sigue con la imagen anterior.
+ssh -i ~/.ssh/id_elastika root@<vps> \
+  'docker run --rm --entrypoint sh shirley-show:<commit> -c "ls /app/frontend/js/data | wc -l"'
 
 # 4. recrear el contenedor con la misma configuración que usa el panel
 ssh -i ~/.ssh/id_elastika root@<vps> '
@@ -242,10 +256,22 @@ ssh -i ~/.ssh/id_elastika root@<vps> '
     -p 127.0.0.1:65529:3001 \
     shirley-show:<commit>'
 
-# 5. verificar de verdad
+# 5. verificar de verdad.
+#    El 200 de "/" no prueba nada: index.html es estático y una web en blanco
+#    también devuelve 200. El healthcheck tampoco sirve, porque solo consulta
+#    /api/presentations. Hay que comprobar el contenido del grafo y abrir la
+#    aplicación en un navegador.
+docker exec panel-app-shir ls /app/frontend/js/data | wc -l        # 14
+curl -s -o /dev/null -w '%{http_code}\n' \
+  http://127.0.0.1:65529/assets/js/data/list-presentations.js      # 200
 curl -sS http://127.0.0.1:65529/api/agent/gpu-status   # {"mode":"remote","pc_online":true}
 docker exec panel-app-shir colab quota
 ```
+
+Nota sobre el runtime: la imagen final solo contiene `data`, `frontend` y el
+binario. `scripts/verify-frontend-graph.sh` corre en el stage de build y no se
+copia a `/app`, así que `/app/scripts` no existe dentro del contenedor. Es
+correcto; no hay que buscarlo ahí.
 
 Actualiza después `image` en el TOML; si no, la interfaz del panel muestra una
 imagen distinta de la que está corriendo.
