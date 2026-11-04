@@ -231,6 +231,10 @@ instabox ssh <caja> -- 'cd /data/workspace/build && docker build -t shirley-show
 #    afecta a ese manifiesto. Un mismo artefacto puede aparecer como 948 MB en
 #    un daemon y 665 MB en otro. Comparar IDs entre daemons es un falso
 #    positivo de integridad; comparar contenido:
+#    El comando importa: rutas ABSOLUTAS y RELATIVAS producen hashes distintos
+#    sobre la misma imagen (la ruta entra en el hash). Usar siempre esta forma
+#    relativa, que no depende del prefijo /app, y no mezclar métodos entre
+#    sesiones: hacerlo crea un falso positivo de divergencia.
 #      docker exec panel-app-shir sha256sum /app/shirley-show
 #      docker exec panel-app-shir sh -c 'cd /app/frontend && find . -type f \
 #        | LC_ALL=C sort | xargs sha256sum | sha256sum'
@@ -243,18 +247,38 @@ instabox ssh <caja> -- 'docker save shirley-show:<commit> | gzip -1' \
 ssh -i ~/.ssh/id_elastika root@<vps> \
   'docker run --rm --entrypoint sh shirley-show:<commit> -c "ls /app/frontend/js/data | wc -l"'
 
-# 4. recrear el contenedor con la misma configuración que usa el panel
-ssh -i ~/.ssh/id_elastika root@<vps> '
-  docker rm -f panel-app-shir
-  docker run -d --name panel-app-shir \
-    --label panel.project=app-shir \
-    --restart unless-stopped \
-    --memory 768m --memory-swap 1536m \
-    --env-file /srv/panel/projects/app-shir.env \
-    -v /srv/shirley/data:/app/data \
-    -v /srv/shirley/secrets/colab-token.json:/home/shirley/.config/colab/token.json \
-    -p 127.0.0.1:65529:3001 \
-    shirley-show:<commit>'
+# 4. redesplegar.
+#    Usar la API del panel, no "docker rm -f" y luego "docker run". Ese orden
+#    destruye producción antes de crear el reemplazo: si el run falla (imagen
+#    ausente, env_file ilegible, puerto ocupado, límite de memoria) el servicio
+#    queda caído. El panel hace un swap en tres fases y nunca borra primero:
+#      a) arranca el reemplazo al lado, como panel-app-shir-next-<pid>
+#      b) si falla, retira el reemplazo y REARRANCA el anterior
+#      c) solo si el reemplazo está en pie, borra el viejo y lo renombra
+#    Ver src/docker.rs en koro-panel. Es la ruta que usan los despliegues reales.
+curl -sS -X POST http://127.0.0.1:3000/api/v1/projects/app-shir/acciones/up \
+  -H 'Authorization: Bearer <token>' | tee /dev/stderr | grep -q '"ok":true'
+
+#    Si hay que hacerlo a mano sin el panel, reproducir las tres fases. El
+#    "||" y el "&&" tienen que cortar el script de verdad, o el rename borra
+#    producción aunque el reemplazo no haya arrancado:
+#      set -e
+#      NEXT=panel-app-shir-next
+#      docker rm -f "$NEXT" 2>/dev/null || true
+#      docker run -d --name "$NEXT" --label panel.project=app-shir \
+#        --restart unless-stopped --memory 768m \
+#        --env-file /srv/panel/projects/app-shir.env \
+#        -v /srv/shirley/data:/app/data \
+#        -v /srv/shirley/secrets/colab-token.json:/home/shirley/.config/colab/token.json \
+#        -p 127.0.0.1:65529:3001 shirley-show:<commit>
+#      # Solo se llega aquí si el run anterior tuvo éxito (set -e).
+#      docker rm -f panel-app-shir
+#      docker rename "$NEXT" panel-app-shir
+#
+#    Sobre la memoria: pasar solo --memory. Docker deriva --memory-swap al doble
+#    por defecto, igual que hace el panel. Escribir los dos a mano deja el swap
+#    obsoleto en silencio si alguien cambia "memory" en el TOML. Verificado en el
+#    contenedor vivo: Memory=805306368, MemorySwap=1610612736.
 
 # 5. verificar de verdad.
 #    El 200 de "/" no prueba nada: index.html es estático y una web en blanco
