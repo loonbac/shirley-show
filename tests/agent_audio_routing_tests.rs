@@ -28,7 +28,8 @@ fn test_attached_file_is_classified_as_attached_audio() {
             has_attached_file: true,
             has_previous_staged_id: false,
             has_confirmed_destination: false,
-            mentions_audio: true
+            mentions_audio: true,
+            has_youtube_url: false,
         }),
         AudioTurnKind::AttachedFile,
         "a file attached in this turn must be recognised as audio"
@@ -43,7 +44,8 @@ fn test_previous_staged_id_is_classified_as_prepared_audio() {
             has_attached_file: false,
             has_previous_staged_id: true,
             has_confirmed_destination: false,
-            mentions_audio: true
+            mentions_audio: true,
+            has_youtube_url: false,
         }),
         AudioTurnKind::PreparedAudio
     );
@@ -58,7 +60,8 @@ fn test_attached_file_wins_over_previous_id() {
             has_attached_file: true,
             has_previous_staged_id: true,
             has_confirmed_destination: false,
-            mentions_audio: true
+            mentions_audio: true,
+            has_youtube_url: false,
         }),
         AudioTurnKind::AttachedFile
     );
@@ -72,7 +75,8 @@ fn test_no_audio_is_a_youtube_turn() {
             has_attached_file: false,
             has_previous_staged_id: false,
             has_confirmed_destination: false,
-            mentions_audio: true
+            mentions_audio: true,
+            has_youtube_url: false,
         }),
         AudioTurnKind::Youtube
     );
@@ -112,15 +116,20 @@ fn test_prepared_audio_exposes_the_same_toolset() {
     );
 }
 
-// T7. The YouTube case stays deliberately narrow: it must not be able to run a
-// download plus a separation in one turn, which would be two paid operations
-// decided by the model.
+// T7. The YouTube case is narrow in one specific way: it must not separate.
+// Separation needs audio that does not exist until the download finishes, and
+// it costs GPU time; keeping it in the same turn would let the model decide two
+// paid operations in one step.
+//
+// It does include the downloader and the means to place the result, because the
+// requirement is "send a link and that is it": leaving the audio in staging made
+// the user come back for a second request.
 #[test]
-fn test_youtube_turn_exposes_only_the_downloader() {
-    assert_eq!(
-        audio_turn_tool_names(AudioTurnKind::Youtube),
-        vec!["download_youtube_track"]
-    );
+fn test_youtube_turn_downloads_and_places_but_does_not_separate() {
+    let names = audio_turn_tool_names(AudioTurnKind::Youtube);
+    assert!(names.contains(&"download_youtube_track"));
+    assert!(names.contains(&"add_track_from_staged"));
+    assert!(!names.contains(&"separate_vocals"));
 }
 
 // T8. The routing helper must not claim separability where the destination is
@@ -164,6 +173,7 @@ fn test_attached_file_requires_registration_before_separating() {
         has_previous_staged_id: false,
         has_confirmed_destination: false,
         mentions_audio: true,
+        has_youtube_url: false,
     });
 }
 
@@ -179,6 +189,7 @@ fn test_attached_audio_branch_mentions_the_attached_file() {
         has_previous_staged_id: false,
         has_confirmed_destination: false,
         mentions_audio: true,
+        has_youtube_url: false,
     });
     assert_eq!(kind, AudioTurnKind::AttachedFile);
     let prompt = shirley_show::agent::tool_routing::audio_turn_instruction(kind, true);
@@ -212,6 +223,7 @@ fn test_existing_track_in_destination_is_its_own_case() {
         has_previous_staged_id: false,
         has_confirmed_destination: true,
         mentions_audio: true,
+        has_youtube_url: false,
     };
     assert_eq!(
         audio_turn_kind(state),
@@ -236,6 +248,7 @@ fn test_youtube_branch_requires_no_destination_and_no_audio() {
         has_previous_staged_id: false,
         has_confirmed_destination: false,
         mentions_audio: true,
+        has_youtube_url: false,
     };
     assert_eq!(audio_turn_kind(state), AudioTurnKind::Youtube);
 }
@@ -255,4 +268,70 @@ fn test_all_audio_work_cases_share_the_toolset() {
             "{kind:?} must expose the same tools as an attached file"
         );
     }
+}
+
+// T14. REGRESSION. Adding the ExistingTrack case broke the YouTube path: a message
+// with a link and a confirmed destination satisfied "destination + mentions audio",
+// so the existing-track branch won and the downloader was not exposed at all. The
+// agent then answered that the presentation was empty and it could not download.
+//
+// A link in the message is unambiguous: it must reach the downloader.
+#[test]
+fn test_youtube_link_beats_existing_destination() {
+    use shirley_show::agent::tool_routing::{AudioTurnKind, AudioTurnState, audio_turn_kind};
+
+    let state = AudioTurnState {
+        has_attached_file: false,
+        has_previous_staged_id: false,
+        has_confirmed_destination: true,
+        mentions_audio: true,
+        has_youtube_url: true,
+    };
+    assert_eq!(
+        audio_turn_kind(state),
+        AudioTurnKind::Youtube,
+        "a YouTube link must not be routed to the existing-track branch"
+    );
+}
+
+// T15. The user's requirement, stated plainly: send a link and the agent downloads
+// it in the best quality. "And that's it" means the track must end up in the
+// presentation without a second request, so the YouTube case must expose the
+// downloader AND the means to add what it produced.
+#[test]
+fn test_youtube_turn_can_download_and_add_in_one_step() {
+    use shirley_show::agent::tool_routing::{AudioTurnKind, audio_turn_tool_names};
+
+    let names = audio_turn_tool_names(AudioTurnKind::Youtube);
+    assert!(
+        names.contains(&"download_youtube_track"),
+        "the downloader is the whole point: {names:?}"
+    );
+    assert!(
+        names.contains(&"add_track_from_staged"),
+        "without it the audio stays in staging and the user needs a second request: {names:?}"
+    );
+    assert!(
+        names.contains(&"get_presentation"),
+        "the agent needs the track list before adding, to avoid duplicating: {names:?}"
+    );
+    assert!(
+        !names.contains(&"separate_vocals"),
+        "separation needs audio that does not exist yet: that is a second turn"
+    );
+}
+
+// T16. A link with no destination still works: the agent asks where to put it.
+#[test]
+fn test_youtube_link_without_destination_still_exposes_the_downloader() {
+    use shirley_show::agent::tool_routing::{AudioTurnKind, AudioTurnState, audio_turn_kind};
+
+    let state = AudioTurnState {
+        has_attached_file: false,
+        has_previous_staged_id: false,
+        has_confirmed_destination: false,
+        mentions_audio: false,
+        has_youtube_url: true,
+    };
+    assert_eq!(audio_turn_kind(state), AudioTurnKind::Youtube);
 }

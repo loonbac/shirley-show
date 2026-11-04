@@ -443,6 +443,10 @@ impl AgentChat {
                     has_previous_staged_id,
                     has_confirmed_destination: has_active_destination,
                     mentions_audio,
+                    // A link names its own source. Without this flag the
+                    // existing-track branch won whenever a destination was set,
+                    // and the downloader was not exposed at all.
+                    has_youtube_url: user_message.contains("youtu"),
                 },
             );
             debug_assert!(
@@ -469,10 +473,19 @@ impl AgentChat {
                     | crate::agent::tool_routing::AudioTurnKind::PreparedAudio
             );
 
+            // The audio instruction is appended to the full prompt, never swapped for
+            // it. Replacing it dropped the active presentation id, so the model knew
+            // a destination existed but not which one, and answered "prepared, which
+            // presentation do you want?" on a turn where the destination was already
+            // confirmed. The context is not decoration: it carries the only id the
+            // agent can act on.
             let system_prompt = if is_audio_operation {
-                crate::agent::tool_routing::audio_turn_instruction(
-                    audio_kind,
-                    has_active_destination,
+                format!(
+                    "{full_system_prompt}\n\n{}",
+                    crate::agent::tool_routing::audio_turn_instruction(
+                        audio_kind,
+                        has_active_destination,
+                    )
                 )
             } else {
                 full_system_prompt.clone()
