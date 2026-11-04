@@ -196,10 +196,21 @@ Sin `ffmpeg`, `test_encode_mp3_320k_success` falla con `IoError(NotFound)`. Sin
 ### Despliegue, paso a paso
 
 ```sh
-# 1. copiar el árbol (sin build, sin dependencias, sin datos)
-tar czf - --exclude=./target --exclude=./.git --exclude=./node_modules \
-  --exclude=./data --exclude=./.pi --exclude=./.env --exclude=./audio \
-  . | instabox ssh <caja> -- 'rm -rf /data/workspace/build && mkdir -p /data/workspace/build && tar xzf - -C /data/workspace/build'
+# 1. copiar el árbol desde un checkout limpio, sin build, sin dependencias ni datos.
+#    git archive parte de lo que git rastrea, así que no puede arrastrar
+#    target/, node_modules/ ni la base de datos. Preferirlo a un tar con
+#    --exclude escritos a mano: un "--exclude data/" sin anclar también borra
+#    frontend/js/data/, y la imagen resultante compila bien pero sirve una
+#    página en blanco.
+git archive HEAD | tar x -C /tmp/build-src
+instabox ssh <caja> -- 'rm -rf /data/workspace/build && mkdir -p /data/workspace/build'
+rsync -a --exclude='/target/' --exclude='/node_modules/' --exclude='/.git/' --exclude='/.env' \
+  /tmp/build-src/ <caja>:/data/workspace/build/ 2>/dev/null \
+  || tar czf - -C /tmp/build-src . | instabox ssh <caja> -- 'tar xzf - -C /data/workspace/build'
+
+# 1b. comprobar el grafo de módulos ANTES de construir. El builder también lo
+#     corre, pero verlo aquí evita esperar 10 minutos para descubrirlo.
+instabox ssh <caja> -- 'cd /data/workspace/build && sh scripts/verify-frontend-graph.sh frontend'
 
 # 2. construir en la caja
 instabox ssh <caja> -- 'cd /data/workspace/build && docker build -t shirley-show:<commit> .'

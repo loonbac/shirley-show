@@ -5,8 +5,11 @@
 target/
 .run/
 .env
-data/
-production-data/
+# Anchored on purpose: a bare "data/" or "production-data/" also matches a
+# nested path such as frontend/js/data/, so a new module dropped there stays
+# untracked and disappears from the next checkout.
+/data/
+/production-data/
 secrets/*
 !secrets/.gitkeep
 
