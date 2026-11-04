@@ -48,9 +48,9 @@ Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n /run/current-sys
 
 | Variable | Ejemplo | Notas |
 |---|---|---|
-| `CMD_API_KEY` | key de Command Code Provider API | Requerida. Guarda como secreto. |
-| `CMD_MODEL` | `stealth/space-bunny-alpha` | Opcional (por defecto Space Bunny Alpha). |
-| `CMD_BASE_URL` | `https://api.commandcode.ai/provider/v1` | Opcional. |
+| `OPENCODE_API_KEY` | key de OpenCode Go (plan Go) | Requerida. Guarda como secreto. |
+| `OPENCODE_MODEL` | `deepseek-v4.1-flash` | Opcional (por defecto DeepSeek V4.1 Flash). |
+| `OPENCODE_BASE_URL` | `https://opencode.ai/inference/go/openai/v1` | Opcional. |
 | `GROQ_API_KEY` / `GROQ_MODEL` | `gsk_...` | Opcional, solo como fallback. |
 | `JOSHUA_PC_HOST` | `100.73.247.39` | Vacío = modo local (sin GPU remota). |
 | `JOSHUA_PC_USER` / `JOSHUA_PC_PORT` | `loonbac` / `22` | Opcional. |

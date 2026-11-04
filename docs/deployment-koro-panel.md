@@ -59,8 +59,9 @@ El panel escribe `/srv/panel/projects/<id>.env` (modo 0600) y lo pasa con
 
 | Variable | Ejemplo | Efecto si falta |
 |---|---|---|
-| `CMD_API_KEY` | key de Command Code | Ressy responde "no configurado"; el resto funciona |
-| `CMD_MODEL` | `stealth/space-bunny-alpha` | usa el valor por defecto |
+| `OPENCODE_API_KEY` | key de OpenCode Go (plan Go) | Ressy responde "no configurado"; el resto funciona |
+| `OPENCODE_MODEL` | `deepseek-v4.1-flash` | usa el valor por defecto: el modelo mas barato que completa un flujo de varias herramientas, y con el tope mensual mas alto del plan |
+| `OPENCODE_BASE_URL` | `https://opencode.ai/inference/go/openai/v1` | usa el valor por defecto |
 | `SHIRLEY_PUBLIC_BASE_URL` | `https://shirley.example.com` | **el enlace del ticket sale relativo** y el comprador no puede abrirlo |
 | `SHIRLEY_COLAB_TOKEN` | `/home/shirley/.config/colab/token.json` | ya viene del Dockerfile; cámbialo solo si montas el token en otra ruta |
 | `SHIRLEY_COLAB_GPU` | `g4` | usa el valor por defecto (RTX PRO 6000, 102 GB) |

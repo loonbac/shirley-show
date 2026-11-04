@@ -25,6 +25,10 @@ pub const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_millis(100);
 // no tool calls even though the upstream request itself succeeded.
 pub const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4_096;
 pub const USER_AGENT_SHIRLEY: &str = "shirley-show/1.0";
+// OpenCode Go rejects a request without this header with
+// HTTP 400 MissingSessionID: it routes per session to reuse the provider-side
+// prefix cache. The conversation id is the natural session key.
+pub const HEADER_OPENCODE_SESSION: &str = "x-opencode-session";
 
 tokio::task_local! {
     pub static CURRENT_SESSION_ID: String;
@@ -108,9 +112,16 @@ impl ChatCompletionProvider for GroqClient {
         let base_url = self.config.base_url.clone();
         let api_key = self.config.api_key.clone();
         let provider_name = self.config.provider_name();
+        // Groq neither needs nor documents this header; only OpenCode Go
+        // requires it, so the Groq request stays byte-identical to before.
+        let is_opencode = self.config.is_opencode();
 
         Box::pin(async move {
             let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+            let session_id = CURRENT_SESSION_ID
+                .try_with(|id| id.clone())
+                .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
 
             let mut wire_messages = Vec::with_capacity(request.messages.len() + 1);
             wire_messages.push(GroqMessage::System {
@@ -195,8 +206,11 @@ impl ChatCompletionProvider for GroqClient {
             loop {
                 let mut req_builder = client
                     .post(&endpoint)
-                    .header(reqwest::header::USER_AGENT, USER_AGENT_SHIRLEY)
-                    .json(&body);
+                    .header(reqwest::header::USER_AGENT, USER_AGENT_SHIRLEY);
+                if is_opencode {
+                    req_builder = req_builder.header(HEADER_OPENCODE_SESSION, &session_id);
+                }
+                let mut req_builder = req_builder.json(&body);
                 if let Some(ref key) = api_key {
                     req_builder = req_builder.bearer_auth(key);
                 }

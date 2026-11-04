@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         state = state.with_agent_provider(None, agent_limits, config.groq.model.clone());
         println!(
-            "Asistente Ressy en modo no configurado (CMD_API_KEY ni GROQ_API_KEY detectadas)."
+            "Asistente Ressy en modo no configurado (OPENCODE_API_KEY ni GROQ_API_KEY detectadas)."
         );
     }
 
