@@ -57,6 +57,10 @@ pub enum VocalSeparationError {
     ColabUnavailable,
     #[error("Falló el proceso de separación vocal")]
     SeparationFailed,
+    #[error(
+        "La separación se completó pero no se pudo traer el resultado: ningún servidor de transferencia aceptó el archivo"
+    )]
+    TransferFailed,
 }
 
 impl VocalSeparationError {
@@ -77,6 +81,7 @@ impl VocalSeparationError {
             Self::SshKeyMissing => "ssh_key_missing",
             Self::ColabTokenMissing => "colab_token_missing",
             Self::ColabUnavailable => "colab_unavailable",
+            Self::TransferFailed => "transfer_failed",
             Self::SeparationFailed => "separation_failed",
         }
     }
@@ -121,6 +126,9 @@ impl VocalSeparationError {
                 "Google Colab no está disponible o la cuota de GPU está agotada"
             }
             Self::SeparationFailed => "Falló el proceso de separación vocal",
+            Self::TransferFailed => {
+                "La separación se completó pero no se pudo traer el resultado: ningún servidor de transferencia aceptó el archivo"
+            }
         }
     }
 }

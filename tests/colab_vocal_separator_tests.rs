@@ -238,10 +238,7 @@ async fn test_colab_vocal_separator_missing_source_fails_fast() {
     };
 
     let res = sep.separate(req).await;
-    assert_eq!(
-        res.unwrap_err(),
-        VocalSeparationError::InvalidAudioDuration
-    );
+    assert_eq!(res.unwrap_err(), VocalSeparationError::InvalidAudioDuration);
 }
 
 #[tokio::test]
@@ -548,12 +545,18 @@ async fn test_colab_vocal_separator_full_successful_pipeline_lifecycle() {
     assert!(res.size_bytes > 0);
     assert!(output_mp3.is_file());
 
-    // Verify lifecycle log: start -> upload -> exec -> stop
+    // Lifecycle on success is now start -> upload -> exec, and the stop is
+    // deferred: the machine is kept for the retention window so a second
+    // request reuses it. Asserting "stop happened" here would pin the old
+    // contract, in which every request paid a cold start.
     let log = fixture.read_log();
     assert!(log.contains("start"), "Must call colab start");
     assert!(log.contains("upload"), "Must call colab upload");
     assert!(log.contains("exec"), "Must call colab exec");
-    assert!(log.contains("stop"), "Must call colab stop");
+    assert!(
+        !log.contains("stop"),
+        "a successful run must keep the machine for the retention window, not stop it"
+    );
 
     // Ensure permit was released
     assert_eq!(gpu.available_permits(), 1);
@@ -625,7 +628,10 @@ async fn test_colab_vocal_separator_sha256_mismatch_fails_and_runs_stop() {
     };
 
     let res = sep.separate(req).await;
-    assert_eq!(res.unwrap_err(), VocalSeparationError::InvalidSeparatorOutput);
+    assert_eq!(
+        res.unwrap_err(),
+        VocalSeparationError::InvalidSeparatorOutput
+    );
 
     let log = fixture.read_log();
     assert!(log.contains("stop"), "Must call stop on sha256 mismatch");
@@ -650,7 +656,10 @@ async fn test_colab_vocal_separator_duration_mismatch_fails_and_runs_stop() {
     };
 
     let res = sep.separate(req).await;
-    assert_eq!(res.unwrap_err(), VocalSeparationError::InvalidSeparatorOutput);
+    assert_eq!(
+        res.unwrap_err(),
+        VocalSeparationError::InvalidSeparatorOutput
+    );
 
     let log = fixture.read_log();
     assert!(log.contains("stop"), "Must call stop on duration mismatch");
@@ -681,10 +690,12 @@ async fn test_colab_vocal_separator_duration_exceeded_before_gpu() {
 
     // Verify colab start was NEVER called
     let log = fixture.read_log();
-    assert!(!log.contains("start"), "colab start must not be called when duration > 600s");
+    assert!(
+        !log.contains("start"),
+        "colab start must not be called when duration > 600s"
+    );
     assert_eq!(gpu.available_permits(), 1);
 }
-
 
 #[test]
 fn test_remote_script_treats_no_vocals_as_instrumental() {
@@ -748,7 +759,10 @@ exit 0
     };
 
     let result = sep.separate(req).await;
-    assert!(matches!(result, Err(VocalSeparationError::ColabUnavailable)));
+    assert!(matches!(
+        result,
+        Err(VocalSeparationError::ColabUnavailable)
+    ));
 
     let log = std::fs::read_to_string(&log_file).unwrap_or_default();
     let stop_line = log
@@ -760,4 +774,3 @@ exit 0
         "the stop must be session-less when no id could be parsed, got: {stop_line}"
     );
 }
-

@@ -43,8 +43,7 @@ impl ColabVocalSeparatorConfig {
             .map(expand_tilde)
             .unwrap_or_else(|_| default_token_path());
 
-        let gpu_type = std::env::var("SHIRLEY_COLAB_GPU")
-            .unwrap_or_else(|_| "g4".to_string());
+        let gpu_type = std::env::var("SHIRLEY_COLAB_GPU").unwrap_or_else(|_| "g4".to_string());
 
         let overlap = std::env::var("SHIRLEY_COLAB_OVERLAP")
             .ok()
@@ -100,10 +99,10 @@ impl ColabVocalSeparatorConfig {
 
     /// Pure validation function testing physical existence and refresh_token presence.
     pub fn validate_token_file(path: &Path) -> Result<(), VocalSeparationError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|_| VocalSeparationError::ColabTokenMissing)?;
-        let parsed: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|_| VocalSeparationError::ColabTokenMissing)?;
+        let content =
+            std::fs::read_to_string(path).map_err(|_| VocalSeparationError::ColabTokenMissing)?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).map_err(|_| VocalSeparationError::ColabTokenMissing)?;
 
         let has_refresh = parsed
             .get("refresh_token")

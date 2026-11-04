@@ -1,4 +1,6 @@
 pub mod colab_remote_script;
+pub mod colab_session_cache;
+pub mod colab_transfer;
 pub mod colab_vocal_separator;
 pub mod colab_vocal_separator_config;
 pub mod process_vocal_separator;
@@ -12,6 +14,8 @@ pub mod vocal_command_builder;
 pub mod vocal_process_guard;
 
 pub use colab_remote_script::generate_remote_script;
+pub use colab_session_cache::ColabSessionCache;
+pub use colab_transfer::{SESSION_IDLE_RETENTION, TRANSFER_UPLOADERS, TransferUploader};
 pub use colab_vocal_separator::{ColabExecutionResult, ColabSessionGuard, ColabVocalSeparator};
 pub use colab_vocal_separator_config::{
     COROS_MODELS, ColabVocalSeparatorConfig, INSTRUMENTAL_MODELS,
