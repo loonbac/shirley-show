@@ -256,7 +256,18 @@ ssh -i ~/.ssh/id_elastika root@<vps> \
 #      b) si falla, retira el reemplazo y REARRANCA el anterior
 #      c) solo si el reemplazo está en pie, borra el viejo y lo renombra
 #    Ver src/docker.rs en koro-panel. Es la ruta que usan los despliegues reales.
-curl -sS -X POST http://127.0.0.1:3000/api/v1/projects/app-shir/acciones/up \
+#
+#    La URL no es loopback ni el puerto por defecto. El panel se ata a la IP de
+#    Tailscale y al puerto del unit, no a 127.0.0.1: comprobado en el VPS,
+#    koro-panel escucha en 100.82.97.118:9090 (PANEL_BIND + PANEL_PORT en
+#    /etc/koro-panel.env y el unit), mientras que 127.0.0.1:3000 lo ocupa
+#    DOCKERD. Apuntar ahí no falla con "connection refused": devuelve
+#    HTTP 405 Method Not Allowed, que se lee como si el panel hubiera
+#    contestado cuando en realidad no se habló con él. Y 127.0.0.1:9090 sí
+#    rehúsa la conexión, porque el panel no escucha en loopback.
+PANEL_URL=http://100.82.97.118:9090   # PANEL_BIND + PANEL_PORT del unit
+#    -f hace que un 4xx salga como exit != 0 en vez de pasar silenciosamente.
+curl -sSf -X POST "$PANEL_URL/api/v1/projects/app-shir/acciones/up" \
   -H 'Authorization: Bearer <token>' | tee /dev/stderr | grep -q '"ok":true'
 
 #    Si hay que hacerlo a mano sin el panel, reproducir las tres fases. El
