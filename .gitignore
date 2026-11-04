@@ -30,3 +30,5 @@ playwright-report/
 data/media/
 tmp/
 .air.toml
+# Local Pi runtime state
+.atl/
