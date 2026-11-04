@@ -26,9 +26,11 @@ node_modules/
 test-results/
 playwright-report/
 
-# Imágenes subidas (afiches) — datos de runtime, en el volumen
-data/media/
-tmp/
-.air.toml
+# Runtime scratch at the repository root only. Anchored on purpose: unanchored,
+# "tmp/" also matches src/tmp/ or frontend/tmp/, so a real module dropped there
+# would never show in git status. Same defect as the /data/ note above.
+/tmp/
+/.air.toml
+
 # Local Pi runtime state
 .atl/
