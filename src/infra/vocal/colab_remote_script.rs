@@ -18,13 +18,29 @@ pub fn generate_remote_script(
     password: &str,
     remote_input_path: &str,
 ) -> String {
-    let mode_str = serde_json::to_string(mode.as_str()).unwrap_or_else(|_| "\"instrumental\"".to_string());
+    let mode_str =
+        serde_json::to_string(mode.as_str()).unwrap_or_else(|_| "\"instrumental\"".to_string());
     let models_json = serde_json::to_string(models).unwrap_or_else(|_| "[]".to_string());
     let password_json = serde_json::to_string(password).unwrap_or_else(|_| "\"\"".to_string());
-    let input_path_json = serde_json::to_string(remote_input_path).unwrap_or_else(|_| "\"/content/input_audio\"".to_string());
+    let input_path_json = serde_json::to_string(remote_input_path)
+        .unwrap_or_else(|_| "\"/content/input_audio\"".to_string());
+
+    // The uploader chain is built as Python source, then injected as a literal.
+    // It goes through json.dumps later anyway, so escaping it here would only
+    // add a second, divergent layer.
+    // Must match the remote script's own `enc_path`, which is
+    // `work_dir / "output.mp3.enc"` under `work_dir = Path("/content/colab_sep_work")`.
+    // A literal that does not match would make every uploader fail on a missing
+    // file and report a transfer error instead of the real one.
+    let upload_block = crate::infra::vocal::colab_transfer::build_uploader_block(
+        "/content/colab_sep_work/output.mp3.enc",
+        "/content/colab_sep_work/output.mp3.enc",
+    );
+    let upload_block_python =
+        serde_json::to_string(&upload_block).unwrap_or_else(|_| "\"\"".to_string());
 
     format!(
-r#"#!/usr/bin/env python3
+        r#"#!/usr/bin/env python3
 import hashlib
 import json
 import os
@@ -194,18 +210,24 @@ openssl_cmd = [
 ]
 subprocess.run(openssl_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-# 7. Upload to litterbox with curl
-curl_cmd = [
-    "curl", "-s",
-    "-F", "reqtype=fileupload",
-    "-F", "time=1h",
-    "-F", f"fileToUpload=@{{enc_path}}",
-    "https://litterbox.catbox.moe/resources/internals/api.php"
-]
-curl_res = subprocess.run(curl_cmd, capture_output=True, text=True, check=True)
-url = curl_res.stdout.strip()
+# 7. Upload the encrypted payload through the fallback chain.
+#
+# A single hardcoded host is what broke this pipeline: litterbox answers HTTP
+# 412 "Invalid uploader" to Google Cloud addresses, so the separation consumed
+# real GPU time and then threw the result away. The chain tries each host in
+# order and keeps the first that yields a real file URL.
+upload_block = {upload_block_python}
+upload_res = subprocess.run(["bash", "-c", upload_block], capture_output=True, text=True)
+url = ""
+for line in upload_res.stdout.splitlines():
+    if line.startswith("TRANSFER_OK "):
+        url = line[len("TRANSFER_OK "):].strip()
+        break
 if not url.startswith("http"):
-    raise RuntimeError(f"Litterbox upload failed: {{url}}")
+    raise RuntimeError(
+        "Transfer failed on every uploader: "
+        + (upload_res.stdout.strip() or upload_res.stderr.strip() or "no output")
+    )
 
 # 8. Output strictly ONE small JSON line
 payload = {{
@@ -288,10 +310,8 @@ mod tests {
         );
         // The runtime script is Python: a template typo must fail here instead of
         // on a paid GPU, after the session has already started.
-        let path = std::env::temp_dir().join(format!(
-            "colab_remote_script_{}.py",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("colab_remote_script_{}.py", std::process::id()));
         std::fs::write(&path, &script).unwrap();
 
         let output = std::process::Command::new("python3")
