@@ -87,6 +87,8 @@ fi
 /// failed, so the caller never has to guess which happened.
 pub fn build_uploader_block(file: &str, _unused: &str) -> String {
     let mut out = String::new();
+    // The chain runs inside a function so the first success can return from it.
+    out.push_str("transfer_attempt() {\n");
     out.push_str("TRANSFER_URL=\"\"\n");
     for uploader in TRANSFER_UPLOADERS {
         let body = uploader.body.replace("__FILE__", file);
@@ -94,10 +96,16 @@ pub fn build_uploader_block(file: &str, _unused: &str) -> String {
         out.push_str("CANDIDATE_URL=\"\"\n");
         out.push_str(&body);
         out.push_str("\n");
+        // No break: the attempts live inside a function, and the first success
+        // returns from it. An earlier version emitted `break` outside any loop,
+        // which bash reports as an error and then *continues*, so the payload was
+        // uploaded to every fallback host after already succeeding.
         out.push_str(
-            "if [ -n \"$CANDIDATE_URL\" ]; then\n             \tTRANSFER_URL=\"$CANDIDATE_URL\"\n             \tbreak\n             fi\n",
+            "if [ -n \"$CANDIDATE_URL\" ]; then\n             \tTRANSFER_URL=\"$CANDIDATE_URL\"\n             \treturn 0\n             fi\n",
         );
     }
+    out.push_str("return 1\n}\n");
+    out.push_str("transfer_attempt\n");
     out.push_str(
         "\nif [ -n \"$TRANSFER_URL\" ]; then\n         \techo \"TRANSFER_OK $TRANSFER_URL\"\n         else\n         \techo \"ALL_UPLOADERS_FAILED\" >&2\n         \texit 1\n         fi\n",
     );
@@ -246,12 +254,24 @@ pub async fn fetch_with_retry(
     use std::process::Stdio;
     use tokio::process::Command;
 
+    // The budget is the caller's, not each attempt's. Giving every attempt the
+    // full timeout meant four attempts could run roughly four times past
+    // `VocalSeparationRequest.timeout`, so a separation could outlive its own
+    // deadline instead of honouring it.
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut last_error = String::from("no attempt was made");
+
     for attempt in 1..=attempts.max(1) {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left.is_zero() {
+            last_error = format!("out of time after {} attempt(s)", attempt - 1);
+            break;
+        }
+
         let args = transfer_curl_args(
             url,
             dest.to_str().ok_or("destination is not valid UTF-8")?,
-            timeout.as_secs().max(30),
+            left.as_secs().max(1),
         );
         let mut cmd = Command::new("curl");
         cmd.kill_on_drop(true);
@@ -260,7 +280,7 @@ pub async fn fetch_with_retry(
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::piped());
 
-        let outcome = tokio::time::timeout(timeout, cmd.output()).await;
+        let outcome = tokio::time::timeout(left, cmd.output()).await;
 
         match outcome {
             Ok(Ok(o)) if o.status.success() => {
@@ -277,19 +297,24 @@ pub async fn fetch_with_retry(
                 let code = o.status.code().unwrap_or(-1);
                 let stderr = String::from_utf8_lossy(&o.stderr).to_string();
                 // 22 is curl's --fail: the server answered with an HTTP error.
-                // Retrying that is pointless, and it would only add latency to a
-                // failure that is already decided.
+                // Retrying that is pointless and only adds latency to a failure
+                // that is already decided.
                 if code == 22 {
                     return Err(format!("http error: {}", stderr.trim()));
                 }
                 last_error = format!("curl exit {code}: {}", stderr.trim());
             }
             Ok(Err(e)) => last_error = format!("exec: {e}"),
-            Err(_) => last_error = format!("timeout after {:?}", timeout),
+            Err(_) => last_error = format!("timeout after {left:?}"),
         }
 
         if attempt < attempts {
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            let pause = Duration::from_secs(2);
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if left <= pause {
+                break;
+            }
+            tokio::time::sleep(pause).await;
         }
     }
     Err(last_error)

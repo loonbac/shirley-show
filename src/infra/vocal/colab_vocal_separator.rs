@@ -186,20 +186,43 @@ impl ColabVocalSeparator {
     /// user has their audio. Holding the response open for three minutes to keep
     /// a machine alive would be worse than the cold start it saves.
     fn schedule_release(&self, session_id: String, colab_bin: PathBuf) {
+        let sessions = self.sessions.clone();
         tokio::spawn(async move {
+            // Claim the release: this task owns it only while its generation is
+            // still current. A later request that reuses the session bumps the
+            // generation, and this task then stops nothing. Without that check a
+            // second request could be killed mid-pipeline by the first timer.
+            let generation = {
+                let mut guard = sessions.lock().await;
+                guard.arm_release(
+                    Instant::now() + crate::infra::vocal::colab_transfer::SESSION_IDLE_RETENTION,
+                )
+            };
+
             tokio::time::sleep(crate::infra::vocal::colab_transfer::SESSION_IDLE_RETENTION).await;
+
+            // Re-check ownership after sleeping.
+            {
+                let guard = sessions.lock().await;
+                if !guard.should_release(generation) {
+                    return;
+                }
+            }
+
             let mut cmd = Command::new(colab_bin);
             cmd.kill_on_drop(true);
             cmd.args(["stop", "--session", &session_id]);
             cmd.stdin(Stdio::null());
             cmd.stdout(Stdio::null());
             cmd.stderr(Stdio::null());
-            let _ = tokio::time::timeout(Duration::from_secs(60), cmd.status()).await;
+            let ok = matches!(
+                tokio::time::timeout(Duration::from_secs(60), cmd.status()).await,
+                Ok(Ok(st)) if st.success()
+            );
+            if !ok && std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                eprintln!("[release] could not stop {session_id}; rerun colab stop");
+            }
         });
-    }
-
-    pub fn config(&self) -> &ColabVocalSeparatorConfig {
-        &self.config
     }
 
     async fn run_ffprobe_duration(
@@ -296,7 +319,6 @@ impl ColabVocalSeparator {
         Ok(hash.to_lowercase())
     }
 
-    /// Stops the session and reports whether the shutdown was confirmed.
     async fn stop_session(&self, session_id: &str) -> bool {
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
@@ -756,6 +778,9 @@ impl VocalSeparator for ColabVocalSeparator {
                 }
             };
 
+            // The id is recorded now so a concurrent request can find it; its age is
+            // refreshed when the work finishes, because the window the product asks
+            // for counts from completion, not from when the machine was chosen.
             this.remember_session(&session_id).await;
             if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
                 eprintln!("[separate] using session {session_id} (reused={reused})");
@@ -787,6 +812,16 @@ impl VocalSeparator for ColabVocalSeparator {
             // cache is cleared, because a failed runtime is not worth keeping.
             match &pipeline_result {
                 Ok(_) => {
+                    // The age of the cached session is refreshed HERE, when the
+                    // work finishes. Stamping it when the session was chosen made
+                    // a separation longer than the window expire before it
+                    // completed, so the next request paid a cold start while the
+                    // previous machine was still alive.
+                    {
+                        let mut guard = this.sessions.lock().await;
+                        guard.refresh_at(Instant::now());
+                    }
+
                     // The Drop guard must not fire while the machine is meant
                     // to stay alive; the scheduled task owns the release now.
                     session_guard.deactivate();

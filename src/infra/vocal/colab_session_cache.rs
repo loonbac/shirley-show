@@ -18,6 +18,15 @@ use tokio::sync::Mutex;
 struct Inner {
     session_id: Option<String>,
     stored_at: Option<Instant>,
+    /// When the pending release would fire, and which generation owns it.
+    ///
+    /// A release is superseded rather than cancelled: a detached task cannot be
+    /// cancelled cheaply, so instead it re-checks the generation before stopping
+    /// anything. An old task that wakes up finds a newer generation and does
+    /// nothing, which is what keeps a reused session from being stopped
+    /// underneath an active request.
+    release_deadline: Option<Instant>,
+    release_generation: u64,
 }
 
 /// Remembers the most recent Colab session and how old that memory is.
@@ -77,6 +86,54 @@ impl ColabSessionCache {
         if let Ok(mut guard) = self.inner.try_lock() {
             guard.session_id = None;
             guard.stored_at = None;
+        }
+    }
+    /// Refreshes only the age of the cached session.
+    ///
+    /// Called when the work finishes, not when it starts. Stamping at start made
+    /// a separation longer than the retention window expire before it completed,
+    /// so the next request paid a cold start while the previous machine was still
+    /// running. The window the product asks for counts from completion.
+    pub fn refresh_at(&mut self, at: Instant) {
+        if let Ok(mut guard) = self.inner.try_lock() {
+            if guard.session_id.is_some() {
+                guard.stored_at = Some(at);
+            }
+        }
+    }
+
+    /// Arms (or re-arms) the pending release and returns its generation.
+    ///
+    /// Re-arming bumps the generation. The task that owns generation N refuses to
+    /// stop the session once the generation has moved past N, so a second request
+    /// that reuses the machine cannot be killed by the first request's timer.
+    pub fn arm_release(&mut self, deadline: Instant) -> u64 {
+        if let Ok(mut guard) = self.inner.try_lock() {
+            guard.release_deadline = Some(deadline);
+            guard.release_generation = guard.release_generation.wrapping_add(1);
+            return guard.release_generation;
+        }
+        0
+    }
+
+    /// The instant the current release is due, if one is armed.
+    pub fn release_deadline(&self) -> Option<Instant> {
+        self.inner.try_lock().ok()?.release_deadline
+    }
+
+    /// The generation that currently owns the release.
+    pub fn release_generation(&self) -> u64 {
+        self.inner
+            .try_lock()
+            .map(|g| g.release_generation)
+            .unwrap_or(0)
+    }
+
+    /// True when `generation` still owns the release, so the task may stop it.
+    pub fn should_release(&self, generation: u64) -> bool {
+        match self.inner.try_lock() {
+            Ok(g) => generation != 0 && g.release_generation == generation,
+            Err(_) => false,
         }
     }
 }

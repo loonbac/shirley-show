@@ -429,3 +429,215 @@ fn test_fetch_with_retry_does_not_retry_http_errors() {
         "an HTTP error must not be retried"
     );
 }
+
+// R4-002 / R3-003. The generated chain emitted "break" outside any loop. Bash
+// reports that as an error and *continues*, so a successful uploader did not end
+// the chain: it uploaded the same encrypted payload to every fallback host and
+// could spend 300s more after already succeeding. Found by native review.
+//
+// This runs the real generated block against a fake curl and counts calls.
+#[test]
+fn test_uploader_chain_stops_after_first_success() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("chain_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+
+    // Fake tools: curl always reports a URL, python3 passes stdin through.
+    let fake_curl = dir.join("curl");
+    let mut f = std::fs::File::create(&fake_curl).unwrap();
+    writeln!(f, "#!/bin/sh").unwrap();
+    writeln!(f, "echo CALLED >> {}", dir.join("calls").display()).unwrap();
+    writeln!(f, "echo https://fake.example/file.enc").unwrap();
+    drop(f);
+    std::fs::set_permissions(&fake_curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // The tmpfiles uploader pipes curl through python3 to extract the URL. A real
+    // python3 would parse the fake response and fail, so the fake must cover it
+    // too: emit a direct link and let the shell continue.
+    let fake_py = dir.join("python3");
+    let mut p = std::fs::File::create(&fake_py).unwrap();
+    writeln!(p, "#!/bin/sh").unwrap();
+    writeln!(p, "cat > /dev/null").unwrap();
+    writeln!(p, "echo https://fake.example/direct.enc").unwrap();
+    drop(p);
+    std::fs::set_permissions(&fake_py, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let block_path = dir.join("block.sh");
+    let block = shirley_show::infra::vocal::colab_transfer::build_uploader_block(
+        "/tmp/nonexistent.enc",
+        "/tmp/nonexistent.enc",
+    );
+    std::fs::write(&block_path, &block).unwrap();
+
+    let path_with_fake = format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let out = std::process::Command::new("bash")
+        .arg(&block_path)
+        .env("PATH", &path_with_fake)
+        .output()
+        .expect("bash must run");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let calls = std::fs::read_to_string(dir.join("calls"))
+        .map(|s| s.lines().count())
+        .unwrap_or(0);
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        stdout.contains("TRANSFER_OK"),
+        "the chain must report success, got: {stdout} / {stderr}"
+    );
+    assert!(
+        !stderr.contains("break: "),
+        "the generated shell must not emit break outside a loop: {stderr}"
+    );
+    // Three uploaders exist; a working chain stops at the first.
+    // tmpfiles legitimately makes two requests: the upload and then the landing
+    // page it must read to find the direct link. What matters is that the chain
+    // stopped there instead of falling through to litterbox and catbox, which
+    // would be four to six requests. Counting hosts is the assertion; counting
+    // requests would pin an implementation detail.
+    assert!(
+        calls <= 2,
+        "the chain must stop after the first uploader succeeds, made {calls} requests"
+    );
+}
+
+// R1-001 / R3-002 / R4-003. Every success used to spawn an independent 180s stop
+// task for the same session id, and a reuse only refreshed the cache timestamp.
+// The old timer was never cancelled, so a second request that reused the machine
+// could be stopped mid-pipeline by the first request's timer, discarding its GPU
+// work. The release has to be superseded, not accumulated.
+#[test]
+fn test_release_is_superseded_not_accumulated() {
+    use shirley_show::infra::vocal::colab_session_cache::ColabSessionCache;
+    use std::time::{Duration, Instant};
+
+    let mut cache = ColabSessionCache::new();
+    let retention = Duration::from_secs(180);
+
+    // First request finishes: a release is armed for now + retention.
+    let first_deadline = Instant::now() + retention;
+    cache.store_at("sess-1".to_string(), Instant::now());
+    cache.arm_release(first_deadline);
+    assert_eq!(cache.release_deadline(), Some(first_deadline));
+
+    // A second request reuses the session and finishes later, so it arms a later
+    // deadline. The pending release must move, not stack.
+    let second_deadline = Instant::now() + retention + Duration::from_secs(100);
+    cache.arm_release(second_deadline);
+    assert_eq!(
+        cache.release_deadline(),
+        Some(second_deadline),
+        "a second finish must supersede the earlier release, not add another"
+    );
+
+    // A release that has already fired for a superseded generation must not stop
+    // the session. The generation counter is what makes that decidable.
+    let generation_at_arm = cache.release_generation();
+    cache.arm_release(Instant::now() + retention);
+    assert!(
+        !cache.should_release(generation_at_arm),
+        "a stale generation must not be allowed to stop the session"
+    );
+    let current = cache.release_generation();
+    assert!(
+        cache.should_release(current),
+        "the current generation owns the release"
+    );
+}
+
+// R3-001 / R4-001. The cache was stamped when the session was chosen, before the
+// pipeline ran. A separation longer than the retention window therefore expired
+// the entry before it finished, so the next request inside the real window paid a
+// cold start while the previous machine was still scheduled to stop. The stamp
+// has to be refreshed when the work finishes.
+#[test]
+fn test_cache_is_stamped_at_finish_not_at_start() {
+    use shirley_show::infra::vocal::colab_session_cache::ColabSessionCache;
+    use std::time::{Duration, Instant};
+
+    let mut cache = ColabSessionCache::new();
+    let retention = Duration::from_secs(180);
+
+    // The session was chosen 200s ago and the pipeline took that long, so the
+    // work just finished but the stamp is older than the 180s window. That is the
+    // real shape of the defect: a long separation expired its own entry.
+    cache.store_at(
+        "sess-1".to_string(),
+        Instant::now() - Duration::from_secs(200),
+    );
+    assert_eq!(
+        cache.reusable(retention),
+        None,
+        "stamped at start, the entry looks expired right after finishing"
+    );
+
+    // Stamping at finish is the contract the product asks for: three minutes
+    // after the request completes.
+    cache.refresh_at(Instant::now());
+    assert_eq!(
+        cache.reusable(retention).as_deref(),
+        Some("sess-1"),
+        "a fresh stamp at finish makes the window count from completion"
+    );
+}
+
+// R3-004. Each retry attempt used to receive the full caller timeout, so four
+// attempts could run about four times past the separation's deadline. The budget
+// belongs to the caller: total time must stay inside it.
+#[test]
+fn test_retry_respects_the_callers_total_budget() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    // A server that never answers properly: it accepts and stalls, forcing
+    // retries until the budget is spent.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming() {
+            let mut s = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = [0u8; 64];
+            let _ = s.read(&mut buf);
+            // Keep the connection open without responding.
+            held.push(s);
+            let _: &mut Vec<std::net::TcpStream> = &mut held;
+        }
+    });
+
+    let dest = std::env::temp_dir().join(format!("budget_{}.bin", std::process::id()));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let budget = Duration::from_secs(3);
+    let started = Instant::now();
+    let result = rt.block_on(async {
+        shirley_show::infra::vocal::colab_transfer::fetch_with_retry(
+            &format!("http://127.0.0.1:{port}/x"),
+            &dest,
+            budget,
+            6,
+        )
+        .await
+    });
+    let elapsed = started.elapsed();
+    let _ = std::fs::remove_file(&dest);
+
+    assert!(result.is_err(), "a stalling server must fail");
+    assert!(
+        elapsed < budget + Duration::from_secs(3),
+        "six attempts must not each get the full budget: took {elapsed:?} for a {budget:?} budget"
+    );
+}
