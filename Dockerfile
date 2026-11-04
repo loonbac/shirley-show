@@ -24,6 +24,12 @@ RUN mkdir -p src && echo 'fn main() {}' > src/main.rs && echo '' > src/lib.rs \
 COPY src ./src
 COPY migrations ./migrations
 COPY frontend ./frontend
+# The app ships plain ES modules with no bundler, so a build context that lost
+# a subdirectory of frontend/ produces an image that builds cleanly and serves
+# a blank page: the browser fails to resolve the missing import. Fail here
+# instead of shipping it.
+COPY scripts/verify-frontend-graph.sh ./scripts/verify-frontend-graph.sh
+RUN sh ./scripts/verify-frontend-graph.sh frontend
 RUN touch src/main.rs src/lib.rs && cargo build --release --locked
 
 # ---- Stage 2: runtime ----
