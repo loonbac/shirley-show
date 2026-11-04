@@ -270,7 +270,20 @@ ssh -i ~/.ssh/id_elastika root@<vps> \
 #      GET  /api/v1/projects/app-shir/acciones/up  -> 200  (fallback HTML)
 #    La landing sirve su SPA para cualquier ruta, así que un GET de
 #    "verificación" devuelve 200 y da el paso por bueno mientras se golpea otro
-#    sitio en producción. Verificar SIEMPRE con POST y con -f.
+#    sitio en producción.
+#
+#    Ni GET ni -f resuelven esto: -f solo convierte 4xx/5xx en fallo, y ante el
+#    200 de la landing devuelve exit 0 como si todo fuera bien. Y usar el POST
+#    que despliega como "verificación" confunde la prueba con la acción: un
+#    verde no distingue "el panel respondió" de "el panel redesplegó".
+#
+#    Una sonda no debe tener efectos. La prueba que discrimina es el
+#    Content-Type sobre una ruta de LECTURA, sin token y sin efectos:
+#      curl -sS -o /dev/null -w '%{content_type}\n' "$PANEL_URL/api/v1/projects"
+#    El panel responde application/json (401 sin token); la landing responde
+#    text/html con 200. Medido: el panel nunca sirve HTML bajo /api/v1.
+#    Si imprime text/html, la URL es otro servicio: no desplegar.
+#    El POST de /acciones/up va después, y es la operación, no la verificación.
 #
 #    Que un puerto lo "posea" dockerd en ss -ltnp no dice qué lo sirve: dockerd
 #    figura como dueño de todo puerto publicado por un contenedor. Cruzar con
