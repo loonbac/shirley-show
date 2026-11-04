@@ -18,6 +18,13 @@ pub struct AudioTurnState {
     pub has_confirmed_destination: bool,
     /// The message talks about audio at all.
     pub mentions_audio: bool,
+    /// The message carries a YouTube link.
+    ///
+    /// This is the strongest signal there is: it names the exact audio source.
+    /// It used to lose against "destination confirmed + mentions audio", so a
+    /// link sent to a presentation that already had tracks never reached the
+    /// downloader and the agent answered that it could not download.
+    pub has_youtube_url: bool,
 }
 
 /// What kind of audio work this turn is.
@@ -52,6 +59,11 @@ pub fn audio_turn_kind(state: AudioTurnState) -> AudioTurnKind {
         AudioTurnKind::AttachedFile
     } else if state.has_previous_staged_id {
         AudioTurnKind::PreparedAudio
+    } else if state.has_youtube_url {
+        // A link names its own source, so it beats "there is a destination with
+        // tracks": the user is not asking to work on what is there, she is asking
+        // to bring something new in.
+        AudioTurnKind::Youtube
     } else if state.has_confirmed_destination && state.mentions_audio {
         AudioTurnKind::ExistingTrack
     } else {
@@ -84,7 +96,18 @@ pub fn audio_turn_tool_names(kind: AudioTurnKind) -> Vec<&'static str> {
             "add_track_from_staged",
             "separate_vocals",
         ],
-        AudioTurnKind::Youtube => vec!["download_youtube_track"],
+        // The user's requirement, in her words: "le envío un link y ya". "Y ya"
+        // means the track must land in the presentation, not sit in staging
+        // waiting for a second request. The downloader alone was not enough: it
+        // produced a staged id and nothing consumed it.
+        //
+        // `separate_vocals` stays out on purpose: there is no audio to separate
+        // yet, and separating needs a track id that only exists after adding.
+        AudioTurnKind::Youtube => vec![
+            "download_youtube_track",
+            "get_presentation",
+            "add_track_from_staged",
+        ],
     }
 }
 
@@ -131,9 +154,14 @@ pub fn audio_turn_instruction(kind: AudioTurnKind, has_destination: bool) -> Str
              pidas enlaces de YouTube: la pista ya esta en la presentacion."
         ),
         AudioTurnKind::Youtube => format!(
-            "Interpreta la solicitud completa de audio. Para un enlace de YouTube llama primero \
-             a download_youtube_track. Destino confirmado: {has_destination}. No inventes IDs ni \
-             afirmes acciones sin herramientas."
+            "La solicitud trae un enlace de YouTube. Llama a download_youtube_track con ese \
+             enlace: descarga el audio en la mejor calidad disponible. Destino confirmado: \
+             {has_destination}. Si el destino no esta confirmado, llama a list_presentations, \
+             identifica por el nombre escrito por la usuaria una unica presentacion y llama a \
+             get_presentation con su ID. Despues llama a add_track_from_staged con el \
+             staged_audio_id que devolvio la descarga y el titulo del audio, para que la pista \
+             quede en la presentacion en este mismo turno: no pidas una segunda confirmacion. \
+             No inventes IDs ni afirmes acciones sin herramientas."
         ),
     }
 }
