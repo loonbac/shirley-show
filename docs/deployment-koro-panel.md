@@ -285,6 +285,19 @@ curl -sS -X POST http://127.0.0.1:3000/api/v1/projects/app-shir/acciones/up \
 #    también devuelve 200. El healthcheck tampoco sirve, porque solo consulta
 #    /api/presentations. Hay que comprobar el contenido del grafo y abrir la
 #    aplicación en un navegador.
+#
+#    Ojo con cómo se audita la red. Los listeners de Playwright
+#    (page.on('request'), context.on('response')) NO son la lista completa de
+#    lo que pide el navegador: filtran peticiones internas. Medido sobre el
+#    mismo render, buscando /favicon.ico:
+#      page.on('request') / context.on('request')     -> 136, favicon NO
+#      page.on('response') / context.on('response')   -> 136, favicon NO
+#      CDP Network.requestWillBeSent                  -> 137, favicon SÍ
+#      CDP Network.responseReceived                   -> 137, "404 .../favicon.ico"
+#      page.on('console') con location.url            -> el error del 404
+#    Para auditar de verdad hay que usar CDP (context.newCDPSession + Network.enable).
+#    Y un error de consola con location.url es evidencia de una petición aunque no
+#    haya evento de red de alto nivel asociado.
 docker exec panel-app-shir ls /app/frontend/js/data | wc -l        # 14
 curl -s -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:65529/assets/js/data/list-presentations.js      # 200
