@@ -390,3 +390,40 @@ fn test_events_table_cards_mobile() {
         "events-table must render data-label via ::before"
     );
 }
+
+#[test]
+fn test_agent_context_badge_wraps_instead_of_truncating() {
+    // The badge carries a sentence, so `text-overflow: ellipsis` on one line
+    // rendered "Modo catalogo (creara un nuevo sh..." -- a prefix that says
+    // nothing. It must wrap and stay bounded by its container instead.
+    let content = fs::read_to_string("frontend/styles/organisms/agent-chat-panel.css")
+        .expect("read agent-chat-panel.css");
+
+    // The desktop media query also styles this badge, so take the base rule:
+    // the one that sets the display and is not nested in a breakpoint.
+    let start = content
+        .match_indices(".agent-chat-context-badge {")
+        .map(|(i, _)| i)
+        .find(|i| {
+            let tail = &content[*i..];
+            let close = tail.find("}").unwrap_or(tail.len());
+            tail[..close].contains("display: inline-flex")
+        })
+        .expect("the base .agent-chat-context-badge rule must exist");
+    let block = &content[start..];
+    let end = block.find("}").expect("the rule must close");
+    let rule = &block[..end];
+
+    assert!(
+        !rule.contains("text-overflow"),
+        "the badge must not truncate: its text is a sentence, not a token"
+    );
+    assert!(
+        !rule.contains("white-space: nowrap"),
+        "the badge must be allowed to wrap so the full label stays readable"
+    );
+    assert!(
+        rule.contains("max-width: 100%"),
+        "the badge must be bounded by its container, not by a fixed width"
+    );
+}
