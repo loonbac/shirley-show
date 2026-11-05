@@ -203,9 +203,10 @@ impl Config {
 
         let groq = GroqConfig::from_env();
 
-        let surface = SurfaceConfig::new(
+        let surface = SurfaceConfig::new_three(
             env::var("SHIRLEY_PUBLIC_BASE_URL").ok().as_deref(),
             env::var("SHIRLEY_PANEL_BASE_URL").ok().as_deref(),
+            env::var("SHIRLEY_DOOR_BASE_URL").ok().as_deref(),
         );
 
         let yt_dlp_bin = env::var("YT_DLP_BIN").ok().and_then(|val| {
@@ -444,6 +445,9 @@ pub struct SurfaceConfig {
     /// Host of the management application, for example
     /// `panel.shirleyshow.site`.
     pub panel_host: String,
+    /// Host of the door, for example `puerta.shirleyshow.site`. Empty when the
+    /// deployment does not split it out.
+    pub door_host: String,
 }
 
 /// What a given request may reach.
@@ -453,6 +457,9 @@ pub enum PublicSurface {
     Landing,
     /// The management application: panel, API, tickets and the door.
     Application,
+    /// The door on its own host: scan, sell at the entrance, close the event,
+    /// and nothing else.
+    Door,
     /// Unknown or missing host: everything stays closed.
     Closed,
 }
@@ -467,7 +474,29 @@ impl SurfaceConfig {
         Self {
             site_host: host_of(site_base_url).unwrap_or_default(),
             panel_host: host_of(panel_base_url).unwrap_or_default(),
+            door_host: String::new(),
         }
+    }
+
+    /// Builds the rule for a three-host deployment: landing, panel and door.
+    pub fn new_three(
+        site_base_url: Option<&str>,
+        panel_base_url: Option<&str>,
+        door_base_url: Option<&str>,
+    ) -> Self {
+        Self {
+            site_host: host_of(site_base_url).unwrap_or_default(),
+            panel_host: host_of(panel_base_url).unwrap_or_default(),
+            door_host: host_of(door_base_url).unwrap_or_default(),
+        }
+    }
+
+    /// Whether the door host may perform `method path`.
+    ///
+    /// Only meaningful for [`PublicSurface::Door`]; other surfaces are decided
+    /// by their own rules.
+    pub fn door_allows(&self, method: &str, path: &str) -> bool {
+        door_allows_path(method, path)
     }
 
     /// Classifies a request by the `Host` header it arrived with.
@@ -483,6 +512,10 @@ impl SurfaceConfig {
         let Some(host) = normalize_host(host) else {
             return PublicSurface::Closed;
         };
+
+        if !self.door_host.is_empty() && host == self.door_host {
+            return PublicSurface::Door;
+        }
 
         if host == self.panel_host {
             return PublicSurface::Application;
@@ -504,6 +537,53 @@ impl SurfaceConfig {
 
         PublicSurface::Closed
     }
+}
+
+/// The only `/api` calls the door host may make.
+///
+/// Written from what `frontend/js/modules/events/door-controller.js` actually
+/// calls, not from memory. Two of them write: `checkInTicket` and
+/// `sellTickets`. Omitting either leaves the doorman unable to mark an entrance
+/// or sell a ticket during the event, which is when there is no time to fix it.
+///
+/// The list is a positive allowlist on purpose: a new route is refused at the
+/// door until someone adds it here, whereas a denylist would expose every future
+/// route by default.
+fn door_allows_path(method: &str, path: &str) -> bool {
+    let path = path.split('?').next().unwrap_or(path);
+    let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+
+    // `GET /api/public/ticket/<token>` — used when the door shows a ticket.
+    if method == "GET"
+        && segments.len() == 4
+        && segments[0] == "api"
+        && segments[1] == "public"
+        && segments[2] == "ticket"
+        && !segments[3].is_empty()
+    {
+        return true;
+    }
+
+    // `POST /api/entradas/checkin` — marking an entrance.
+    if method == "POST" && segments == ["api", "entradas", "checkin"] {
+        return true;
+    }
+
+    // Routes scoped to one event: `getEvent`, `getEventSummary`, the poster and
+    // `sellTickets` all arrive as `/api/eventos/<id>/...`.
+    if segments.len() >= 3 && segments[0] == "api" && segments[1] == "eventos" && !segments[2].is_empty()
+    {
+        let rest = &segments[3..];
+        return match (method, rest) {
+            ("GET", []) => true,              // getEvent
+            ("GET", ["resumen"]) => true,     // getEventSummary
+            ("GET", ["imagen"]) => true,      // ticket/poster image
+            ("POST", ["entradas"]) => true,   // sellTickets
+            _ => false,
+        };
+    }
+
+    false
 }
 
 /// Extracts the bare hostname from a base URL such as `https://a.b:8080/x`.
@@ -551,7 +631,7 @@ impl PublicSurface {
     }
 
     pub fn serves_panel(self) -> bool {
-        matches!(self, Self::Application)
+        matches!(self, Self::Application | Self::Door)
     }
 
     /// The API, including `/api/agent/chat`, which has no auth layer.

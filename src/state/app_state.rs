@@ -108,7 +108,7 @@ impl AppState {
             separation_timeout_secs: 600,
             remote_separation_timeout_secs: 1500,
             joshua_pc: None,
-            surface: crate::config::SurfaceConfig::new(None, None),
+            surface: crate::config::SurfaceConfig::new_three(None, None, None),
         });
         Self::new_with_all_components_and_config(
             pool,

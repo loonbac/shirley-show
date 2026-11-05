@@ -7,7 +7,7 @@
 //! line, in the application itself.
 
 use axum::extract::{Request, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -26,15 +26,42 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
 
     let surface = state.surface.classify(host);
     let path = request.uri().path();
+    let method = request.method().as_str();
 
-    let wants_application = path.starts_with("/api/") || path == "/panel" || path.starts_with("/panel/");
+    let wants_application =
+        path.starts_with("/api/") || path == "/panel" || path.starts_with("/panel/");
 
-    // `Closed` matters as much as `Landing`: a request that arrives with no
-    // Host header, an IP, or a foreign domain is not a visitor of the landing
-    // and must not reach an API that has no auth layer.
-    if wants_application && surface != PublicSurface::Application {
-        return StatusCode::NOT_FOUND.into_response();
+    match surface {
+        PublicSurface::Application => {}
+        // The door is the only surface besides the panel that can write, and it
+        // runs with a long session so it cannot be trusted with the whole
+        // application. It gets a positive allowlist instead of a bare refusal.
+        PublicSurface::Door => {
+            if wants_application && !state.surface.door_allows(method, path) {
+                return refused();
+            }
+        }
+        // `Closed` matters as much as `Landing`: a request that arrives with no
+        // Host header, an IP, or a foreign domain is not a visitor of the
+        // landing and must not reach an API that has no auth layer.
+        PublicSurface::Landing | PublicSurface::Closed => {
+            if wants_application {
+                return refused();
+            }
+        }
     }
 
     next.run(request).await
+}
+
+/// A refusal that can be told apart from a handler's own 404.
+///
+/// Both are "not found", which is what an anonymous visitor should see, but a
+/// test (or an operator reading logs) needs to know which layer refused.
+fn refused() -> Response {
+    let mut response = StatusCode::NOT_FOUND.into_response();
+    response
+        .headers_mut()
+        .insert("x-surface-refused", HeaderValue::from_static("1"));
+    response
 }
