@@ -176,13 +176,17 @@
           <h2 class="pres__h2">Shirley Show y sus amigos</h2>
         </div>
         <div class="pres__galeria">
-          <div class="pres__item" style="transform:rotate(-2deg)">
+          <div class="pres__item" style="transform:rotate(-2deg)"
+                 role="button" tabindex="0" aria-label="Abrir: Shirley en escena"
+                 data-titulo="Shirley en escena" data-video="0">
             <div class="pres__item-medio" style="aspect-ratio:4 / 5">
               <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Shirley en escena</span></div>
             </div>
             <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Shirley en escena</span></div>
           </div>
-          <div class="pres__item" style="transform:rotate(1.5deg)">
+          <div class="pres__item" style="transform:rotate(1.5deg)"
+                 role="button" tabindex="0" aria-label="Abrir: Presentación junto a la banda"
+                 data-titulo="Presentación junto a la banda" data-video="1">
             <div class="pres__item-medio" style="aspect-ratio:1 / 1">
               <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Presentación junto a la banda</span></div>
               <div class="pres__video-badge">VIDEO</div>
@@ -190,19 +194,25 @@
             </div>
             <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Presentación junto a la banda</span></div>
           </div>
-          <div class="pres__item" style="transform:rotate(-1deg)">
+          <div class="pres__item" style="transform:rotate(-1deg)"
+                 role="button" tabindex="0" aria-label="Abrir: Con sus amigos músicos"
+                 data-titulo="Con sus amigos músicos" data-video="0">
             <div class="pres__item-medio" style="aspect-ratio:3 / 4">
               <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Con sus amigos músicos</span></div>
             </div>
             <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Con sus amigos músicos</span></div>
           </div>
-          <div class="pres__item" style="transform:rotate(2deg)">
+          <div class="pres__item" style="transform:rotate(2deg)"
+                 role="button" tabindex="0" aria-label="Abrir: Detalle del escenario"
+                 data-titulo="Detalle del escenario" data-video="0">
             <div class="pres__item-medio" style="aspect-ratio:1 / 1">
               <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Detalle del escenario</span></div>
             </div>
             <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Detalle del escenario</span></div>
           </div>
-          <div class="pres__item" style="transform:rotate(-1.5deg)">
+          <div class="pres__item" style="transform:rotate(-1.5deg)"
+                 role="button" tabindex="0" aria-label="Abrir: Un momento especial"
+                 data-titulo="Un momento especial" data-video="1">
             <div class="pres__item-medio" style="aspect-ratio:4 / 3">
               <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Un momento especial</span></div>
               <div class="pres__video-badge">VIDEO</div>
@@ -210,7 +220,9 @@
             </div>
             <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Un momento especial</span></div>
           </div>
-          <div class="pres__item" style="transform:rotate(1deg)">
+          <div class="pres__item" style="transform:rotate(1deg)"
+                 role="button" tabindex="0" aria-label="Abrir: Cerca del público"
+                 data-titulo="Cerca del público" data-video="0">
             <div class="pres__item-medio" style="aspect-ratio:4 / 5">
               <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Cerca del público</span></div>
             </div>
@@ -250,7 +262,62 @@
     <div style="margin-top:14px"><a class="pres__footer-acceso" href="/panel">Acceso al sistema</a></div>
   </footer>
 
+  <!-- Full-screen viewer: the original gallery opened each tile -->
+  <div class="pres__lb" id="lb" hidden>
+    <div class="pres__lb-caja">
+      <button class="pres__lb-cerrar" id="lb-cerrar" aria-label="Cerrar">&times;</button>
+      <div class="pres__lb-medio" id="lb-medio"></div>
+      <p class="pres__lb-pie" id="lb-pie"></p>
+    </div>
+  </div>
+
 </div>
+
+<script>
+  (function () {
+    var lb = document.getElementById('lb');
+    var medio = document.getElementById('lb-medio');
+    var pie = document.getElementById('lb-pie');
+
+    function cerrar() {
+      lb.hidden = true;
+      document.body.style.overflow = '';
+    }
+
+    function abrir(tile) {
+      var titulo = tile.getAttribute('data-titulo') || '';
+      var esVideo = tile.getAttribute('data-video') === '1';
+      medio.textContent = '';
+      var ph = document.createElement('div');
+      ph.className = 'pres__ph';
+      var txt = document.createElement('span');
+      txt.className = 'pres__ph-txt';
+      txt.textContent = titulo;
+      ph.appendChild(txt);
+      medio.appendChild(ph);
+      if (esVideo) {
+        var badge = document.createElement('div');
+        badge.className = 'pres__video-badge';
+        badge.textContent = 'VIDEO';
+        medio.appendChild(badge);
+      }
+      pie.textContent = titulo;
+      lb.hidden = false;
+      document.body.style.overflow = 'hidden';
+    }
+
+    document.querySelectorAll('.pres__item').forEach(function (tile) {
+      tile.addEventListener('click', function () { abrir(tile); });
+      tile.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(tile); }
+      });
+    });
+
+    document.getElementById('lb-cerrar').addEventListener('click', cerrar);
+    lb.addEventListener('click', function (e) { if (e.target === lb) cerrar(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !lb.hidden) cerrar(); });
+  })();
+</script>
 
 <script>
   document.getElementById('anio').textContent = new Date().getFullYear();
