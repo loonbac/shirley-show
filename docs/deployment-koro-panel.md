@@ -994,3 +994,39 @@ Conviene saber además que **no se reproducen siempre**. Probado con dos y tres 
 de `sh -c`, con `sudo` en medio, y con `@@`, `|` y `$` como separadores: en esta
 máquina llegan intactos. **Un mecanismo plausible no demuestra que ocurriera** — la
 atribución honesta es «puede pasar por esta vía», no «pasó por esta vía».
+
+#### `ssh` concatena argv: el caso que sí se reproduce
+
+El límite anterior tenía una causa concreta y reproducible, y no era ni el separador
+ni las llaves de plantilla. Estaba una capa más arriba, en **cómo se invocaba `ssh`**:
+
+```python
+subprocess.run(["ssh", host, "sh", "-c", cmd])        # mal: argv separado
+subprocess.run(["ssh", host, f"sh -c '{cmd}'"])       # bien: una sola cadena
+```
+
+**`ssh` no pasa argv al remoto: los concatena con espacios.** Con la forma separada,
+el remoto recibe `sh -c sudo docker exec …`, y `sh -c` toma **sólo la palabra
+siguiente** (`sudo`) como comando, dejando el resto en `$0 $1 …`. Medido:
+
+```
+["ssh", host, "sh", "-c", cmd]   ->  rc=1  9 líneas  "usage: sudo -h | -K | -k | -V"
+["ssh", host, "sh -c '<cmd>'"]   ->  rc=0  "hola"
+```
+
+**Nueve líneas.** Un parser que contaba líneas como filas de datos reportó
+`total=9, ingresadas=9` sobre el texto de ayuda de `sudo`.
+
+De ahí la lección, que es la parte general:
+
+> **Un parser que no comprueba la forma de la entrada convierte un mensaje de error
+> en un resultado.**
+
+Y la de atribución, que es la misma de antes: **un síntoma con dos causas posibles se
+atribuye midiendo, no eligiendo.** Las dos explicaciones publicadas antes —«el
+separador se rompió» y «las llaves compiten con el shell»— eran ficción: probadas
+con dos y tres capas de `sh -c`, con `sudo` en medio y con `@@`, `|` y `$` como
+separadores, llegan intactas.
+
+Antes de interpretar una salida, **mirar su forma**. Un comando que devuelve algo que
+parece de otro programa está diciendo que no se ejecutó lo que se creía.
