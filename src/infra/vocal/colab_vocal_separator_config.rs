@@ -78,6 +78,11 @@ impl ColabVocalSeparatorConfig {
         // answered every time it was asked. Order matters: the first one that
         // assigns wins, so the expensive-but-fast option is tried before the
         // slow-but-reliable one.
+        // The variable keeps its singular name even though it now holds a list.
+        // Renaming it to `_FALLBACKS` would silently restore the default chain
+        // in every deployment that sets the old name, and nothing in the image
+        // would complain: the chain is read from the environment, not compiled
+        // in. Keep the name.
         let gpu_fallbacks: Vec<String> = match std::env::var("SHIRLEY_COLAB_GPU_FALLBACK") {
             Ok(raw) => raw
                 .split(',')
