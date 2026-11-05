@@ -794,3 +794,43 @@ Y el error simétrico: comparar dos módulos enteros para probar «solo cambió 
 cabecera» da distinto **porque el docstring es un nodo**. Ahí lo correcto es
 excluirlo y comparar el resto. **Las dos son la misma falta: medir el artefacto
 entero cuando importa una parte, o medir el texto cuando importa el código.**
+
+#### El acta cita dos hashes, porque responden preguntas distintas
+
+Un commit envejece; el contenido no. Medido en esta rama, el mismo fichero a
+través de cuatro commits:
+
+```
+7cf5932  921b2ead1ebfb8f2e5e0cb5b6583a3b7
+5fd4501  921b2ead1ebfb8f2e5e0cb5b6583a3b7
+9d1784e  921b2ead1ebfb8f2e5e0cb5b6583a3b7
+911ddc7  921b2ead1ebfb8f2e5e0cb5b6583a3b7
+```
+
+`HEAD` cambió cuatro veces; el contenido no. Por eso el acta lleva los dos:
+
+- **el commit** responde «¿de dónde salió?», y permite
+  `git show <commit>:<ruta>` desde cualquier máquina;
+- **el hash del contenido** responde «¿qué se ejecutó exactamente?», y es lo único
+  que sigue siendo verdad cuando la rama avanza.
+
+Sólo con el commit, el acta envejece en minutos. Sólo con el hash, se pierde la
+procedencia y hay que confiar en un `/tmp`.
+
+#### «Host» es ambiguo, y por eso se enumeran tres sitios
+
+Decir «el host no tiene copias» es ambiguo: puede ser la máquina donde hablas o el
+host del VPS fuera del contenedor. Son dos sistemas de ficheros distintos, y una
+copia vivió en el segundo mientras el primero se declaraba limpio.
+
+Se enumeran **tres**, con nombre completo:
+
+```
+local        la máquina donde se prepara
+VPS host     el host del VPS, fuera del contenedor
+contenedor   el sistema de ficheros del contenedor
+```
+
+Y se enumeran, no se recuerdan: `ls /tmp/*.py` en cada uno, no `rm` de nombres
+conocidos. Un `rm -f` de algo inexistente devuelve 0 y refuerza la falsa sensación
+de limpieza.
