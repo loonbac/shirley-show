@@ -5,7 +5,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
 
   test('Flujo 1: Presentaciones - Crear presentación y agregar contenido al repertorio', async ({ page }) => {
     // 1. Ir al catálogo de presentaciones
-    await page.goto('/#/presentations');
+    await page.goto('/panel#/presentations');
     await expect(page.locator('.welcome-header').first()).toBeVisible();
 
     // 2. Click en "+ Nueva Presentación"
@@ -32,7 +32,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
 
   test('Flujo 2: Eventos - Crear evento con tipos de entrada y selector de fecha real', async ({ page }) => {
     // 1. Ir a la sección de eventos
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     await expect(page.locator('.events-catalog-header').first()).toBeVisible();
 
     // 2. Click en "Nuevo Evento" o "Crear Primer Evento"
@@ -85,7 +85,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
 
   test('Flujo 3: Detalle de Evento, Venta Rápida de Entradas y Resumen Financiero', async ({ page }) => {
     // 1. Ir a eventos y abrir el evento creado
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     const eventCard = page.locator('.events-card').filter({ hasText: 'Gala de Shirley Show en Barranco' }).first();
     await expect(eventCard).toBeVisible();
     await eventCard.locator('button:has-text("Ver Detalle")').click();
@@ -145,7 +145,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
   });
 
   test('Flujo 4: Registro de Gastos y Cálculo de Ganancia Neta', async ({ page }) => {
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     const eventCard = page.locator('.events-card').filter({ hasText: 'Gala de Shirley Show en Barranco' }).first();
     await eventCard.locator('button:has-text("Ver Detalle")').click();
 
@@ -180,7 +180,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
   });
 
   test('Flujo 5: Interesados (Leads) y Conversión a Venta', async ({ page }) => {
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     const eventCard = page.locator('.events-card').filter({ hasText: 'Gala de Shirley Show en Barranco' }).first();
     await eventCard.locator('button:has-text("Ver Detalle")').click();
 
@@ -226,7 +226,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
     expect(realQrSecret).toHaveLength(32);
 
     // 2. Navegar a Modo Puerta
-    await page.goto(`/#/puerta/${gala.id}`);
+    await page.goto(`/panel#/puerta/${gala.id}`);
     await expect(page.locator('.door-camera-guide')).toBeVisible();
     await expect(page.locator('.door-scan-hint')).toContainText('Apunta la cámara al código QR');
     // Verificar que no hay campo de texto manual (seguridad endurecida)
@@ -274,7 +274,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
     const ticket = entradas[0];
 
     // Navegar a la URL pública del ticket (#/ticket/:token)
-    await page.goto(`/#/ticket/${ticket.scan_token}`);
+    await page.goto(`/panel#/ticket/${ticket.scan_token}`);
     await expect(page.locator('.public-ticket-container')).toBeVisible();
     await expect(page.locator('.public-ticket-event-title')).toContainText('Gala de Shirley Show');
     await expect(page.locator('.public-ticket-info-value').first()).toContainText(ticket.nombre_comprador);
@@ -282,7 +282,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
   });
 
   test('Flujo 8: Finalizar y Reabrir Evento', async ({ page }) => {
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     const eventCard = page.locator('.events-card').filter({ hasText: 'Gala de Shirley Show en Barranco' }).first();
     await eventCard.locator('button:has-text("Ver Detalle")').click();
 
@@ -296,7 +296,7 @@ test.describe.serial('Shirley Show - Flujos de Usuario Reales E2E', () => {
     await expect(reopenBtn).toBeVisible();
 
     // En el catálogo debe aparecer en la sección finalizados
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     await expect(page.locator('.events-card-finalized, .events-badge-muted').first()).toBeVisible();
 
     // Volver a abrir detalle y reabrir

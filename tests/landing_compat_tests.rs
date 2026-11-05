@@ -25,10 +25,14 @@ fn test_public_landing_and_panel_are_separate_documents() {
         "the landing must not depend on the panel bundle"
     );
 
-    // The panel must remain reachable from the landing.
+    // The panel is not reachable from the public page at all. Its only way in is
+    // its own host, behind Cloudflare Access. An anonymous visitor who reaches
+    // `/api/agent/chat` spends real provider tokens, so a convenience link on the
+    // landing is not convenience: it is the shortest path to a paid endpoint.
     assert!(
-        landing.contains(r#"href="/panel""#),
-        "the landing must link to the panel so the owner can still get in"
+        !landing.contains("/panel"),
+        "the public landing must contain no reference to the panel: it is served \
+         behind Access on its own host, and a link here exposes it to anyone"
     );
 
     let router = fs::read_to_string("src/router.rs").expect("read router.rs");
@@ -39,37 +43,41 @@ fn test_public_landing_and_panel_are_separate_documents() {
 }
 
 #[test]
-fn test_old_ticket_links_are_forwarded_to_the_panel() {
-    // Ticket links are hash routes (`/#/ticket/<token>`). A hash never reaches
-    // the server, so the forward has to happen in the landing document itself.
+fn test_the_landing_never_forwards_a_visitor_into_the_panel() {
+    // This document used to rewrite any hash route (`#/eventos`, `#/panel`, ...)
+    // into `/panel#/...`. That handed the panel to anyone who typed a fragment,
+    // without ever knowing the path: the shortest way around Access.
+    //
+    // The landing now answers on its own. Ticket links are shown by the landing
+    // itself, so nothing needs forwarding and no client-side redirect exists to
+    // be abused.
     let landing = fs::read_to_string("frontend/landing/index.html")
         .expect("frontend/landing/index.html must exist");
 
     assert!(
-        landing.contains("/panel"),
-        "the landing must know the panel path"
+        !landing.contains("location.replace"),
+        "the landing must not rewrite its own location: the only redirect it had \
+         pointed at the panel, and a client-side redirect to a protected host is a \
+         bypass with extra steps"
     );
     assert!(
-        landing.contains("location.hash"),
-        "the landing must inspect the hash to forward legacy links"
+        !landing.contains("panelViews"),
+        "the hash-route forwarder must be gone, not merely disabled"
     );
-    assert!(
-        landing.contains("location.replace"),
-        "forwarding must replace history, not stack a back step on a ticket scan"
-    );
+}
 
-    // Every hash route that already exists in the world must be forwarded.
-    for view in [
-        "ticket",
-        "eventos",
-        "presentations",
-        "puerta",
-    ] {
-        assert!(
-            landing.contains(view),
-            "legacy hash route `{view}` must be forwarded, or existing links break"
-        );
-    }
+#[test]
+fn the_landing_does_not_load_the_panel_bundle() {
+    // A ticket page on the public host must stay a leaf: if it pulled the panel
+    // bundle it would drag the whole application, its API client and its chat
+    // surface onto the anonymous host.
+    let landing = fs::read_to_string("frontend/landing/index.html")
+        .expect("frontend/landing/index.html must exist");
+
+    assert!(
+        !landing.contains("/assets/"),
+        "the landing must ship no asset from the panel bundle"
+    );
 }
 
 #[test]

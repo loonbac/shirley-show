@@ -22,20 +22,30 @@ test('el panel sigue accesible en /panel', async ({ page }) => {
   await expect(page.locator('.app-topbar')).toBeVisible();
 });
 
-test('un enlace viejo de entrada (#/ticket/...) sigue llegando al panel', async ({ page }) => {
-  // This is the exact shape already shared with buyers over WhatsApp.
+test('la landing no reenvía al panel por un hash de entrada', async ({ page }) => {
+  // This exact shape was shared with buyers over WhatsApp. It used to land them
+  // in the panel, which is behind Access on its own host; the landing handed
+  // out the protected surface to anyone who typed a fragment.
   await page.goto('/#/ticket/st_ab12cd34ef56ab78cd90ef12ab34cd56');
 
-  // The landing forwards to the panel preserving the hash, and the public
-  // ticket view resolves it. The token here is invented, so the view reports
-  // that it does not exist -- which proves it was reached, not lost.
-  await expect(page).toHaveURL(/\/panel#\/ticket\/st_ab12cd34ef56ab78cd90ef12ab34cd56$/);
-  await expect(page.getByText('Entrada no disponible')).toBeVisible();
+  await expect(page).toHaveURL(/^[^#]*\/#\/ticket\/st_ab12cd34ef56ab78cd90ef12ab34cd56$/);
+  await expect(page.locator('.pres__hero')).toBeVisible();
 });
 
-test('un enlace viejo de evento (#/eventos/...) sigue llegando al panel', async ({ page }) => {
+test('la landing no reenvía al panel por un hash de evento', async ({ page }) => {
   await page.goto('/#/eventos/abc-123');
-  await expect(page).toHaveURL(/\/panel#\/eventos\/abc-123$/);
+  await page.waitForTimeout(400);
+  await expect(page).not.toHaveURL(/\/panel/);
+  await expect(page.locator('.pres__hero')).toBeVisible();
+});
+
+test('la landing pública no menciona el panel en ningún sitio', async ({ page }) => {
+  // Not just no link: no string, no comment, nothing that names the protected
+  // surface to an anonymous visitor.
+  await page.goto('/');
+  const html = await page.content();
+  expect(html).not.toContain('panel');
+  expect(await page.locator('a[href*="panel"]').count()).toBe(0);
 });
 
 test('la raíz sin hash no redirige: se queda en la landing', async ({ page }) => {

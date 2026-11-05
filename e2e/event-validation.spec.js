@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Validación de Formularios de Eventos E2E', () => {
 
   test('Validación: muestra error amigable si los campos obligatorios están vacíos', async ({ page }) => {
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     await page.locator('button:has-text("Nuevo Evento"), button:has-text("Crear Primer Evento")').first().click();
 
     const dialog = page.locator('.events-dialog').first();
@@ -18,7 +18,7 @@ test.describe('Validación de Formularios de Eventos E2E', () => {
   });
 
   test('Validación: muestra error si la fecha ingresada es inválida', async ({ page }) => {
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     await page.locator('button:has-text("Nuevo Evento"), button:has-text("Crear Primer Evento")').first().click();
 
     const dialog = page.locator('.events-dialog').first();
@@ -44,7 +44,7 @@ test.describe('Validación de Formularios de Eventos E2E', () => {
   });
 
   test('Soporte de fecha humana: acepta fechas escritas en formato AAAA-MM-DD HH:MM', async ({ page }) => {
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     await page.locator('button:has-text("Nuevo Evento"), button:has-text("Crear Primer Evento")').first().click();
 
     const dialog = page.locator('.events-dialog').first();
@@ -70,7 +70,7 @@ test.describe('Validación de Formularios de Eventos E2E', () => {
   });
 
   test('Validación de entradas: no permite tipos de entrada con capacidad 0 o nombre vacío', async ({ page }) => {
-    await page.goto('/#/eventos');
+    await page.goto('/panel#/eventos');
     await page.locator('button:has-text("Nuevo Evento"), button:has-text("Crear Primer Evento")').first().click();
 
     const dialog = page.locator('.events-dialog').first();
