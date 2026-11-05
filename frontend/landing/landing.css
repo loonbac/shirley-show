@@ -227,8 +227,11 @@
    composition stays the same. Selector keys on the badge, which only video
    tiles have, because the badge precedes the play button in the markup. */
 /* The play disc is absolutely centred and `.pres__ph` centres its own content,
-   so padding cannot separate them. Move the label clear of the disc instead. */
-.pres__item-medio:has(.pres__video-badge) .pres__ph-txt {
+   so padding cannot separate them: the label moves aside with `transform`.
+   Selected by the tile's own attribute, not by `:has()`: the descendant test
+   needs Chrome 105+/Safari 15.4+/Firefox 121+, and on an older phone the label
+   would collide with the disc again. An attribute selector works everywhere. */
+.pres__item[data-video="1"] .pres__ph-txt {
   transform: translateY(52px);
 }
 

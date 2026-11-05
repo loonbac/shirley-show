@@ -109,3 +109,48 @@ fn test_landing_assets_are_present() {
         );
     }
 }
+
+/// `:has()` needs Chrome 105+ / Safari 15.4+ / Firefox 121+ (all 2023). The
+/// video tiles already carry `data-video="1"`, and an attribute selector works
+/// everywhere, so the landing must not depend on `:has()` for layout.
+#[test]
+fn test_landing_does_not_depend_on_has_selector() {
+    let css = fs::read_to_string("frontend/landing/landing.css")
+        .expect("frontend/landing/landing.css must exist");
+    // Prose is not code: a comment may name the selector it warns about, so
+    // strip comments before looking for real rules.
+    let mut css_rules = String::with_capacity(css.len());
+    let chars: Vec<char> = css.chars().collect();
+    let mut i = 0;
+    let mut in_comment = false;
+    while i < chars.len() {
+        let next = chars.get(i + 1).copied();
+        if !in_comment && chars[i] == '/' && next == Some('*') {
+            in_comment = true;
+            i += 2;
+            continue;
+        }
+        if in_comment && chars[i] == '*' && next == Some('/') {
+            in_comment = false;
+            i += 2;
+            continue;
+        }
+        if !in_comment {
+            css_rules.push(chars[i]);
+        }
+        i += 1;
+    }
+    assert!(
+        !css_rules.contains(":has("),
+        "landing.css must not use :has(): older mobile browsers drop the rule \
+         and the video label collides with the play disc again"
+    );
+
+    let html = fs::read_to_string("frontend/landing/index.html")
+        .expect("frontend/landing/index.html must exist");
+    assert!(
+        html.contains("data-video=\"1\""),
+        "video tiles must expose data-video=\"1\" so CSS can target them \
+         without :has()"
+    );
+}
