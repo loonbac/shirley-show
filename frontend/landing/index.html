@@ -406,23 +406,16 @@
       return m ? m[1] : '';
     }
 
-    // `st_...` is the buyer's link token. A bare 32-hex string is the door code
-    // from the printed QR: it opens the door, not this page.
-    function esTokenDeEnlace(token) {
-      return /^st_[0-9a-fA-F]{64}$/.test(token);
-    }
-
+    // Both credentials a buyer can arrive with resolve to the same ticket:
+    //   `st_<64 hex>`  the link token, and
+    //   `<32 hex>`     the door secret printed inside the QR.
+    //
+    // The second one is the only one that reaches here in practice: the buyer is
+    // never sent a link, they are sent the photo of their ticket, and its QR
+    // carries `#/ticket/<door secret>`. Refusing it here -- as an earlier version
+    // did -- meant a buyer scanning their own ticket saw the landing page and
+    // nothing else.
     var token = leer();
-
-    if (token && !esTokenDeEnlace(token)) {
-      // The buyer scanned their own printed ticket. Show the card they already
-      // have on this device if any, and tell them what to do at the door.
-      try {
-        var guardado = JSON.parse(localStorage.getItem(CLAVE) || 'null');
-        if (guardado && guardado.t) pintar(guardado.t);
-      } catch (e) {}
-      return;
-    }
 
     if (token) {
       fetch('/api/public/ticket/' + encodeURIComponent(token), {
