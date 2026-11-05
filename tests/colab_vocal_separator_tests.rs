@@ -166,6 +166,7 @@ fn test_remote_script_generation_content() {
         VocalSeparationMode::Instrumental,
         &INSTRUMENTAL_MODELS,
         12,
+        8,
         "super_secret_pw",
         "/content/my_input.wav",
     );
@@ -203,6 +204,7 @@ fn test_remote_script_generation_coros_mode() {
     let script = generate_remote_script(
         VocalSeparationMode::Coros,
         &COROS_MODELS,
+        8,
         8,
         "another_pass",
         "/content/audio.mp3",
@@ -726,6 +728,7 @@ fn test_remote_script_treats_no_vocals_as_instrumental() {
         VocalSeparationMode::Instrumental,
         &INSTRUMENTAL_MODELS,
         12,
+        8,
         "pw",
         "/content/input.wav",
     );
