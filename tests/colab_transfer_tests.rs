@@ -805,3 +805,99 @@ fn test_boot_sweep_stops_regardless_of_retention() {
         "al arrancar no hay ningún turno en curso, así que cualquier runtime es huérfano"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Upload resilience.
+//
+// `colab upload` exits 1 with "kernel write failed" while still leaving the
+// file byte-perfect on the runtime. Measured in production:
+//
+//   local  sha256 = 5a0b6df6...d470
+//   remote sha256 = 5a0b6df6...d470
+//   size = 289689 (exact)
+//
+// Trusting the exit code aborted every separation with `separation_failed`.
+// The upload is only failed when the file is absent or its size/checksum does
+// not match, so the decision belongs to the verification, not the exit status.
+#[test]
+fn test_upload_exit_code_alone_does_not_decide_success() {
+    use shirley_show::infra::vocal::colab_transfer::{UploadVerdict, upload_verdict};
+
+    // The exact production case: exit 1, file intact.
+    assert_eq!(
+        upload_verdict(false, Some(289_689), 289_689),
+        UploadVerdict::Accept,
+        "el CLI sale con 1 pero el archivo llego completo: aceptar"
+    );
+
+    // Exit 0 but the file never landed: reject.
+    assert_eq!(
+        upload_verdict(true, None, 289_689),
+        UploadVerdict::Reject,
+        "salida 0 sin archivo remoto no es exito"
+    );
+
+    // Truncated payload: reject, whatever the exit code says.
+    assert_eq!(
+        upload_verdict(true, Some(100), 289_689),
+        UploadVerdict::Reject,
+        "un archivo truncado no sirve aunque el CLI diga que si"
+    );
+
+    // Exit 1 and nothing there: retry.
+    assert_eq!(
+        upload_verdict(false, None, 289_689),
+        UploadVerdict::Retry,
+        "sin archivo y con fallo: reintentar es lo razonable"
+    );
+}
+
+// The lease is what stops a boot sweep from killing a living sibling's GPU.
+// It was added after measuring that a blind `colab stop` destroyed a
+// separation mid-flight: the user saw `separation_failed` with no explanation.
+#[test]
+fn test_lease_is_taken_by_a_fresh_process() {
+    let dir = std::env::temp_dir().join(format!("lease-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // No lease yet: this process owns the runtimes and may sweep.
+    assert!(
+        !shirley_show::infra::vocal::colab_orphan_reaper::claim_runtime_lease(&dir),
+        "sin arrendamiento previo no hay dueno ajeno"
+    );
+    shirley_show::infra::vocal::colab_orphan_reaper::release_runtime_lease(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_lease_of_a_dead_process_is_not_respected() {
+    let dir = std::env::temp_dir().join(format!("lease-dead-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // A pid that cannot be running: the runtime it left behind is an orphan and
+    // must be swept, otherwise it bills forever.
+    std::fs::write(dir.join("colab-runtime-owner.pid"), "4294967290").unwrap();
+    assert!(
+        !shirley_show::infra::vocal::colab_orphan_reaper::claim_runtime_lease(&dir),
+        "un pid muerto no protege un runtime huerfano"
+    );
+    shirley_show::infra::vocal::colab_orphan_reaper::release_runtime_lease(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_lease_of_a_live_process_is_respected() {
+    let dir = std::env::temp_dir().join(format!("lease-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // pid 1 is always running on unix, so it stands in for a live sibling.
+    std::fs::write(dir.join("colab-runtime-owner.pid"), "1").unwrap();
+    assert!(
+        shirley_show::infra::vocal::colab_orphan_reaper::claim_runtime_lease(&dir),
+        "una instancia viva no debe perder su GPU a manos de otra"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

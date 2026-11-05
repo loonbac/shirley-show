@@ -425,12 +425,35 @@ if [ "$cmd" = "start" ]; then
     exit 0
 elif [ "$cmd" = "upload" ]; then
     echo "upload $@" >> "{log_str}"
-    exit 0
+    # Remember what actually arrived so the size probe can answer truthfully.
+    # The upload is judged on the runtime contents, never on the exit code.
+    for arg in "$@"; do
+        if [ -f "$arg" ]; then
+            cp "$arg" "{temp_dir_str}/uploaded"
+        fi
+    done
+    # Exit 1 on purpose: the real CLI reports "kernel write failed" while still
+    # leaving a byte-perfect file. The pipeline must accept that.
+    exit 1
 elif [ "$cmd" = "exec" ]; then
     if [ -f "{fail_exec_str}" ]; then
         exit 1
     fi
     echo "exec $@" >> "{log_str}"
+
+    # The upload is judged by what the runtime holds, not by the CLI exit
+    # code, so the fake must answer the size probe. Without this the probe is
+    # mistaken for the separation script and every lifecycle test fails.
+    case "$*" in
+        *"SIZE="*)
+            if [ -f "{temp_dir_str}/uploaded" ]; then
+                echo "SIZE=$(wc -c < "{temp_dir_str}/uploaded" | tr -d ' ')"
+            else
+                echo "SIZE=absent"
+            fi
+            exit 0
+            ;;
+    esac
 
     # Extract script file (last argument)
     for last; do true; done

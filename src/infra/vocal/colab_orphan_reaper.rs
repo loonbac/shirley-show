@@ -68,6 +68,64 @@ pub fn boot_reap_decision(has_active_work: bool) -> ReapDecision {
 /// Devuelve `true` cuando el comando terminó con éxito. Un fallo no es fatal: el
 /// siguiente barrido lo reintenta y, mientras tanto, el límite es el mismo que ya
 /// existía.
+/// Whether this process is the one that owns Colab runtimes for this host.
+///
+/// The boot sweep and any recovery sweep answer the same question: is a runtime
+/// alive because *we* left it, or because another live instance is using it?
+/// `colab stop` with no session kills **every** runtime in the account, so a
+/// second instance sweeping blindly destroys its sibling's work.
+///
+/// The answer is an owner file holding the process id that claimed it. A pid
+/// that is no longer running, a file naming ourselves, or no file at all means
+/// the runtimes cannot belong to a living sibling.
+///
+/// This is a lock, not a guarantee: two instances starting in the same instant
+/// can still both see a stale file. That is acceptable because the consequence
+/// is a lost GPU, not corrupt data, and the alternative — never sweeping —
+/// leaves the orphan billing forever, which is the defect being fixed.
+fn lease_path(data_dir: &std::path::Path) -> std::path::PathBuf {
+    data_dir.join("colab-runtime-owner.pid")
+}
+
+/// Claims ownership for this process, returning whether it belonged to someone else.
+pub fn claim_runtime_lease(data_dir: &std::path::Path) -> bool {
+    let path = lease_path(data_dir);
+    let previous = std::fs::read_to_string(&path).ok();
+    let foreign = match previous
+        .as_deref()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+    {
+        Some(pid) if pid == std::process::id() => false,
+        Some(pid) => process_is_running(pid),
+        None => false,
+    };
+    let _ = std::fs::create_dir_all(data_dir);
+    let _ = std::fs::write(&path, std::process::id().to_string());
+    foreign
+}
+
+/// Releases the lease when this process owned it.
+pub fn release_runtime_lease(data_dir: &std::path::Path) {
+    let path = lease_path(data_dir);
+    let ours = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .map(|pid| pid == std::process::id())
+        .unwrap_or(false);
+    if ours {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[cfg(unix)]
+fn process_is_running(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+#[cfg(not(unix))]
+fn process_is_running(_pid: u32) -> bool {
+    false
+}
 pub async fn stop_all_runtimes(colab_bin: &std::path::Path, timeout: Duration) -> bool {
     let mut cmd = Command::new(colab_bin);
     cmd.kill_on_drop(true);

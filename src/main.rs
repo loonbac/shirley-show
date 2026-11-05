@@ -34,7 +34,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let colab_bin = std::env::var("SHIRLEY_COLAB_BIN")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("colab"));
-        let decision = shirley_show::infra::vocal::colab_orphan_reaper::boot_reap_decision(false);
+        // The lease tells us whether a runtime belongs to a *living* sibling.
+        // `colab stop` with no session frees every runtime in the account, so
+        // sweeping while another instance is alive would destroy its work. This
+        // was measured: a periodic sweep killed a separation mid-flight and the
+        // user saw `separation_failed` with no explanation.
+        let foreign_owner =
+            shirley_show::infra::vocal::colab_orphan_reaper::claim_runtime_lease(&config.data_dir);
+        let decision =
+            shirley_show::infra::vocal::colab_orphan_reaper::boot_reap_decision(foreign_owner);
         if decision == shirley_show::infra::vocal::colab_orphan_reaper::ReapDecision::Stop {
             let stopped = shirley_show::infra::vocal::colab_orphan_reaper::stop_all_runtimes(
                 &colab_bin,
@@ -42,6 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await;
             println!("Barrido de GPU al arrancar: runtimes huérfanos liberados={stopped}");
+        } else {
+            println!("Barrido de GPU al arrancar: omitido, otra instancia sigue viva");
         }
     }
     let audio_dir = config.data_dir.join("audio");
