@@ -33,13 +33,22 @@ export function createAgentToolCard(props) {
   const summaryText = action.summary || formatDefaultSummary(action);
   const summaryEl = createElement('span', { class: 'agent-tool-card-summary' }, [summaryText]);
 
+  const rowChildren = [checkIcon, summaryEl];
+  const row = createElement('div', { class: 'agent-tool-card-row' }, rowChildren);
+
+  const bodyChildren = [row];
+  const audioEl = buildAudioActions(action);
+  if (audioEl) {
+    bodyChildren.push(audioEl);
+  }
+
   const el = createElement(
     'div',
     {
       class: `agent-tool-card ${toolClass} ${isSuccess ? 'is-success' : 'is-error'}`,
       role: 'status',
     },
-    [checkIcon, summaryEl]
+    bodyChildren
   );
 
   function update(nextProps = {}) {
@@ -50,6 +59,48 @@ export function createAgentToolCard(props) {
   }
 
   return { el, update };
+}
+
+/**
+ * Builds the download and playback controls for a track the agent just added.
+ *
+ * The point of the separation work is the audio file itself, so the turn that
+ * produced it must let the user take it and hear it without hunting for the
+ * track in the presentation. Only a successful `add_track_from_staged` carries
+ * a real `item_id`; anything else gets nothing rather than a broken link.
+ *
+ * @param {Record<string, any>} action
+ * @returns {HTMLElement | null}
+ */
+function buildAudioActions(action) {
+  if (!action || action.status !== 'success') return null;
+  if (action.tool !== 'add_track_from_staged') return null;
+
+  const itemId = action.details && action.details.item_id;
+  if (!itemId || typeof itemId !== 'string') return null;
+
+  const encoded = encodeURIComponent(itemId);
+  const streamUrl = `/api/tracks/${encoded}/audio`;
+
+  const audioEl = createElement('audio', {
+    class: 'agent-tool-card-audio',
+    controls: true,
+    preload: 'none',
+    src: streamUrl,
+  });
+
+  const downloadLink = createElement(
+    'a',
+    {
+      class: 'agent-tool-card-download',
+      href: `${streamUrl}?download=1`,
+      download: '',
+      title: 'Descargar el audio',
+    },
+    [createIcon({ name: 'download', size: 'sm' }), 'Descargar']
+  );
+
+  return createElement('div', { class: 'agent-tool-card-audio-actions' }, [audioEl, downloadLink]);
 }
 
 function formatDefaultSummary(action) {
