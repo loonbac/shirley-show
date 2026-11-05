@@ -1,6 +1,6 @@
 # Separación en tres hosts
 
-Estado: **propuesta con evidencia**, pendiente de ejecutar. Nada desplegado todavía.
+Estado: **ejecutado y verificado en producción** el 2026-11-05. Ver «Acta» al final.
 
 ## Por qué tres y no dos
 
@@ -85,11 +85,12 @@ con pruebas, no de memoria.
   porque Access es una regla de borde y una mala configuración del borde no debe
   publicar la API.
 
-## Pendiente de confirmar con el dueño
+## Confirmado por el dueño
 
-1. **Los dos emails** exactos que pueden entrar.
-2. Si la sesión de 30 días de la puerta es aceptable, o prefiere 8 h con código
-   cada turno.
+1. **Los dos emails**: `newlichi2011@gmail.com` y `joshuarosalesmoreno@hotmail.com`.
+2. Sesión de la puerta: **30 días**, aceptada.
+3. Sesión del panel: **8 h**.
+4. `www` **no se necesita**: retirado (ver Acta).
 
 ## Lo que no hará esta separación
 
@@ -101,3 +102,84 @@ con pruebas, no de memoria.
 - No arregla el bloqueo del comprador por sí sola: necesita la página pública de
   ticket, que está escrita como prueba en rojo (`tests/public_ticket_page_tests.rs`)
   y pendiente de implementar.
+
+## Acta — 2026-11-05
+
+Ejecutado con el token de Cloudflare que proveyó el dueño. **Nada de esto es
+propuesta: es lo que está corriendo.**
+
+### Cloudflare
+
+```
+DNS    panel.shirleyshow.site    CNAME -> túnel ae3f41bc…  proxied
+       puerta.shirleyshow.site   CNAME -> túnel ae3f41bc…  proxied
+       www.shirleyshow.site      BORRADO a petición del dueño (d790179f…)
+       media.shirleyshow.site    intacto (otro túnel, b90f923e…)
+
+túnel  ingress -> http://127.0.0.1:65529
+         shirleyshow.site · panel · puerta
+         catch-all -> http://100.82.97.118:9090   (preservado)
+
+Access app "Shirley Show — Panel"   2c7c714b-c8c9-4429-b218-26e3ac05592f   8h
+       app "Shirley Show — Puerta"  213e2ec0-5a67-4250-8daf-7528c8960c8f   720h
+       allow: newlichi2011@gmail.com · joshuarosalesmoreno@hotmail.com
+       one_time_pin · auto_redirect_to_identity · launcher oculto
+       RETIRADAS las dos apps que cubrían la landing:
+         5072beeb… (shirleyshow.site, 720h) · 55a100c5… (www, 720h)
+         respaldo previo en /tmp/cf-backup/{app,policies}-<id>.json
+```
+
+### Contenedor
+
+`shirley-show:14290bf` — **sin build nuevo**: el binario ya soportaba las tres
+variables (`config.rs:206 new_three`).
+
+```
+SHIRLEY_PUBLIC_BASE_URL=https://shirleyshow.site
+SHIRLEY_PANEL_BASE_URL=https://panel.shirleyshow.site
+SHIRLEY_DOOR_BASE_URL=https://puerta.shirleyshow.site
+started 2026-11-05T15:54:27.197898194Z · restarts 0 · healthy · 10 variables
+```
+
+koro-panel las añadió al `env_file`, no con `-e`, para que sobrevivan al redeploy.
+
+### Verificación
+
+Desde internet:
+```
+https://shirleyshow.site/         200   landing pública, sin Access
+https://www.shirleyshow.site/     NXDOMAIN (4 vías: 1.1.1.1 · 8.8.8.8 · 9.9.9.9 · DoH)
+https://panel.shirleyshow.site/   302   -> cloudflareaccess.com
+https://puerta.shirleyshow.site/  302   -> cloudflareaccess.com
+GET /api/public/ticket/<real>     200   qr_svg=True · codigo_qr=null
+GET /#/ticket/<codigo_qr>         200
+```
+
+Corte en origen contra `127.0.0.1:65529`:
+```
+shirleyshow.site        / 200 · /panel 404 refused=1 · checkin 404 refused=1
+panel.shirleyshow.site  / 200 · /panel 200 · /api/presentations 200
+puerta.shirleyshow.site / 200 · /panel 404 refused=1 · checkin permitido
+desconocido.test        / 200 (landing estática) · todo lo demás 404 refused=1
+```
+
+**El comprador lee su entrada y no puede marcar ingresos.**
+
+### Trampas medidas, para no repetirlas
+
+- **Access se retira DESPUÉS del split, nunca antes.** Con `panel_host.is_empty()`
+  el binario devuelve `Application` para todos los hosts (`config.rs:521`);
+  retirar el borde primero habría abierto `/api/agent/chat` y `/panel`.
+- **Un `HTTP 000` en un CNAME recién creado es «todavía no», no «roto».**
+- **El DNS se mide antes que el HTTP.** Un `530`/`1016` sobre un nombre que ya no
+  resuelve es el resolver, no Cloudflare. `--resolve` a una IP del borde **fabrica
+  el `Host` que el DNS niega**: el borde contesta por cualquier nombre.
+- **`getent hosts` mide la caché de esta máquina, no el DNS público.** Aquí el
+  resolver es Tailscale (`100.100.100.100`). Un registro no cambia dos veces; una
+  entrada de caché sí.
+- **Un 404 por token inexistente no distingue «refusado» de «no encontrado».**
+  La cabecera `x-surface-refused: 1` sí.
+
+### Pendiente
+
+Sólo el issue **#72**, después del evento.
