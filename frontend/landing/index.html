@@ -3,157 +3,271 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#0f1b2e">
+  <meta name="theme-color" content="#9a7110">
   <title>Shirley Show — Música en vivo para tus eventos</title>
-  <meta name="description" content="Shirley Show: música en vivo, mariachis y esparcimiento para matrimonios, aniversarios y eventos. Síguela en Facebook para contratarla.">
+  <meta name="description" content="Shirley, cantante e intérprete de música en vivo. Repertorio cálido para bodas, aniversarios y encuentros familiares. Escríbele por Facebook.">
   <link rel="icon" href="/landing/img/logo.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/landing/landing.css">
 </head>
 <body>
-  <a class="pres-skip" href="#contenido">Ir al contenido</a>
+<div class="pres">
 
-  <!-- Hero: foto con halo, logo, etiquetas y llamada a la accion -->
-  <header class="pres-hero pres-sec" id="inicio">
-    <div class="pres-wrap pres-hero__grid">
-      <div class="pres-hero__foto">
-        <span class="pres-halo" aria-hidden="true"></span>
-        <span class="pres-halo-anillo" aria-hidden="true"></span>
-        <img class="pres-hero__img" src="/landing/img/hero.png"
-             alt="Shirley, cantante de Shirley Show, en el escenario" loading="eager">
-        <span class="pres-hero__badge">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-            <path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>
-          </svg>
-          Música en vivo
-        </span>
-      </div>
+  <!-- Musical note motif, reused as a decorative watermark -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="nota" viewBox="0 0 24 24" fill="none">
+      <path d="M9 17V5l10-2v12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="6.5" cy="17" r="2.6" stroke="currentColor" stroke-width="1.6"/>
+      <circle cx="16.5" cy="15" r="2.6" stroke="currentColor" stroke-width="1.6"/>
+    </symbol>
+    <symbol id="facebook" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 5h16v11H8l-4 4V5z"/>
+    </symbol>
+    <symbol id="calendario" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="5" width="16" height="15" rx="3"/><line x1="4" y1="10" x2="20" y2="10"/>
+      <line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/>
+    </symbol>
+    <symbol id="micro" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0012 0"/>
+      <line x1="12" y1="17" x2="12" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/>
+    </symbol>
+    <symbol id="grupo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="10.5" r="2.5"/>
+      <path d="M4 20c0-3 2.4-5.2 5-5.2s5 2.2 5 5.2"/><path d="M14.5 20c0-2.4 1.7-4.2 3.8-4.2"/>
+    </symbol>
+  </svg>
 
-      <div class="pres-hero__texto">
-        <img class="pres-hero__logo" src="/landing/img/logo.png" alt="Shirley Show">
-        <p class="pres-hero__sub">Música en vivo para tus eventos</p>
-
-        <svg class="pres-onda" viewBox="0 0 220 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-          <path d="M2 14h10M18 8v12M26 4v20M34 10v8M42 1v26M50 7v14M58 12v4M66 3v22M74 9v10M82 6v16M90 13v2M98 0v28M106 8v12M114 5v18M122 11v6M130 2v24M138 9v10M146 7v14M154 12v4M162 4v20M170 10v8M178 6v16M186 13v2M194 8v12M202 11v6M210 14h8"/>
-        </svg>
-
-        <ul class="pres-chips">
-          <li class="pres-chip">Matrimonios</li>
-          <li class="pres-chip">Mariachis</li>
-          <li class="pres-chip">Aniversarios</li>
-          <li class="pres-chip">Esparcimientos</li>
-        </ul>
-
-        <div class="pres-botones">
-          <a class="pres-btn pres-btn--primario" href="https://www.facebook.com/" target="_blank" rel="noopener noreferrer">
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 5h16v11H8l-4 4V5z"/>
+  <main>
+    <!-- Hero and ribbon fill the first screen together -->
+    <div class="pres__portada">
+      <header class="pres__sec pres__sec--blanca pres__sec--hero" id="inicio">
+        <svg class="pres__nota-fondo" style="top:40px;right:-30px;opacity:.05;color:#9a7110" width="220" height="220" aria-hidden="true"><use href="#nota"/></svg>
+        <div class="pres__wrap pres__hero">
+          <div class="pres__hero-foto">
+            <div class="pres__halo"></div>
+            <svg class="pres__halo-anillo" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+              <circle cx="50" cy="50" r="48" stroke="#9a7110" stroke-opacity="0.3" stroke-width="1" stroke-dasharray="1 9"/>
             </svg>
-            Síguela en Facebook
-          </a>
-          <a class="pres-btn pres-btn--ghost" href="#galeria">Ver galería</a>
+            <div class="pres__hero-img">
+              <img src="/landing/img/hero.png" alt="Shirley" loading="eager">
+            </div>
+            <svg class="pres__nota-flota" width="26" height="26" style="color:#9a7110" aria-hidden="true"><use href="#nota"/></svg>
+            <div class="pres__hero-badge">
+              <svg width="13" height="13" style="color:#9a7110" aria-hidden="true"><use href="#nota"/></svg>
+              <span>Música en vivo</span>
+            </div>
+          </div>
+
+          <div class="pres__hero-texto">
+            <img class="pres__hero-logo" src="/landing/img/logo.png" alt="Shirley Show">
+            <p class="pres__hero-sub">Música en vivo para tus eventos</p>
+            <div style="margin-top:20px">
+              <div class="pres__onda" aria-hidden="true">
+                <span style="height:9px;opacity:.45"></span>
+                <span style="height:16px;opacity:.55"></span>
+                <span style="height:22px;opacity:.7"></span>
+                <span style="height:14px;opacity:.55"></span>
+                <span style="height:20px;opacity:.65"></span>
+                <span style="height:11px;opacity:.45"></span>
+              </div>
+            </div>
+            <div class="pres__chips">
+              <span class="pres__chip">Matrimonios</span>
+              <span class="pres__chip">Mariachis</span>
+              <span class="pres__chip">Aniversarios</span>
+              <span class="pres__chip">Esparcimientos</span>
+            </div>
+            <div class="pres__buttons">
+              <a href="https://www.facebook.com/" target="_blank" rel="noopener noreferrer" class="pres__btn pres__btn--primario">
+                <svg width="17" height="17" aria-hidden="true"><use href="#facebook"/></svg>
+                Síguela en Facebook
+              </a>
+              <a href="#galeria" class="pres__btn pres__btn--ghost">Ver galería</a>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Gold ribbon: two identical halves, translated exactly -50% for a seamless loop -->
+      <div class="pres__cinta">
+        <div class="pres__cinta-track">
+          <div class="pres__cinta-grupo" aria-hidden="true">
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+          </div>
+          <div class="pres__cinta-grupo" aria-hidden="true">
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+            <b>Música en vivo</b><i>♪</i><b>Mariachis</b><i>♪</i><b>Esparcimientos</b><i>♪</i><b>Repertorio en vivo</b><i>♪</i>
+          </div>
         </div>
       </div>
     </div>
-  </header>
 
-  <!-- Cinta deslizante continua -->
-  <div class="pres-cinta" aria-hidden="true">
-    <div class="pres-cinta__pista">
-      <span>Música en vivo</span><span>&bull;</span><span>Mariachis</span><span>&bull;</span>
-      <span>Esparcimientos</span><span>&bull;</span><span>Repertorio en vivo</span><span>&bull;</span>
-      <span>Música en vivo</span><span>&bull;</span><span>Mariachis</span><span>&bull;</span>
-      <span>Esparcimientos</span><span>&bull;</span><span>Repertorio en vivo</span><span>&bull;</span>
-    </div>
-  </div>
-
-  <main id="contenido">
-    <!-- Sobre ella -->
-    <section class="pres-sec pres-sec--blanca" id="sobre">
-      <div class="pres-wrap pres-sobre">
-        <div class="pres-sobre__foto">
-          <img src="/landing/img/sobre.png" alt="Shirley en escena" loading="lazy">
+    <!-- About -->
+    <section id="sobre" class="pres__sec pres__sec--crema">
+      <svg class="pres__nota-fondo" style="top:24px;left:-24px;transform:rotate(-12deg)" width="140" height="140" aria-hidden="true"><use href="#nota"/></svg>
+      <div class="pres__wrap pres__about" style="max-width:1100px;gap:40px">
+        <div class="pres__about-foto">
+          <div class="pres__about-marco">
+            <img src="/landing/img/sobre.png" alt="Shirley en escena" loading="lazy">
+          </div>
+          <div class="pres__about-tag">En el escenario</div>
         </div>
-        <div class="pres-sobre__texto">
-          <p class="pres-etiqueta">En el escenario</p>
-          <h2 class="pres-h2">Sobre ella</h2>
-          <p class="pres-lead">Una voz cercana, hecha para acompañarte</p>
-          <ul class="pres-lista">
-            <li><strong>Voz cálida</strong><span>Un timbre que llena el salón sin tapar la conversación.</span></li>
-            <li><strong>Estilo cercano</strong><span>Habla con tu público como si lo conociera de siempre.</span></li>
-            <li><strong>Repertorio variado</strong><span>De mariachi a balada, según lo que pida el momento.</span></li>
-          </ul>
+        <div class="pres__about-texto">
+          <span class="pres__eyebrow">Sobre ella</span>
+          <h2 class="pres__h2">Una voz cercana, hecha para acompañarte</h2>
+          <p class="pres__lead" style="margin-top:18px">
+            Shirley es cantante e intérprete de música en vivo, conocida por una voz cálida y un
+            estilo cercano que conecta con cada público. Su repertorio combina baladas, música
+            popular y momentos acústicos íntimos.
+          </p>
+          <p class="pres__lead">
+            Más que un show, cada presentación es un encuentro: pensado para acompañar tus
+            celebraciones familiares y comunitarias con sencillez, calidez y mucho cariño.
+          </p>
+          <div class="pres__chips" style="margin-top:6px">
+            <span class="pres__chip pres__chip--blanco">Voz cálida</span>
+            <span class="pres__chip pres__chip--blanco">Estilo cercano</span>
+            <span class="pres__chip pres__chip--blanco">Repertorio variado</span>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- Disponible para eventos -->
-    <section class="pres-sec pres-sec--crema" id="eventos">
-      <div class="pres-wrap pres-eventos">
-        <p class="pres-etiqueta">Disponible para eventos</p>
-        <h2 class="pres-h2">Lleva su música a tu próximo encuentro</h2>
-        <p class="pres-lead">Matrimonios, aniversarios, esparcimientos y celebraciones con mariachi.</p>
-        <a class="pres-btn pres-btn--primario" href="https://www.facebook.com/" target="_blank" rel="noopener noreferrer">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4 5h16v11H8l-4 4V5z"/>
-          </svg>
+    <!-- Available for events: three cards -->
+    <section id="eventos" class="pres__sec pres__sec--blanca">
+      <div class="pres__wrap" style="max-width:1100px;text-align:center">
+        <span class="pres__eyebrow">Disponible para eventos</span>
+        <h2 class="pres__h2">Lleva su música a tu próximo encuentro</h2>
+        <div class="pres__cards">
+          <div class="pres__card">
+            <span class="pres__card-num">01</span>
+            <div class="pres__card-icono"><svg width="24" height="24" aria-hidden="true"><use href="#calendario"/></svg></div>
+            <h3>Eventos y reuniones</h3>
+            <p>Para bodas, aniversarios, reuniones familiares y encuentros comunitarios: un repertorio que acompaña cada momento con calidez.</p>
+          </div>
+          <div class="pres__card">
+            <span class="pres__card-num">02</span>
+            <div class="pres__card-icono"><svg width="24" height="24" aria-hidden="true"><use href="#micro"/></svg></div>
+            <h3>Repertorio en vivo</h3>
+            <p>Canciones interpretadas en vivo, con una voz cercana y arreglos pensados para crear una atmósfera íntima y memorable.</p>
+          </div>
+          <div class="pres__card">
+            <span class="pres__card-num">03</span>
+            <div class="pres__card-icono"><svg width="24" height="24" aria-hidden="true"><use href="#grupo"/></svg></div>
+            <h3>Show con amigos músicos</h3>
+            <p>Presentaciones junto a otros talentosos músicos invitados, para una experiencia más completa y llena de buena energía.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Gallery: masonry of placeholders until real photos arrive -->
+    <section id="galeria" class="pres__sec pres__sec--crema">
+      <div class="pres__wrap">
+        <div style="text-align:center;margin-bottom:36px">
+          <span class="pres__eyebrow">Galería</span>
+          <h2 class="pres__h2">Shirley Show y sus amigos</h2>
+        </div>
+        <div class="pres__galeria">
+          <div class="pres__item" style="transform:rotate(-2deg)">
+            <div class="pres__item-medio" style="aspect-ratio:4 / 5">
+              <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Shirley en escena</span></div>
+            </div>
+            <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Shirley en escena</span></div>
+          </div>
+          <div class="pres__item" style="transform:rotate(1.5deg)">
+            <div class="pres__item-medio" style="aspect-ratio:1 / 1">
+              <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Presentación junto a la banda</span></div>
+              <div class="pres__video-badge">VIDEO</div>
+              <div class="pres__play"><div class="pres__play-circ"><div class="pres__play-tri"></div></div></div>
+            </div>
+            <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Presentación junto a la banda</span></div>
+          </div>
+          <div class="pres__item" style="transform:rotate(-1deg)">
+            <div class="pres__item-medio" style="aspect-ratio:3 / 4">
+              <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Con sus amigos músicos</span></div>
+            </div>
+            <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Con sus amigos músicos</span></div>
+          </div>
+          <div class="pres__item" style="transform:rotate(2deg)">
+            <div class="pres__item-medio" style="aspect-ratio:1 / 1">
+              <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Detalle del escenario</span></div>
+            </div>
+            <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Detalle del escenario</span></div>
+          </div>
+          <div class="pres__item" style="transform:rotate(-1.5deg)">
+            <div class="pres__item-medio" style="aspect-ratio:4 / 3">
+              <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Un momento especial</span></div>
+              <div class="pres__video-badge">VIDEO</div>
+              <div class="pres__play"><div class="pres__play-circ"><div class="pres__play-tri"></div></div></div>
+            </div>
+            <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Un momento especial</span></div>
+          </div>
+          <div class="pres__item" style="transform:rotate(1deg)">
+            <div class="pres__item-medio" style="aspect-ratio:4 / 5">
+              <div class="pres__ph"><svg width="26" height="26" aria-hidden="true"><use href="#nota"/></svg><span class="pres__ph-txt">Cerca del público</span></div>
+            </div>
+            <div class="pres__item-pie"><svg width="12" height="12" style="color:#9a7110;flex-shrink:0" aria-hidden="true"><use href="#nota"/></svg><span>Cerca del público</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Single call to action: Facebook -->
+    <section id="contacto" class="pres__sec pres__contacto">
+      <svg class="pres__nota-fondo" style="bottom:-10px;left:-20px;opacity:.06" width="160" height="160" aria-hidden="true"><use href="#nota"/></svg>
+      <div class="pres__contacto-wrap">
+        <h2>¿Quieres tenerla en tu próximo evento?</h2>
+        <p>Escríbele por Facebook y cuéntale sobre tu evento — ella te responde con mucho gusto.</p>
+        <a href="https://www.facebook.com/" target="_blank" rel="noopener noreferrer" class="pres__btn pres__btn--primario pres__btn--xl pres__cta">
+          <svg width="18" height="18" aria-hidden="true"><use href="#facebook"/></svg>
           Escríbele por Facebook
-        </a>
-      </div>
-    </section>
-
-    <!-- Galeria -->
-    <section class="pres-sec pres-sec--blanca" id="galeria">
-      <div class="pres-wrap">
-        <p class="pres-etiqueta">Shirley Show y sus amigos</p>
-        <h2 class="pres-h2">Galería</h2>
-        <ul class="pres-galeria">
-          <li class="pres-galeria__item" style="--aspecto: 4 / 5; --rot: -2deg"><span>Shirley en escena</span></li>
-          <li class="pres-galeria__item" style="--aspecto: 1 / 1; --rot: 1.5deg"><span>Junto a la banda</span></li>
-          <li class="pres-galeria__item" style="--aspecto: 3 / 4; --rot: -1deg"><span>Con sus amigos músicos</span></li>
-          <li class="pres-galeria__item" style="--aspecto: 1 / 1; --rot: 2deg"><span>Detalle del escenario</span></li>
-          <li class="pres-galeria__item" style="--aspecto: 4 / 3; --rot: -1.5deg"><span>Un momento especial</span></li>
-          <li class="pres-galeria__item" style="--aspecto: 4 / 5; --rot: 1deg"><span>Cerca del público</span></li>
-        </ul>
-        <p class="pres-nota">Las fotos se irán sumando con el tiempo.</p>
-      </div>
-    </section>
-
-    <!-- Contacto unico -->
-    <section class="pres-sec pres-sec--oscura" id="contacto">
-      <div class="pres-wrap pres-contacto">
-        <h2 class="pres-h2">¿Quieres tenerla en tu próximo evento?</h2>
-        <p class="pres-lead">El único canal de contacto es su Facebook: ella misma responde.</p>
-        <a class="pres-btn pres-btn--claro" href="https://www.facebook.com/" target="_blank" rel="noopener noreferrer">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4 5h16v11H8l-4 4V5z"/>
-          </svg>
-          Síguela en Facebook
         </a>
       </div>
     </section>
   </main>
 
-  <footer class="pres-pie">
-    <div class="pres-wrap pres-pie__inner">
-      <span class="pres-pie__marca">Shirley Show</span>
-      <a class="pres-pie__acceso" href="/panel">Acceso al sistema</a>
+  <footer class="pres__footer">
+    <div style="margin-bottom:14px">
+      <div class="pres__onda" style="justify-content:center" aria-hidden="true">
+        <span style="height:7px;width:2.5px;opacity:.4"></span>
+        <span style="height:12px;width:2.5px;opacity:.5"></span>
+        <span style="height:17px;width:2.5px;opacity:.65"></span>
+        <span style="height:11px;width:2.5px;opacity:.5"></span>
+        <span style="height:15px;width:2.5px;opacity:.6"></span>
+        <span style="height:8px;width:2.5px;opacity:.4"></span>
+      </div>
     </div>
+    <div class="pres__footer-marca">Shirley Show</div>
+    <div class="pres__footer-copy">© <span id="anio">2026</span> Shirley Show · Música en vivo</div>
+    <div style="margin-top:14px"><a class="pres__footer-acceso" href="/panel">Acceso al sistema</a></div>
   </footer>
 
-  <!--
-    Compatibilidad. Los enlaces de entrada ya compartidos usan el hash
-    (#/ticket/<token>), y el hash nunca llega al servidor: por eso la landing
-    no puede redirigirlos desde el backend. Si al cargar hay un hash de una
-    vista interna, se pasa al panel conservandolo entero, para que las
-    entradas emitidas y sus enlaces sigan funcionando sin cambios.
-  -->
-  <script>
-    (function () {
-      var panelViews = /^#\/(ticket|eventos|evento|presentations|presentacion|puerta|panel)\b/;
-      if (panelViews.test(window.location.hash)) {
-        window.location.replace('/panel' + window.location.hash);
-      }
-    })();
-  </script>
+</div>
+
+<script>
+  document.getElementById('anio').textContent = new Date().getFullYear();
+</script>
+
+<!--
+  Compatibility. Ticket links already shared use the hash (#/ticket/<token>),
+  and a hash never reaches the server: only the client can forward it. If this
+  block is ever removed, tickets already printed stop working silently.
+-->
+<script>
+  (function () {
+    var panelViews = /^#\/(ticket|eventos|evento|presentations|presentacion|puerta|panel)\b/;
+    if (panelViews.test(window.location.hash)) {
+      window.location.replace('/panel' + window.location.hash);
+    }
+  })();
+</script>
 </body>
 </html>
