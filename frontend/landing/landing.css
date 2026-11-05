@@ -278,6 +278,19 @@
   font-size: 14.5px; color: var(--ink); text-align: right;
   overflow-wrap: anywhere;
 }
+/* The QR the door scans. It arrives as an SVG with its own dimensions, so the
+   box sets the size and the svg is told to fill it: without that, a QR sized
+   for print overflows a phone card. */
+.pres__ticket-qr {
+  margin: 16px auto 0; padding: 12px;
+  width: 190px; max-width: 100%;
+  background: #fff; border: 1px solid var(--line); border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+}
+.pres__ticket-qr svg {
+  display: block; width: 100%; height: auto;
+}
+
 .pres__ticket-pie {
   margin: 16px 0 0; padding-top: 13px; border-top: 1px dashed var(--line);
   font-size: 12.5px; line-height: 1.6; color: var(--muted);

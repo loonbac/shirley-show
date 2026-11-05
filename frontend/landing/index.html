@@ -391,11 +391,34 @@
         cont.appendChild(aviso);
       }
 
+      // The QR is the credential the door scans. Without it this page proves a
+      // purchase but cannot open a door, and the buyer who left the photo at
+      // home has nothing to show.
+      //
+      // Parsed as a document and adopted as a node, never assigned to
+      // `innerHTML`: the markup is server-generated today, and the day it stops
+      // being so, this line is the difference between a ticket and a script.
+      if (t.qr_svg) {
+        try {
+          var doc = new DOMParser().parseFromString(t.qr_svg, 'image/svg+xml');
+          var svg = doc.documentElement;
+          if (svg && svg.nodeName && svg.nodeName.toLowerCase() === 'svg') {
+            var caja = document.createElement('div');
+            caja.className = 'pres__ticket-qr';
+            caja.appendChild(document.importNode(svg, true));
+            cont.appendChild(caja);
+          }
+        } catch (e) {}
+      }
+
       var pie = document.createElement('p');
       pie.className = 'pres__ticket-pie';
+      // "Basta con dar tu nombre" was false: `door_allows_path` in src/config.rs
+      // does not expose the ticket list to the door host, so the doorman can
+      // only scan a QR. Telling the buyer otherwise stages a scene at the door.
       pie.textContent =
         'Guarda esta página: tu entrada queda registrada en este dispositivo. ' +
-        'En la puerta basta con dar tu nombre.';
+        'En la puerta muestra el QR de esta entrada.';
       cont.appendChild(pie);
 
       cont.hidden = false;
