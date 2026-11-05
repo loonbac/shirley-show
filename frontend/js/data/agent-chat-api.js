@@ -190,7 +190,7 @@ export async function sendAgentChatMessage(options) {
  * Cheap, read-only 3-second probe without side effects.
  *
  * @param {{ signal?: AbortSignal }} [options={}]
- * @returns {Promise<{ mode: 'local' | 'remote', pc_online: boolean }>}
+ * @returns {Promise<{ mode: 'local' | 'colab', pc_online: boolean }>}
  */
 export async function getGpuStatus(options = {}) {
   const { signal } = options;
@@ -205,12 +205,9 @@ export async function getGpuStatus(options = {}) {
  * intent based on genuine GPU presence status.
  *
  * @param {{ mode?: string, pc_online?: boolean } | null} [gpuStatus=null]
- * @returns {'esperando la PC de Joshua…' | 'separando voces…'}
+ * @returns {'separando voces…'}
  */
 export function resolveVocalPendingLabel(gpuStatus) {
-  if (gpuStatus && gpuStatus.mode === 'remote' && !gpuStatus.pc_online) {
-    return 'esperando la PC de Joshua…';
-  }
   return 'separando voces…';
 }
 

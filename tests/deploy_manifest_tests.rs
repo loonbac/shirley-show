@@ -135,10 +135,6 @@ fn test_compose_yaml_structure_and_defaults() {
          access_token expires, and a read-only mount breaks separation hourly. \
          Mount in question: {token_mount}"
     );
-    assert!(
-        content.contains("JOSHUA_PC_HOST=${JOSHUA_PC_HOST:-}"),
-        "compose.yaml must default JOSHUA_PC_HOST to empty"
-    );
 }
 
 #[test]

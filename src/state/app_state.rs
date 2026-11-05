@@ -112,7 +112,6 @@ impl AppState {
             agent_timeout_secs: 120,
             separation_timeout_secs: 600,
             remote_separation_timeout_secs: 1500,
-            joshua_pc: None,
             surface: crate::config::SurfaceConfig::new_three(None, None, None),
         });
         Self::new_with_all_components_and_config(
@@ -159,8 +158,8 @@ impl AppState {
         ));
 
         let gpu_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        // Separation always runs on Colab (S1). The Joshua PC and local process
-        // backends are retired from the production path.
+        // Separation always runs on Colab (S1). No other backend participates
+        // in the production path.
         let colab_config = ColabVocalSeparatorConfig::from_env(
             storage.vocal_work_dir().to_path_buf(),
             gpu_semaphore.clone(),

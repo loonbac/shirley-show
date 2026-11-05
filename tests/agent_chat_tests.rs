@@ -162,7 +162,6 @@ fn setup_test_state() -> (AppState, TempDir) {
             agent_timeout_secs: 120,
             separation_timeout_secs: 600,
             remote_separation_timeout_secs: 1500,
-            joshua_pc: None,
             surface: shirley_show::config::SurfaceConfig::new(None, None),
         });
     config.data_dir = temp_dir.path().join("data");

@@ -1,6 +1,6 @@
 import { createAgentChatPanel } from '../components/organisms/agent-chat-panel.js';
 import { createAgentFloatingTrigger } from '../components/molecules/agent-chat-trigger.js';
-import { sendAgentChatMessage, getGpuStatus } from '../data/agent-chat-api.js';
+import { sendAgentChatMessage } from '../data/agent-chat-api.js';
 import { emitAgentRefresh } from '../core/state/agent-refresh.js';
 import { activePresentationContextSignal } from '../core/state/active-presentation-context.js';
 import { stageModeSignal } from '../core/state/stage-mode-state.js';
@@ -40,7 +40,6 @@ export function getActiveAgentChatController() {
 export function createAgentChatController(deps) {
   const {
     chatState,
-    getGpuStatusFn = getGpuStatus,
     sendAgentChatMessageFn = sendAgentChatMessage,
   } = deps;
 
@@ -149,16 +148,7 @@ export function createAgentChatController(deps) {
     });
 
     if (isVocalIntent) {
-      try {
-        const gpuStatus = await getGpuStatusFn({ signal: turn.abortController.signal });
-        if (gpuStatus && gpuStatus.mode === 'remote' && !gpuStatus.pc_online) {
-          chatState.setPendingLabel('esperando la PC de Joshua…');
-        } else {
-          chatState.setPendingLabel('separando voces…');
-        }
-      } catch (_err) {
-        chatState.setPendingLabel('separando voces…');
-      }
+      chatState.setPendingLabel('separando voces…');
     }
 
     const stagedAudioId = chatState.get().stagedAudioId;

@@ -25,8 +25,6 @@ pub enum VocalSeparationError {
     InvalidAudioDuration,
     #[error("El audio supera el límite máximo de 10 minutos para separación vocal")]
     DurationExceeded,
-    #[error("La herramienta de separación vocal no está disponible en el servidor")]
-    SeparatorNotConfigured,
     #[error("El modo instrumental no está disponible en el servidor")]
     InstrumentalUnavailable,
     #[error(
@@ -41,16 +39,6 @@ pub enum VocalSeparationError {
     TranscodeFailed,
     #[error("La separación vocal tardó demasiado tiempo y fue cancelada")]
     SeparationTimeout,
-    #[error(
-        "Por favor, enciende la PC de Joshua; estaré esperando hasta que encienda y cuando lo haga haré el trabajo. Cuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo."
-    )]
-    WakeWait,
-    #[error("No se pudo conectar con la PC remota dentro del tiempo de espera")]
-    PcWakeTimeout,
-    #[error("Permiso denegado para ejecutar comandos requeridos en la PC remota")]
-    RemoteSudoDenied,
-    #[error("La clave SSH para conectar con la PC remota no existe o no es legible")]
-    SshKeyMissing,
     #[error("El archivo de credenciales de Google Colab no existe o no contiene un token válido")]
     ColabTokenMissing,
     #[error("Google Colab no está disponible o la cuota de GPU está agotada")]
@@ -68,17 +56,12 @@ impl VocalSeparationError {
         match self {
             Self::InvalidAudioDuration => "invalid_audio_duration",
             Self::DurationExceeded => "duration_exceeded",
-            Self::SeparatorNotConfigured => "separator_not_configured",
             Self::InstrumentalUnavailable => "instrumental_unavailable",
             Self::GpuBusy => "gpu_busy",
             Self::InvalidSeparatorOutput => "invalid_separator_output",
             Self::IncompatibleStems => "incompatible_stems",
             Self::TranscodeFailed => "transcode_failed",
             Self::SeparationTimeout => "separation_timeout",
-            Self::WakeWait => "wake_wait",
-            Self::PcWakeTimeout => "pc_wake_timeout",
-            Self::RemoteSudoDenied => "remote_sudo_denied",
-            Self::SshKeyMissing => "ssh_key_missing",
             Self::ColabTokenMissing => "colab_token_missing",
             Self::ColabUnavailable => "colab_unavailable",
             Self::TransferFailed => "transfer_failed",
@@ -92,9 +75,6 @@ impl VocalSeparationError {
             Self::DurationExceeded => {
                 "El audio supera el límite máximo de 10 minutos para separación vocal"
             }
-            Self::SeparatorNotConfigured => {
-                "La herramienta de separación vocal no está disponible en el servidor"
-            }
             Self::InstrumentalUnavailable => {
                 "El modo instrumental no está disponible en el servidor"
             }
@@ -107,18 +87,6 @@ impl VocalSeparationError {
             Self::IncompatibleStems => "Los canales de audio producidos son incompatibles entre sí",
             Self::TranscodeFailed => "Falló la codificación final del audio a MP3",
             Self::SeparationTimeout => "La separación vocal tardó demasiado tiempo y fue cancelada",
-            Self::WakeWait => {
-                "Por favor, enciende la PC de Joshua; estaré esperando hasta que encienda y cuando lo haga haré el trabajo. Cuando termine, la PC de Joshua se apagará automáticamente después de 1 hora sin trabajo."
-            }
-            Self::PcWakeTimeout => {
-                "No se pudo conectar con la PC remota dentro del tiempo de espera"
-            }
-            Self::RemoteSudoDenied => {
-                "Permiso denegado para ejecutar comandos requeridos en la PC remota"
-            }
-            Self::SshKeyMissing => {
-                "La clave SSH para conectar con la PC remota no existe o no es legible"
-            }
             Self::ColabTokenMissing => {
                 "El archivo de credenciales de Google Colab no existe o no contiene un token válido"
             }

@@ -154,7 +154,6 @@ mod wiring {
             agent_timeout_secs: 120,
             separation_timeout_secs: 600,
             remote_separation_timeout_secs: 1500,
-            joshua_pc: None,
             surface: SurfaceConfig::new_three(
                 Some("https://shirleyshow.site"),
                 Some("https://panel.shirleyshow.site"),

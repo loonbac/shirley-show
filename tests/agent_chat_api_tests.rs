@@ -67,7 +67,6 @@ fn setup_test_app() -> (axum::Router, AppState, TempDir) {
         agent_timeout_secs: 120,
         separation_timeout_secs: 600,
         remote_separation_timeout_secs: 1500,
-        joshua_pc: None,
         // Existing single-host behaviour: these requests carry no Host header,
         // and the split is a deployment option, not a default.
         surface: shirley_show::config::SurfaceConfig::new(None, None),

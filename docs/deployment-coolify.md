@@ -1,7 +1,7 @@
 # Despliegue en Coolify (eje-desarrollo)
 
-Shirley Show corre en Coolify **sin GPU**. La separación vocal se delega por SSH
-a la PC de Joshua (`nixos-pc`, Tailscale `100.73.247.39`, RTX 3060).
+Shirley Show corre en Coolify **sin GPU**. La separación vocal se delega a
+Google Colab (`colab` CLI), que se coordina desde el contenedor.
 
 ## 1. Requisitos en eje-desarrollo
 
@@ -52,16 +52,8 @@ Verifica desde el servidor: `ssh loonbac@100.73.247.39 "sudo -n /run/current-sys
 | `OPENCODE_MODEL` | `deepseek-v4.1-flash` | Opcional (por defecto DeepSeek V4.1 Flash). |
 | `OPENCODE_BASE_URL` | `https://opencode.ai/inference/go/openai/v1` | Opcional. |
 | `GROQ_API_KEY` / `GROQ_MODEL` | `gsk_...` | Opcional, solo como fallback. |
-| `JOSHUA_PC_HOST` | `100.73.247.39` | Vacío = modo local (sin GPU remota). |
-| `JOSHUA_PC_USER` / `JOSHUA_PC_PORT` | `loonbac` / `22` | Opcional. |
-| `JOSHUA_PC_SSH_KEY` | `/home/shirley/.ssh/id_ed25519` | Ruta **dentro** del contenedor. |
 | `SSH_KEY_HOST_PATH` | `/opt/shirley/secrets/id_ed25519` | Ruta en el **host**. |
-| `JOSHUA_PC_WAKE_TIMEOUT_MINS` | `10` | Espera a que enciendan la PC. |
 | `SHIRLEY_PUBLIC_BASE_URL` | `https://shirley.example.com` | Base del enlace del ticket que se envía por WhatsApp. Sin ella el enlace sale relativo y el comprador no puede abrirlo. |
-
-> `JOSHUA_PC_IDLE_SHUTDOWN_MINS` ya **no** existe: el código nunca la leyó. El
-> apagado por inactividad lo programa la propia app tras cada separación exitosa,
-> y el tiempo lo fija `JOSHUA_PC_WAKE_TIMEOUT_MINS` como margen de espera.
 
 ## 5. Red: bridge con publicación en loopback
 
@@ -103,5 +95,5 @@ Para desplegar con **koro-panel** en lugar de Compose, ver
 
 ## 8. Sin GPU remota
 
-Si `JOSHUA_PC_HOST` está vacío o la PC no responde, la app sigue 100%
-operativa; Ressy avisa amablemente y pide encender la PC de Joshua.
+Si la sesión de Colab no está disponible o falla, la app sigue 100%
+operativa; Ressy avisa amablemente y pide reintentar la separación.

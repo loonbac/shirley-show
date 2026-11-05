@@ -95,11 +95,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     state.frontend_dir = config.frontend_dir;
 
-    let separation_timeout = if config.joshua_pc.is_some() {
-        std::time::Duration::from_secs(config.remote_separation_timeout_secs)
-    } else {
-        std::time::Duration::from_secs(config.separation_timeout_secs.min(600))
-    };
+    let separation_timeout =
+        std::time::Duration::from_secs(config.separation_timeout_secs.min(600));
 
     let agent_limits = AgentLimits {
         max_iterations: 5,

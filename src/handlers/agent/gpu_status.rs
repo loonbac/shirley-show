@@ -15,7 +15,9 @@ pub struct GpuStatusOutput {
 
 pub async fn gpu_status(State(state): State<AppState>) -> (StatusCode, Json<GpuStatusOutput>) {
     let is_remote = state.vocal_separator.is_remote();
-    let mode = if is_remote { "remote" } else { "local" };
+    // The only remaining remote backend is Google Colab: report it by its real
+    // name ("colab") instead of the retired "remote" label.
+    let mode = if is_remote { "colab" } else { "local" };
     let pc_online = if is_remote {
         state.vocal_separator.probe(Duration::from_secs(3)).await
     } else {

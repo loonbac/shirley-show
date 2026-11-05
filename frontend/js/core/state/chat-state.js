@@ -150,10 +150,6 @@ export function createChatState(initialState = {}, options = {}) {
       }
     }
 
-    let isPriorRemoteWaiting = Boolean(
-      state.notice && (state.notice.code === 'wake_wait' || state.notice.code === 'pc_offline')
-    );
-
     let turnPendingLabel = pendingLabel;
     const attachmentName = (attachment && attachment.name || '').toLowerCase();
     const attachmentType = (attachment && attachment.type || '').toLowerCase();
@@ -169,8 +165,6 @@ export function createChatState(initialState = {}, options = {}) {
         turnPendingLabel = 'Ressy está subiendo el afiche…';
       } else if (gpuStatus && isVocalIntent) {
         turnPendingLabel = resolveVocalPendingLabel(gpuStatus);
-      } else if (isPriorRemoteWaiting) {
-        turnPendingLabel = 'esperando la PC de Joshua…';
       } else if (isVocalIntent) {
         turnPendingLabel = 'separando voces…';
       } else if (containsYouTubeUrl(message)) {
