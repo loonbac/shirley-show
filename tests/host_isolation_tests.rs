@@ -252,3 +252,23 @@ fn test_loopback_hosts_are_the_application() {
         );
     }
 }
+
+#[test]
+fn test_base_url_host_parsing_handles_ipv6() {
+    // `host_of` split on the first `:` without handling brackets, so a base URL
+    // like `https://[::1]:3001` yielded `[`. The same defect had already been
+    // fixed in `normalize_host`; this pins the other function.
+    for (base, expected) in [
+        ("https://shirleyshow.site", "shirleyshow.site"),
+        ("https://shirleyshow.site/", "shirleyshow.site"),
+        ("https://panel.shirleyshow.site:3001", "panel.shirleyshow.site"),
+        ("http://[::1]:3001", "[::1]"),
+        ("http://[::1]", "[::1]"),
+    ] {
+        let cfg = SurfaceConfig::new(None, Some(base));
+        assert_eq!(
+            cfg.panel_host, expected,
+            "base URL {base} must yield host {expected}"
+        );
+    }
+}

@@ -71,12 +71,6 @@ pub fn create_router(state: AppState) -> Router {
             post(agent::chat).layer(DefaultBodyLimit::max(101 * 1024 * 1024)),
         )
         .route("/api/agent/gpu-status", get(agent::gpu_status))
-        // Applied last so it runs first: the landing host must never reach the
-        // application, whatever the routing table says.
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            surface_guard::guard,
-        ))
         .route(
             "/api/eventos",
             get(ticketing::events::list).post(ticketing::events::create),
@@ -143,5 +137,12 @@ pub fn create_router(state: AppState) -> Router {
             "/api/interesados/{id}/vender",
             post(ticketing::interests::convert),
         )
+        // Applied last so it wraps every route above. `Router::layer` only
+        // covers routes declared before it: placing it mid-chain left the
+        // ticket and event routes unguarded, which the wiring test caught.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            surface_guard::guard,
+        ))
         .with_state(state)
 }
