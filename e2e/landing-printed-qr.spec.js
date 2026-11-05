@@ -16,7 +16,7 @@ const DOOR_SECRET = '648ce69829a9d86e0e8ffda75b0f279d';
 // runs, a 20px quiet zone and 5px modules, wrapped in a 225x225 viewBox. The size
 // and the finder squares matter: the landing parses those runs to redraw the QR
 // with the brand's ink, so a fixture without them would pass while testing nothing.
-function qrSvgFixture(size = 37) {
+function qrSvgFixture(size = 45) {
   const paso = 5, quiet = 20;
   const runs = [];
   const modulo = (r, c) => `M${quiet + c * paso} ${quiet + r * paso}h${paso}v${paso}`;
@@ -132,6 +132,92 @@ test.describe('QR impreso escaneado por el comprador', () => {
       return pintados;
     });
     expect(tieneTinta).toBeGreaterThan(1000);
+  });
+
+  test('la tarjeta no repite el precio ni el estado de pago', async ({ page }) => {
+    // A paid ticket's QR is the proof; the buyer already knows what they paid.
+    // Dropping both rows is what frees the height the QR now uses.
+    await page.route('**/api/public/ticket/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: ticketBody() }),
+    );
+
+    await page.goto(`/#/ticket/${DOOR_SECRET}`);
+    await expect(page.locator('#entrada')).toBeVisible();
+
+    const etiquetas = (await page.locator('#entrada .pres__ticket-k').allInnerTexts())
+      .map((t) => t.toLowerCase());
+    expect(etiquetas).not.toContain('precio');
+    expect(etiquetas).not.toContain('pago');
+    // Positive control: the rows that must stay are still there, so this cannot
+    // pass by rendering no card at all.
+    expect(etiquetas).toContain('a nombre de');
+    expect(etiquetas).toContain('tipo');
+  });
+
+  test('el QR lleva el logo de Shirley Show en el centro y sigue decodificando', async ({ page, request }) => {
+    // The brand mark sits over the middle of the code. That is only safe because
+    // render_qr_svg encodes level H; at level M the covered modules would blow
+    // the error budget and the door would not read it.
+    //
+    // This uses a REAL ticket: the synthetic fixture is a meaningless grid, so
+    // decoding it proves nothing. Selling one through the API also checks that
+    // the level the server picks is the level this page draws.
+    const evento = await request.post('/api/eventos', {
+      data: {
+        nombre: 'Prueba QR con logo',
+        fecha_hora: '2027-03-01T23:00:00Z',
+        lugar: 'Lima',
+        tipos_de_entrada: [{ nombre: 'General', precio: 20, capacidad: 5 }],
+      },
+    });
+    const eventoId = (await evento.json()).evento.id;
+
+    const venta = await request.post(`/api/eventos/${eventoId}/entradas`, {
+      data: {
+        nombre_comprador: 'Lucia Prado',
+        contacto: '987654321',
+        tipo_entrada: 'General',
+        cantidad: 1,
+        medio_pago: 'Efectivo',
+        estado_pago: 'Pagado',
+      },
+    });
+    const ticket = (await venta.json()).entradas[0];
+
+    await page.goto(`/#/ticket/${ticket.codigo_qr}`);
+    await expect(page.locator('#entrada')).toContainText('Lucia Prado');
+    await expect(page.locator('#entrada .pres__ticket-qr canvas')).toHaveCount(1);
+
+    // The logo is painted when it arrives, so wait for the ink in the centre
+    // instead of guessing a timeout.
+    const tintaCentral = async () =>
+      page.locator('#entrada .pres__ticket-qr canvas').evaluate((el) => {
+        const ctx = el.getContext('2d');
+        const m = Math.floor(el.width / 2);
+        const { data } = ctx.getImageData(m - 10, m - 10, 20, 20);
+        // Brand gold has red and green clearly above blue.
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] > 150 && data[i + 1] > 110 && data[i + 2] < 120) return true;
+        }
+        return false;
+      });
+
+    let pintado = false;
+    for (let intento = 0; intento < 25 && !pintado; intento++) {
+      pintado = await tintaCentral();
+      if (!pintado) await page.waitForTimeout(200);
+    }
+    expect(pintado).toBe(true);
+
+    // And the credential must still be readable with the logo over it, using the
+    // reader the door actually prefers.
+    await page.addScriptTag({ url: '/assets/js/vendor/zxing.min.js' });
+    const leido = await page.evaluate(async () => {
+      const mod = await import('/assets/js/modules/events/camera-qr-scanner.js');
+      const c = document.querySelector('#entrada .pres__ticket-qr canvas');
+      return mod.decodeCanvasWithZXing(c);
+    });
+    expect(leido).toContain(ticket.codigo_qr);
   });
 
   test('el QR queda centrado en la tarjeta, también con el CSS antiguo en caché', async ({ page }) => {

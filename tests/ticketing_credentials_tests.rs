@@ -327,3 +327,93 @@ fn extract_door_secret(input: &str) -> Option<String> {
     }
     None
 }
+
+/// The landing and the printed photo both paint the brand logo over the middle
+/// of the QR, which is only safe because the code carries 30% error recovery.
+/// At the crate default (level M, 15%) the covered modules eat the budget and a
+/// phone at the door fails to read the credential.
+///
+/// Asserted by measuring the module count: the same payload needs a larger
+/// matrix at level H than at level M, so a silent revert to `QrCode::new` shows
+/// up here instead of at the door.
+#[test]
+fn test_printed_qr_carries_enough_error_recovery_for_the_logo() {
+    let generator = OsRandomCredentials::new();
+    let creds = generator.generate().unwrap();
+
+    let ticket = Ticket::new(
+        creds.id,
+        "evt-logo".to_string(),
+        None,
+        "Lucia Prado".to_string(),
+        "987654321".to_string(),
+        "General".to_string(),
+        Money::from_soles(20.0).unwrap(),
+        PaymentMethod::Efectivo,
+        PaymentStatus::Pagado,
+        creds.scan_token,
+        creds.qr_secret,
+        CheckinStatus::NoIngreso,
+        None,
+        "2026-10-15T20:00:00Z".to_string(),
+        "2026-10-15T20:00:00Z".to_string(),
+    )
+    .expect("paid ticket creation failed");
+
+    let svg = ticket
+        .render_qr_svg(Some("https://shirleyshow.site"))
+        .expect("paid ticket must render a QR");
+
+    // The `qrcode` crate emits one `<path>` of `M<x> <y>h<w>v<h>` runs, where
+    // the height of a run is exactly one module. Parse each run by its markers
+    // instead of splitting on spaces: the runs are concatenated with no
+    // separator, so `h5v5H20V20` is one token, not four.
+    let mut min_step = usize::MAX;
+    let mut min_x = usize::MAX;
+    let mut max_x = 0usize;
+    for chunk in svg.split('M').skip(1) {
+        let (Some(hpos), Some(_)) = (chunk.find('h'), chunk.find('v')) else {
+            continue;
+        };
+        let Some(vpos) = chunk.find('v') else { continue };
+        if vpos <= hpos {
+            continue;
+        }
+        let head = &chunk[..hpos];
+        let w = &chunk[hpos + 1..vpos];
+        let rest = &chunk[vpos + 1..];
+        let hend = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        let h = &rest[..hend];
+
+        let mut head_parts = head.split_whitespace();
+        let (Some(x), Some(_y)) = (head_parts.next(), head_parts.next()) else {
+            continue;
+        };
+        let (Ok(x), Ok(w), Ok(h)) = (x.parse::<usize>(), w.parse::<usize>(), h.parse::<usize>())
+        else {
+            continue;
+        };
+        if h == 0 {
+            continue;
+        }
+        min_step = min_step.min(h);
+        min_x = min_x.min(x);
+        max_x = max_x.max(x + w);
+    }
+
+    assert!(
+        min_step != usize::MAX && max_x > min_x,
+        "the QR SVG must contain module runs, not an empty path"
+    );
+    let modules = (max_x - min_x) / min_step;
+
+    // A 32-hex or `https://shirleyshow.site/#/ticket/<hex>` payload at level H
+    // is version 8 or larger (45x45). Level M would fit in 37x37.
+    assert!(
+        modules >= 45,
+        "the printed QR must be encoded at level H so the centred logo stays \
+         readable: a {modules}x{modules} matrix means level M came back"
+    );
+}

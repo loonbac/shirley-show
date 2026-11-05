@@ -23,12 +23,17 @@
   <style>
     #entrada .pres__ticket-qr {
       margin: 16px auto 0; padding: 10px;
-      width: 200px; max-width: 100%;
+      width: 270px; max-width: 100%;
       background: #fff; border: 1px solid var(--line); border-radius: 4px;
     }
     #entrada .pres__ticket-qr svg,
     #entrada .pres__ticket-qr canvas {
       display: block; width: 100%; height: auto; margin: 0 auto;
+    }
+    /* Fewer rows leave more room for the credential, which is what the doorman
+       has to read across a dark room. */
+    @media (max-width: 400px) {
+      #entrada .pres__ticket-qr { width: 100%; }
     }
   </style>
 </head>
@@ -396,8 +401,9 @@
       cuerpo.className = 'pres__ticket-cuerpo';
       cuerpo.appendChild(dato('A nombre de', t.nombre_comprador));
       cuerpo.appendChild(dato('Tipo', t.tipo_entrada));
-      cuerpo.appendChild(dato('Precio', t.precio));
-      cuerpo.appendChild(dato('Pago', t.estado_pago));
+      // Price and payment state are deliberately not shown on a paid ticket: the
+      // QR below is the proof, and the buyer knows what they paid. Unpaid ones
+      // still get their warning underneath, which is where that fact matters.
       cont.appendChild(cuerpo);
 
       // An unpaid ticket is a reservation, and saying so here prevents the worst
@@ -531,17 +537,49 @@
         redondeado(ctx, fx + 2, fy + 2, 3, 3, 0.5); ctx.fill();
       }
 
+      // The logo sits over the middle of the code, so those modules are never
+      // painted: the code is born with the hole instead of having dots erased
+      // afterwards. Level H (30% recovery, set in render_qr_svg) is what pays
+      // for it, and the zone stays under a quarter of the width.
+      var logoMods = Math.round(size * 0.26);
+      var desdeLogo = Math.floor((size - logoMods) / 2);
+      var enLogo = function (r, c) {
+        return r >= desdeLogo && r < desdeLogo + logoMods &&
+               c >= desdeLogo && c < desdeLogo + logoMods;
+      };
+
       // Data modules as dots. Radius 0.48 keeps jsQR and ZXing decoding them.
       ctx.beginPath();
       for (var r = 0; r < size; r++) {
         for (var c = 0; c < size; c++) {
           if (!oscuro[r + ':' + c]) continue;
           if (enEsquina(r, c, size)) continue;
+          if (enLogo(r, c)) continue;
           ctx.moveTo(c + 0.5 + 0.48, r + 0.5);
           ctx.arc(c + 0.5, r + 0.5, 0.48, 0, Math.PI * 2);
         }
       }
       ctx.fill();
+
+      // The brand mark, painted when it arrives. The hole is already there, so a
+      // slow or failed load leaves a clean gap and not a half-drawn code.
+      var logo = new Image();
+      logo.onload = function () {
+        try {
+          var escudo = logoMods * 0.12;
+          ctx.save();
+          ctx.fillStyle = '#ffffff';
+          redondeado(ctx, desdeLogo - escudo, desdeLogo - escudo,
+                     logoMods + escudo * 2, logoMods + escudo * 2, logoMods * 0.18);
+          ctx.fill();
+          var escala = Math.min(logoMods / logo.width, logoMods / logo.height);
+          var w = logo.width * escala, h = logo.height * escala;
+          ctx.drawImage(logo, desdeLogo + (logoMods - w) / 2,
+                        desdeLogo + (logoMods - h) / 2, w, h);
+          ctx.restore();
+        } catch (e) {}
+      };
+      logo.src = '/landing/img/logo-qr.png';
 
       caja.appendChild(canvas);
       return true;
