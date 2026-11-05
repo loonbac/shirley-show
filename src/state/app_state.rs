@@ -162,11 +162,6 @@ impl AppState {
         let separation_timeout = std::time::Duration::from_secs(colab_config.timeout_secs);
         let colab_separator = Arc::new(ColabVocalSeparator::new(colab_config));
 
-        // Vigilante de runtimes huérfanos: si el release falla en silencio, nadie
-        // reintenta el apagado y la GPU sigue facturando hasta que Colab la
-        // expire. Se le pasa el semáforo de GPU como señal de trabajo en curso.
-        colab_separator.spawn_reaper(std::time::Duration::from_secs(60));
-
         let vocal_separator: Arc<dyn VocalSeparator> = colab_separator;
         // Vigilante de runtimes huérfanos: si el release falla en silencio, nadie
         // reintenta el apagado y la GPU sigue facturando hasta que Colab la

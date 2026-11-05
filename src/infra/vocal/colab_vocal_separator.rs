@@ -167,6 +167,37 @@ impl ColabVocalSeparator {
     /// preempt a GPU. Handing a dead id to `colab exec` produces a confusing
     /// error far from the cause, so liveness is checked first and a dead id is
     /// dropped.
+
+    /// Reads the size of a file on the runtime, or `None` when it is absent.
+    ///
+    /// This is the evidence the upload is judged on. The CLI status cannot be
+    /// used for that: it reports failure on transfers that arrived intact.
+    async fn remote_file_size(
+        &self,
+        session_id: &str,
+        remote_path: &str,
+        timeout: Duration,
+    ) -> Option<u64> {
+        let probe = format!(
+            "import os\nprint('SIZE=%d' % os.path.getsize({remote_path:?}) if os.path.exists({remote_path:?}) else 'SIZE=absent')"
+        );
+        let mut cmd = Command::new(&self.config.colab_bin);
+        cmd.kill_on_drop(true);
+        cmd.args(["exec", "--session", session_id, "-c", &probe]);
+        cmd.stdin(Stdio::null());
+        cmd.stderr(Stdio::null());
+        let output = match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(o)) => o,
+            _ => return None,
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.lines().find_map(|line| {
+            let line = line.trim();
+            let rest = line.strip_prefix("SIZE=")?;
+            rest.parse::<u64>().ok()
+        })
+    }
+
     async fn session_is_alive(&self, session_id: &str) -> bool {
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
@@ -500,13 +531,54 @@ impl ColabVocalSeparator {
         upload_cmd.stdout(Stdio::null());
         upload_cmd.stderr(Stdio::null());
 
-        let upload_status = match tokio::time::timeout(upload_timeout, upload_cmd.status()).await {
-            Ok(Ok(st)) if st.success() => st,
-            Ok(Ok(_)) => return Err(VocalSeparationError::SeparationFailed),
-            Ok(Err(_)) => return Err(VocalSeparationError::SeparationFailed),
-            Err(_) => return Err(VocalSeparationError::SeparationTimeout),
+        // The exit code cannot decide this. `colab upload` exits 1 with
+        // "kernel write failed" while still leaving the file byte-perfect on the
+        // runtime: measured with a 289.689-byte MP3 whose local and remote
+        // sha256 matched exactly. Aborting on the status failed every separation
+        // even though the audio had already arrived.
+        //
+        // So ask the runtime what it holds. A genuinely empty runtime gets one
+        // more attempt; a truncated file is not retried, because separating half
+        // an audio would "succeed" wrongly.
+        let expected_size = match tokio::fs::metadata(&request.source_path).await {
+            Ok(m) => m.len(),
+            Err(_) => return Err(VocalSeparationError::SeparationFailed),
         };
-        let _ = upload_status;
+
+        let mut accepted = false;
+        for attempt in 0..2u8 {
+            if attempt > 0 && std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                eprintln!("[upload] reintento: el runtime seguia vacio");
+            }
+
+            let exit_success = match tokio::time::timeout(upload_timeout, upload_cmd.status()).await
+            {
+                Ok(Ok(st)) => st.success(),
+                Ok(Err(_)) => false,
+                Err(_) => return Err(VocalSeparationError::SeparationTimeout),
+            };
+
+            let remote_size = self
+                .remote_file_size(session_id, "/content/input_audio", upload_timeout)
+                .await;
+
+            match crate::infra::vocal::colab_transfer::upload_verdict(
+                exit_success,
+                remote_size,
+                expected_size,
+            ) {
+                crate::infra::vocal::colab_transfer::UploadVerdict::Accept => {
+                    accepted = true;
+                    break;
+                }
+                crate::infra::vocal::colab_transfer::UploadVerdict::Retry => continue,
+                crate::infra::vocal::colab_transfer::UploadVerdict::Reject => break,
+            }
+        }
+
+        if !accepted {
+            return Err(VocalSeparationError::SeparationFailed);
+        }
 
         // 3. Generate remote Python script and save to local work directory
         tokio::fs::create_dir_all(&self.config.work_dir)
