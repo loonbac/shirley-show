@@ -272,3 +272,45 @@ fn test_base_url_host_parsing_handles_ipv6() {
         );
     }
 }
+
+#[test]
+fn test_door_host_takes_precedence_over_site_host() {
+    // A misconfiguration —pointing `SHIRLEY_PUBLIC_BASE_URL` at the door host—
+    // must not silently widen what that host may reach, and must be obvious to
+    // whoever reads the result. `Door` wins over `Landing` in `classify`, so the
+    // same hostname cannot be both the public site and the narrow door surface.
+    let cfg = SurfaceConfig::new_three(
+        Some("https://puerta.shirleyshow.site"),
+        Some("https://panel.shirleyshow.site"),
+        Some("https://puerta.shirleyshow.site"),
+    );
+
+    assert_eq!(
+        cfg.classify(Some("puerta.shirleyshow.site")),
+        PublicSurface::Door,
+        "when a host is both the site and the door, the door's narrow allowlist \
+         must win: opening it as the landing would expose /api/* on a host that \
+         is meant to be the most restricted one"
+    );
+}
+
+#[test]
+fn test_missing_panel_host_leaves_the_door_inert_not_closed() {
+    // The single-host fallback is checked before the door, so a door variable
+    // without a panel variable leaves the split off entirely. That is inert by
+    // design: configuring half the split must not take the application down.
+    let cfg = SurfaceConfig::new_three(
+        Some("https://shirleyshow.site"),
+        None,
+        Some("https://puerta.shirleyshow.site"),
+    );
+
+    for host in [Some("puerta.shirleyshow.site"), Some("localhost"), None] {
+        assert_eq!(
+            cfg.classify(host),
+            PublicSurface::Application,
+            "with no panel host the deployment serves everything; a door \
+             variable alone must not close anything"
+        );
+    }
+}
