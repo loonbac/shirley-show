@@ -644,6 +644,19 @@ entrada el botón no se renderiza**:
 44 px exactos, que es el `min-width` del botón. La app real pasa la mayor parte del
 tiempo en el segundo caso. **El estado por defecto también es un escenario.**
 
+Y es el escenario que **el usuario ve al crear un evento**, porque el formulario
+nace con un solo tipo (`forms.js:126-128`, `[{nombre:'General',…}]`). Medido con la
+sección completa —etiqueta, lista y botón de añadir— y con la hoja aplicada
+(`border-box`, `styleSheets.length` = 1):
+
+```
+1 tipo  (DEFECTO)  3 hijos  input 338  botón 0
+2+ tipos           4 hijos  input 294  botón 44
+```
+
+**Los siete números de la cadena se midieron con el botón presente**, es decir, con
+el caso que no es el de partida.
+
 
 Un `querySelector` con un nombre que suena bien puede devolver otro nodo, o
 `null`. Y medir un solo hijo de una rejilla mide una rejilla distinta:
@@ -664,6 +677,25 @@ que la fila, se midió la fila.
 **Regla general**: un número de layout sin `box-sizing` documentado no significa
 nada. Citar una comparación —«idéntico con y sin la línea»— sobrevive a que el
 número absoluto sea irreproducible; citar el píxel no.
+
+#### El estado es la quinta dimensión
+
+Las cuatro comprobaciones cubren hoja, elemento, ancestros y markup. **Ninguna
+cubre el estado del componente.** Y el sesgo es el mismo en las dos direcciones:
+los probes se construyen con el caso más rico —con el botón, con los hermanos, con
+el ancestro— porque es el que hace lucir la medición, y el que se usa es el más
+pobre. Es el mismo sesgo que verificar con datos de prueba que no se parecen a los
+reales.
+
+Un número necesita, para significar algo:
+
+```
+la hoja que lo aplica
+el elemento correcto
+los hermanos presentes
+los ancestros completos
+el estado del componente que lo produjo
+```
 
 ### Verificar una lectura no se hace con una escritura
 
