@@ -596,6 +596,7 @@ impl ColabVocalSeparator {
             request.mode,
             models,
             self.config.overlap,
+            self.config.batch_size,
             &password,
             "/content/input_audio",
         );

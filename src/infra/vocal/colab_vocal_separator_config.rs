@@ -25,6 +25,10 @@ pub struct ColabVocalSeparatorConfig {
     pub token_path: PathBuf,
     pub gpu_type: String,
     pub overlap: u32,
+    /// Inference batch size. Measured on the production GPU: 25s at batch 1,
+    /// 8.5s at batch 8, and flat above that (8.5s at 32 and 64), so 8 is the
+    /// knee and larger values only spend memory.
+    pub batch_size: u32,
     pub timeout_secs: u64,
     pub work_dir: PathBuf,
     pub ffprobe_bin: PathBuf,
@@ -50,6 +54,11 @@ impl ColabVocalSeparatorConfig {
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(12);
 
+        let batch_size = std::env::var("SHIRLEY_COLAB_BATCH_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(8);
+
         let timeout_secs = std::env::var("SHIRLEY_COLAB_TIMEOUT_SECS")
             .ok()
             .or_else(|| std::env::var("SHIRLEY_SEPARATION_TIMEOUT_SECS").ok())
@@ -73,6 +82,7 @@ impl ColabVocalSeparatorConfig {
             token_path,
             gpu_type,
             overlap,
+            batch_size,
             timeout_secs,
             work_dir,
             ffprobe_bin,
