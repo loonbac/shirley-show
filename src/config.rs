@@ -457,8 +457,12 @@ pub enum PublicSurface {
     Landing,
     /// The management application: panel, API, tickets and the door.
     Application,
-    /// The door on its own host: scan, sell at the entrance, close the event,
-    /// and nothing else.
+    /// The door on its own host: scan, sell at the entrance, and nothing else.
+    ///
+    /// It does **not** close or reopen the event: `finalizeEvent` lives in
+    /// `controllers.js`, which the door does not import, and `door_allows`
+    /// refuses it. Keeping the comment narrower than the guess prevents someone
+    /// from widening the allowlist to match a comment that was never true.
     Door,
     /// Unknown or missing host: everything stays closed.
     Closed,
