@@ -1054,18 +1054,33 @@ export function createDoorController(deps = {}) {
     const trimmed = String(code).trim();
     if (!trimmed) return;
 
-    // Acepta el secreto de 32 hex directo o contenido en una URL de entrada
-    let secret = trimmed;
-    const hexMatch = trimmed.match(/[0-9a-fA-F]{32}/);
-    if (hexMatch) {
-      secret = hexMatch[0].toLowerCase();
-    }
+    // The door reads the ticket QR, whose payload is a 32-hex secret, possibly
+    // wrapped in a URL (`https://site/#/ticket/<secret>`).
+    //
+    // The buyer's link carries a different credential: `st_` followed by 64 hex.
+    // Mining the first 32 hex out of that string produces a plausible secret
+    // that belongs to nobody, so a perfectly valid ticket would be refused at
+    // the door. Measured: it was.
+    //
+    // The boundaries matter. Without the lookahead, a 40-hex string would be
+    // sliced into a valid-looking secret; without the lookbehind, a longer run
+    // could be matched from an arbitrary offset.
+    const DOOR_SECRET_PATTERN = /(?:^|[^0-9a-fA-F])([0-9a-fA-F]{32})(?![0-9a-fA-F])/;
+
+    const hexMatch = trimmed.match(DOOR_SECRET_PATTERN);
+    const secret = hexMatch ? hexMatch[1].toLowerCase() : '';
 
     // Only the full 32-hex QR secret reaches the backend. Anything else is
     // rejected locally so the operator sees it immediately.
-    if (!/^[0-9a-fA-F]{32}$/.test(secret)) {
+    if (!secret) {
+      // Name the actual mistake. The buyer's link is the one wrong document a
+      // doorman is likely to be handed, and "formato inválido" sends them to
+      // look for a printing defect that does not exist.
+      const motivo = /st_[0-9a-fA-F]{64}/.test(trimmed)
+        ? 'Este es el enlace del comprador, no es un código de puerta'
+        : 'Formato de código inválido';
       view.update({
-        result: { resultado: 'Invalida', motivo: 'Formato de código inválido' },
+        result: { resultado: 'Invalida', motivo },
       });
       return;
     }

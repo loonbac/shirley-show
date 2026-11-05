@@ -216,6 +216,64 @@ console.log('Running Door Mode and Camera QR Scanner tests...');
   controller.destroy();
 }
 
+// 3b. The QR is read by the door, but the same code can arrive as a URL: a
+// printed ticket may carry `https://site/#/ticket/<secret>` instead of the bare
+// 32 hex. Both describe the same credential and must open the same door.
+//
+// The trap is the buyer's link, which carries `st_<64 hex>`. Extracting the
+// first 32 hex out of that string produces a plausible-looking secret that
+// belongs to nobody, and the door would answer "inválida" for a ticket that is
+// perfectly valid.
+{
+  let checked = null;
+  let rejection = null;
+  const controller = createDoorController({
+    eventId: 'evt-door-forms',
+    api: {
+      getEvent: async (id) => ({ evento: { id, nombre: 'Evento' } }),
+      checkInTicket: async (eventId, codigo) => {
+        checked = codigo;
+        return { resultado: 'Valida', nombre_comprador: 'Ana', tipo_entrada: 'General' };
+      },
+    },
+  });
+
+  const SECRET = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+  // Form 1: the bare secret, which is what every ticket printed so far carries.
+  checked = null;
+  await controller.submitCode(SECRET);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(checked, SECRET, 'the bare 32-hex secret must still reach the API');
+
+  // Form 2: the same secret inside a URL.
+  checked = null;
+  await controller.submitCode(`https://shirleyshow.site/#/ticket/${SECRET}`);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(checked, SECRET, 'a URL carrying the 32-hex secret must reach the API');
+
+  // Form 3: the buyer's own link token must be refused, never mined for hex.
+  checked = null;
+  await controller.submitCode(
+    'https://shirleyshow.site/#/ticket/st_6045a94d1ed07960fcfe9e35221e07ce6a16452c56cfc20d0fc4d5bf61d526da'
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(checked, null, "the buyer's scan_token must never be mined for a 32-hex prefix");
+  assert.ok(
+    controller.viewEl.textContent.includes('no es un código de puerta'),
+    'the door must say the buyer link is not a door credential'
+  );
+
+  // Form 4: a long hex run must not be truncated into a valid-looking secret.
+  checked = null;
+  await controller.submitCode('a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(checked, null, 'a 40-hex string is not a 32-hex secret and must not be sliced');
+
+  controller.destroy();
+  rejection = null;
+}
+
 // 4. DOOR-1: Camera QR Scanner with jsQR Fallback when BarcodeDetector is unavailable
 {
   // Temporarily disable BarcodeDetector
