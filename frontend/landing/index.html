@@ -509,6 +509,11 @@
       canvas.height = lienzo * ESCALA;
       canvas.setAttribute('role', 'img');
       canvas.setAttribute('aria-label', 'Código QR de tu entrada');
+      // The geometry the drawing actually used, so a test can reason about the
+      // hole instead of duplicating the constant. A test that hard-codes it
+      // compares against a different code than the one on screen.
+      canvas.dataset.qrSize = String(size);
+      canvas.dataset.qrLogoMods = String(Math.round(size * 0.40));
       var ctx = canvas.getContext && canvas.getContext('2d');
       if (!ctx) return false;
 
@@ -529,19 +534,20 @@
       var esquinas = [[0, 0], [0, size - 7], [size - 7, 0]];
       for (var e = 0; e < esquinas.length; e++) {
         var fy = esquinas[e][0], fx = esquinas[e][1];
-        redondeado(ctx, fx, fy, 7, 7, 1.0); ctx.fill();
+        redondeado(ctx, fx, fy, 7, 7, 0.8); ctx.fill();
         ctx.save();
         ctx.fillStyle = '#ffffff';
-        redondeado(ctx, fx + 1, fy + 1, 5, 5, 0.75); ctx.fill();
+        redondeado(ctx, fx + 1, fy + 1, 5, 5, 0.6); ctx.fill();
         ctx.restore();
-        redondeado(ctx, fx + 2, fy + 2, 3, 3, 0.5); ctx.fill();
+        redondeado(ctx, fx + 2, fy + 2, 3, 3, 0.4); ctx.fill();
       }
 
       // The logo sits over the middle of the code, so those modules are never
       // painted: the code is born with the hole instead of having dots erased
       // afterwards. Level H (30% recovery, set in render_qr_svg) is what pays
-      // for it, and the zone stays under a quarter of the width.
-      var logoMods = Math.round(size * 0.26);
+      // for it. The 40% share is the one the printed photo uses, so both codes
+      // look like the same object.
+      var logoMods = Math.round(size * 0.40);
       var desdeLogo = Math.floor((size - logoMods) / 2);
       var enLogo = function (r, c) {
         return r >= desdeLogo && r < desdeLogo + logoMods &&
@@ -563,20 +569,19 @@
 
       // The brand mark, painted when it arrives. The hole is already there, so a
       // slow or failed load leaves a clean gap and not a half-drawn code.
+      //
+      // No white backing: the hole *is* the backing. An earlier version painted
+      // one 12% wider than the hole and, because it started at `desdeLogo -
+      // escudo`, it reached into the painted ring and sliced the dots on its
+      // border. The printed photo never did that, which is why only the landing
+      // looked broken.
       var logo = new Image();
       logo.onload = function () {
         try {
-          var escudo = logoMods * 0.12;
-          ctx.save();
-          ctx.fillStyle = '#ffffff';
-          redondeado(ctx, desdeLogo - escudo, desdeLogo - escudo,
-                     logoMods + escudo * 2, logoMods + escudo * 2, logoMods * 0.18);
-          ctx.fill();
           var escala = Math.min(logoMods / logo.width, logoMods / logo.height);
           var w = logo.width * escala, h = logo.height * escala;
           ctx.drawImage(logo, desdeLogo + (logoMods - w) / 2,
                         desdeLogo + (logoMods - h) / 2, w, h);
-          ctx.restore();
         } catch (e) {}
       };
       logo.src = '/landing/img/logo-qr.png';
