@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 // presentation. This mounts the real component through the page's own module
 // graph, then measures the rendered result.
 test('la tarjeta de pista separada ofrece descarga y reproducción', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/panel');
   await page.keyboard.press('Control+k');
   await expect(page.locator('.agent-chat-panel')).toBeVisible();
 

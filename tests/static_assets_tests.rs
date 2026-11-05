@@ -26,6 +26,15 @@ fn setup_test_env() -> (axum::Router, TempDir, PathBuf) {
     )
     .expect("write index.html");
 
+    // The root serves the public landing, so the fixture needs it too.
+    let landing_dir = frontend_dir.join("landing");
+    fs::create_dir_all(&landing_dir).expect("create landing dir");
+    fs::write(
+        landing_dir.join("index.html"),
+        "<!DOCTYPE html><html><head><title>Test landing</title></head><body><header class=\"pres-hero\"></header></body></html>",
+    )
+    .expect("write landing index.html");
+
     // Create a mock asset in styles/
     let styles_dir = frontend_dir.join("styles");
     fs::create_dir_all(&styles_dir).expect("create styles dir");
@@ -48,7 +57,7 @@ async fn test_serve_index_html_with_no_cache() {
     let (app, _dir, _frontend_dir) = setup_test_env();
 
     let req = Request::builder()
-        .uri("/")
+        .uri("/panel")
         .method("GET")
         .body(Body::empty())
         .unwrap();
@@ -183,4 +192,32 @@ async fn test_api_routes_unaffected_by_asset_routing() {
 
     let response = app.oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_root_serves_the_public_landing() {
+    // The site root is public traffic. Serving the panel there would expose the
+    // management UI and break the landing the artist shares.
+    let (app, _dir, _frontend_dir) = setup_test_env();
+
+    let req = Request::builder()
+        .uri("/")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8_lossy(&body);
+
+    assert!(
+        html.contains("pres-hero"),
+        "the root must serve the public landing, not the panel"
+    );
+    assert!(
+        !html.contains("id=\"app\""),
+        "the root must not serve the panel shell"
+    );
 }
