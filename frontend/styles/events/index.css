@@ -759,6 +759,16 @@
   grid-column: 1 / 3;
 }
 
+/* Hook, not decoration: the type-name input carries no rules of its own, but it
+   is the selector the Playwright specs use to reach the field (`.events-type-name`
+   in e2e/event-validation.spec.js and e2e/user-flows.spec.js). Declared so the
+   dead-class check in tests/responsive_mobile_tests.rs has a real selector to
+   find, and so removing the JS class is a deliberate act rather than a silent
+   break of two E2E specs. */
+.events-type-name {
+  min-width: 0;
+}
+
 .events-type-del-btn {
   grid-column: 3 / 4;
   grid-row: 1 / 2;

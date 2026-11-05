@@ -157,7 +157,6 @@ export function createPublicTicketView(initialState = {}) {
       // Pending status: NEVER render QR box or SVG
       credentialSection = createElement("div", { class: "public-ticket-pending-banner" }, [
         createElement("h4", { class: "public-ticket-pending-title" }, [
-          createElement("span", { class: "public-ticket-pending-dot" }),
           createElement("span", {}, ["Reserva pendiente de pago"]),
         ]),
         createElement("p", { class: "public-ticket-pending-msg" }, [

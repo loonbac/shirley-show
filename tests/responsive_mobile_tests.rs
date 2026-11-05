@@ -288,9 +288,39 @@ fn test_double_padding_removed_in_events_views() {
         content.contains(".public-ticket-container {\n  max-width: 480px;\n  margin: 0 auto;\n  padding: var(--space-4) 0;"),
         ".public-ticket-container must have zero horizontal padding (padding: var(--space-4) 0)"
     );
+    // The door container is the exception, and on purpose.
+    //
+    // 47206b1 ("zero-scroll mobile layout and tap-to-toggle camera battery saver")
+    // replaced `padding: var(--space-3) 0` (12px vertical, 0 horizontal) with an
+    // 8px inset on all sides. The zero-horizontal-padding rule this test protects
+    // is about the SCROLLING views, where side padding steals width from the
+    // content on a 320px phone. The door is not a scrolling view: it is a fixed
+    // 100dvh grid that must fit without scrolling, so an 8px inset costs no
+    // scrolling and keeps the camera frame off the glass edge.
+    //
+    // Asserting the literal `var(--space-3) 0` pinned that one layout and broke
+    // the moment the door was redesigned -- a false failure that says nothing
+    // about the rule. What the rule actually needs is: the door box is bounded
+    // by the viewport, and its horizontal inset stays smaller than a form's.
+    let door = content
+        .split(".door-container {")
+        .nth(1)
+        .and_then(|rest| rest.split('}').next())
+        .expect("events/index.css must define .door-container");
+    // `max-height` is the one that actually forbids scrolling: `height: 100dvh`
+    // alone still lets the content overflow. A bare `contains("100dvh")` passed
+    // even after `max-height` was removed, because `height: 100dvh` matched it --
+    // so the assertion has to name the property that does the work.
     assert!(
-        content.contains(".door-container {\n  max-width: 600px;\n  margin: 0 auto;\n  padding: var(--space-3) 0;"),
-        ".door-container must have zero horizontal padding (padding: var(--space-3) 0)"
+        door.contains("max-height: 100dvh"),
+        ".door-container must cap its height at 100dvh, the property that makes the \
+         door fit without scrolling. Rule found: {door}"
+    );
+    assert!(
+        !door.contains("var(--space-4)") && !door.contains("var(--space-3)"),
+        ".door-container must keep its horizontal inset tight (8px), not a form-sized \
+         gutter: side padding on a 100dvh door grid steals height from the camera. \
+         Rule found: {door}"
     );
 }
 
