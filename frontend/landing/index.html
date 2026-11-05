@@ -15,6 +15,13 @@
 <body>
 <div class="pres">
 
+  <!-- Buyer's proof of purchase. Filled from `/api/public/ticket/<token>` when
+       the WhatsApp link carries `#/ticket/<token>`, and remembered on this
+       device so the buyer does not have to find the message again on the day.
+       Deliberately carries no QR: the scan secret is what the door reads, and a
+       QR on the public site would let whoever photographs the screen walk in. -->
+  <section class="pres__ticket" id="entrada" hidden aria-live="polite"></section>
+
   <!-- Musical note motif, reused as a decorative watermark -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <symbol id="nota" viewBox="0 0 24 24" fill="none">
@@ -315,6 +322,104 @@
     document.getElementById('lb-cerrar').addEventListener('click', cerrar);
     lb.addEventListener('click', function (e) { if (e.target === lb) cerrar(); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !lb.hidden) cerrar(); });
+  })();
+</script>
+
+<script>
+  // The buyer reaches this page from a WhatsApp link: /#/ticket/<scan_token>.
+  // A hash never reaches the server, so the ticket is fetched here. Only data is
+  // shown, never the scan secret, and everything is written with textContent --
+  // this page must never turn remote strings into markup.
+  (function () {
+    var CLAVE = 'shirley.entrada';
+    var cont = document.getElementById('entrada');
+    if (!cont) return;
+
+    function dato(etiqueta, valor) {
+      var fila = document.createElement('div');
+      fila.className = 'pres__ticket-fila';
+      var k = document.createElement('span');
+      k.className = 'pres__ticket-k';
+      k.textContent = etiqueta;
+      var v = document.createElement('span');
+      v.className = 'pres__ticket-v';
+      v.textContent = valor == null ? '' : String(valor);
+      fila.appendChild(k);
+      fila.appendChild(v);
+      return fila;
+    }
+
+    function pintar(t) {
+      if (!t || !t.nombre_evento) return;
+      cont.textContent = '';
+
+      var titulo = document.createElement('h2');
+      titulo.className = 'pres__ticket-titulo';
+      titulo.textContent = 'Tu entrada';
+      cont.appendChild(titulo);
+
+      var evento = document.createElement('p');
+      evento.className = 'pres__ticket-evento';
+      evento.textContent = t.nombre_evento;
+      cont.appendChild(evento);
+
+      var cuerpo = document.createElement('div');
+      cuerpo.className = 'pres__ticket-cuerpo';
+      cuerpo.appendChild(dato('A nombre de', t.nombre_comprador));
+      cuerpo.appendChild(dato('Tipo', t.tipo_entrada));
+      cuerpo.appendChild(dato('Precio', t.precio));
+      cuerpo.appendChild(dato('Pago', t.estado_pago));
+      cont.appendChild(cuerpo);
+
+      // An unpaid ticket is a reservation, and saying so here prevents the worst
+      // scene of the night: a buyer at the door who believed they had a ticket.
+      if (t.estado_pago !== 'Pagado') {
+        var aviso = document.createElement('p');
+        aviso.className = 'pres__ticket-aviso';
+        aviso.textContent =
+          'Tu pago está pendiente. Coordínalo por Yape o en efectivo para ' +
+          'habilitar tu ingreso.';
+        cont.appendChild(aviso);
+      }
+
+      var pie = document.createElement('p');
+      pie.className = 'pres__ticket-pie';
+      pie.textContent =
+        'Guarda esta página: tu entrada queda registrada en este dispositivo. ' +
+        'En la puerta basta con dar tu nombre.';
+      cont.appendChild(pie);
+
+      cont.hidden = false;
+    }
+
+    function leer() {
+      var m = /^#\/ticket\/([A-Za-z0-9_]+)$/.exec(window.location.hash || '');
+      return m ? m[1] : '';
+    }
+
+    var token = leer();
+
+    if (token) {
+      fetch('/api/public/ticket/' + encodeURIComponent(token), {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
+      })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (t) {
+          if (!t) return;
+          pintar(t);
+          try { localStorage.setItem(CLAVE, JSON.stringify({ token: token, t: t })); } catch (e) {}
+        })
+        .catch(function () {});
+      return;
+    }
+
+    // No link in the hash: show what this device already holds, so returning to
+    // the plain site still shows the entrance.
+    try {
+      var guardado = JSON.parse(localStorage.getItem(CLAVE) || 'null');
+      if (guardado && guardado.t) pintar(guardado.t);
+    } catch (e) {}
   })();
 </script>
 

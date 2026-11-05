@@ -62,7 +62,8 @@ export function buildWhatsAppMessage(params) {
     return (
       `¡Hola ${name}! Aquí tienes tu entrada para ${event}:\n` +
       `${ticketUrl}\n\n` +
-      `Presenta este enlace en la puerta para tu ingreso. ¡Te esperamos!`
+      `Guarda este enlace: ahí puedes ver tu entrada cuando la necesites. ` +
+      `En la puerta basta con dar tu nombre. ¡Te esperamos!`
     );
   }
 

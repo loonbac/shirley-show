@@ -270,6 +270,106 @@ mod wiring {
             probe(app, "panel.shirleyshow.site", "GET", "/api/eventos/abc").await;
         assert!(!refused, "the panel must reach the door routes too");
     }
+
+#[tokio::test]
+async fn test_the_landing_may_read_a_public_ticket_and_nothing_else() {
+    // The buyer receives a WhatsApp link like `https://shirleyshow.site/#/ticket/st_...`.
+    // The hash never reaches the server, so the landing must fetch the ticket
+    // itself. That means the public host needs exactly one API route: the public
+    // ticket read. Opening `/api/` on the landing would also open
+    // `/api/agent/chat`, which spends paid tokens on anonymous calls.
+    let (app, _tmp) = app();
+
+    let (status, refused) =
+        probe(app.clone(), "shirleyshow.site", "GET", "/api/public/ticket/st_abc").await;
+    assert!(
+        !refused,
+        "the landing must be able to read a public ticket (status {status}): the \
+         buyer's proof of purchase is shown by the landing itself"
+    );
+
+    // And still nothing else, in particular not the paid endpoint.
+    for (method, path) in [
+        ("POST", "/api/agent/chat"),
+        ("GET", "/api/presentations"),
+        ("GET", "/api/eventos"),
+        ("POST", "/api/entradas/checkin"),
+    ] {
+        let (_, refused) = probe(app.clone(), "shirleyshow.site", method, path).await;
+        assert!(
+            refused,
+            "the landing must still be refused {method} {path}: only the public \
+             ticket read is open on the anonymous host"
+        );
+    }
+
+    // Path traversal needs no case here: `curl` and the browser percent-encode
+    // or the router normalises `..` before any layer sees it, and the prefix
+    // match cannot be fooled by a path that still starts with the literal
+    // prefix. Measured rather than assumed: a raw `..` reaches axum's own
+    // rejection with an empty body and no `x-surface-refused` header, so it never
+    // becomes `/api/agent/chat`.
+}
+
+    #[tokio::test]
+    async fn test_the_door_host_serves_the_panel_bundle_at_its_root() {
+        // The door is a mode of the panel application, not a page of the landing.
+        // Serving the landing at `puerta.shirleyshow.site/` looks harmless — it
+        // answers 200 — but the landing never loads the panel bundle, so the doorman
+        // never reaches the door mode. A 200 that makes the feature unreachable is
+        // worse than a 404: it looks like it worked.
+        let (app, _tmp) = app();
+
+        let request = Request::builder()
+            .uri("/")
+            .header(header::HOST, "puerta.shirleyshow.site")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        let html = String::from_utf8_lossy(&body);
+
+        assert!(
+            html.contains("/assets/js/main.js"),
+            "the door host must serve the panel document at `/`: the doorman needs the \
+             bundle to enter door mode, and the landing never loads it"
+        );
+        assert!(
+            !html.contains("pres__hero"),
+            "the door host must not serve the public landing at `/`"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_the_landing_host_is_unaffected_by_the_door_root() {
+        // Whatever the door serves at `/`, the public site keeps serving the landing
+        // there. Pinning both sides stops a fix for one from silently breaking the
+        // other: they share the same route.
+        let (app, _tmp) = app();
+
+        let request = Request::builder()
+            .uri("/")
+            .header(header::HOST, "shirleyshow.site")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        let html = String::from_utf8_lossy(&body);
+
+        assert!(html.contains("pres__hero"), "the public site keeps the landing at /");
+        assert!(
+            !html.contains("/assets/js/main.js"),
+            "the public landing must stay independent of the panel bundle"
+        );
+    }
 }
 
 #[test]
@@ -288,3 +388,4 @@ fn test_the_door_does_not_close_the_event() {
         );
     }
 }
+

@@ -239,3 +239,56 @@
 .pres__item-medio > .pres__ph { flex: 1; justify-content: center; }
 /* The play button is absolutely centred over the tile, so the label needs room
    measured from the middle: pushing the text block down clears it. */
+
+/* Buyer's proof of purchase.
+   Sits directly under the topbar, above the hero, because it is the only thing
+   the buyer came for: they opened a WhatsApp link and must see their entrance
+   without scrolling. It is a sheet of paper, not a card of chrome -- the rest of
+   the page is a poster, and this is the ticket stub tucked into it. */
+.pres__ticket {
+  max-width: 520px; margin: 18px auto 0; padding: 22px 24px 20px;
+  background: #fff; border: 1px solid var(--line);
+  border-top: 3px solid var(--g);
+  border-radius: 3px;
+  box-shadow: 0 14px 34px rgba(28, 19, 10, .10);
+}
+.pres__ticket[hidden] { display: none; }
+
+.pres__ticket-titulo {
+  font-family: 'Playfair Display', serif; font-size: 13px; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase;
+  color: var(--g); margin: 0 0 6px;
+}
+.pres__ticket-evento {
+  font-family: 'Playfair Display', serif; font-size: clamp(19px, 2.6vw, 23px);
+  line-height: 1.25; color: var(--ink); margin: 0 0 16px;
+}
+.pres__ticket-cuerpo {
+  border-top: 1px dashed var(--line); padding-top: 14px;
+  display: grid; gap: 9px;
+}
+.pres__ticket-fila {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+}
+.pres__ticket-k {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--muted); flex: 0 0 auto;
+}
+.pres__ticket-v {
+  font-size: 14.5px; color: var(--ink); text-align: right;
+  overflow-wrap: anywhere;
+}
+.pres__ticket-pie {
+  margin: 16px 0 0; padding-top: 13px; border-top: 1px dashed var(--line);
+  font-size: 12.5px; line-height: 1.6; color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .pres__ticket { margin: 14px 16px 0; padding: 18px 18px 16px; }
+}
+
+.pres__ticket-aviso {
+  margin: 14px 0 0; padding: 10px 12px; border-radius: 2px;
+  background: #fdf6e6; border-left: 3px solid var(--g);
+  font-size: 13px; line-height: 1.55; color: var(--ink);
+}
