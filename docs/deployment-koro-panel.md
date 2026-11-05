@@ -589,3 +589,63 @@ docker run -v /tmp/prueba-data:/app/data …    # directorio vacío
 
 Un solo `POST /api/eventos` contra la base real crea un evento que hay que borrar
 después, y el borrado es una operación sobre datos ajenos.
+
+### Borrar datos: el paso que el resto del runbook no cubre
+
+Todo lo anterior enseña a **medir**. Lo único que este runbook deja pendiente y
+que **borra** es la limpieza de datos de prueba, así que merece su propia regla:
+un runbook que enseña a verificar y calla sobre la operación destructiva deja el
+paso peligroso sin cubrir.
+
+#### Las guardas que protegen contra borrar de más
+
+Seleccionar por **nombre exacto** (nunca `LIKE '%prueba%'`: borraría a un
+comprador real que se llame así más adelante), abortar si el número de filas no
+es el esperado, y verificar las entradas reales antes y después.
+
+#### La guarda que protege contra borrar algo que ya hizo su trabajo
+
+Las anteriores cubren el riesgo de borrar **de más**. Falta el contrario, y es el
+único cuya pérdida es irreversible: borrar algo que **ya produjo un efecto**.
+
+```sql
+SELECT nombre_comprador, estado_checkin FROM entradas
+ WHERE evento_id = ? AND nombre_comprador IN (?, …) AND estado_checkin != 'No ingresó';
+```
+
+Si devuelve una sola fila, **no se borra nada**: esa entrada registró un ingreso
+real y el `DELETE` lo destruye sin vuelta atrás. Una entrada de prueba sin usar
+se puede recrear; un ingreso registrado, no.
+
+#### Y la que no depende de la lista estar completa
+
+La consulta anterior filtra por los nombres que ya crees conocer. Si una entrada
+de prueba tiene otro nombre —un typo, una creada después— pasa el filtro y se
+borra igual, aunque haya ingresado a alguien.
+
+La condición que no admite listas incompletas es la complementaria: **ninguna
+entrada ingresada del evento puede desaparecer con ese `DELETE`**.
+
+```sql
+SELECT nombre_comprador, estado_checkin FROM entradas
+ WHERE evento_id = ? AND estado_checkin != 'No ingresó';
+```
+
+Quédate con la segunda: una lista protege contra borrar de más **si está
+completa**; esta protege aunque no lo esté.
+
+#### Antes de ejecutar
+
+- `SELECT` que cuenta las filas del evento antes y después.
+- Una FK ausente no se supone: se comprueba con `PRAGMA foreign_key_list` sobre
+  todas las tablas, para saber si el borrado deja huérfanos.
+- `DRY_RUN=1` por defecto, `DRY_RUN=0` para ejecutar. Contra la base real, la
+  primera ejecución es siempre en seco.
+- Probarlo antes contra una base sintética **con el caso peligroso**, no solo con
+  el normal: el normal ya se sabe que funciona; el peligroso hay que verlo fallar.
+
+#### La regla general
+
+Antes de borrar, no basta preguntarse «¿es la fila que quiero?». Hay que
+preguntarse además «¿ha producido ya un efecto que no puedo reconstruir?», y
+«¿depende mi lista de que esté completa?».
