@@ -9,12 +9,23 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use crate::handlers::{agent, audio, items, presentations, static_assets, surface_guard, ticketing};
 use crate::state::AppState;
 
+/// Static assets are public and versioned by the `?v=` query on the entry
+/// points, so they may be stored. `must-revalidate` after the window keeps a
+/// deploy from being invisible for longer than a minute.
+pub const ASSET_CACHE_CONTROL: &str = "public, max-age=60, must-revalidate";
+
 pub fn create_router(state: AppState) -> Router {
     let frontend_dir = state.frontend_dir.clone();
+    // The panel bundle is ~1.2 MB across 85 modules reached through a six-level
+    // import waterfall. `no-store` forbade both the browser and Cloudflare from
+    // keeping any of it, so every visit re-downloaded all of it across the
+    // tunnel, and the waterfall multiplied that by its depth. These files are
+    // public and carry no secrets; a short freshness window is enough to make a
+    // reload cheap while still picking up a deploy within a minute.
     let frontend_service = ServiceBuilder::new()
         .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
-            HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+            HeaderValue::from_static(ASSET_CACHE_CONTROL),
         ))
         .service(ServeDir::new(frontend_dir.clone()));
 
@@ -31,7 +42,7 @@ pub fn create_router(state: AppState) -> Router {
             ServiceBuilder::new()
                 .layer(SetResponseHeaderLayer::overriding(
                     header::CACHE_CONTROL,
-                    HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+                    HeaderValue::from_static(ASSET_CACHE_CONTROL),
                 ))
                 .service(ServeDir::new(frontend_dir.join("landing"))),
         )

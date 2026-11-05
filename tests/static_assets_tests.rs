@@ -221,3 +221,63 @@ async fn test_root_serves_the_public_landing() {
         "the root must not serve the panel shell"
     );
 }
+
+/// The panel bundle is ~1.2 MB over 85 modules in a six-level import waterfall.
+/// `no-store` made every visit re-download all of it across the tunnel, which is
+/// what made the panel take seconds to appear. Assets are public and carry no
+/// secrets, so they must be storable; the HTML must stay revalidated.
+#[tokio::test]
+async fn test_static_assets_are_cacheable_while_html_is_not() {
+    let (app, _tmp, frontend_dir) = setup_test_env();
+    fs::create_dir_all(frontend_dir.join("js")).expect("create js dir");
+    fs::write(frontend_dir.join("js/main.js"), "export const a = 1;\n").expect("write main.js");
+
+    let asset = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/assets/js/main.js")
+                .method("GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(asset.status(), StatusCode::OK);
+    let asset_cache = asset
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .expect("cache-control on an asset")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        !asset_cache.contains("no-store"),
+        "an asset that cannot be stored is re-downloaded on every visit, got: {asset_cache}"
+    );
+    assert!(
+        asset_cache.contains("max-age="),
+        "the asset needs a freshness window, got: {asset_cache}"
+    );
+
+    // The document itself must still be revalidated: it is what points at the
+    // versioned entry points, so a stale copy would pin the whole bundle.
+    let html = app
+        .oneshot(
+            Request::builder()
+                .uri("/panel")
+                .method("GET")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        html.headers()
+            .get(header::CACHE_CONTROL)
+            .expect("cache-control on the document")
+            .to_str()
+            .unwrap(),
+        "no-cache"
+    );
+}
