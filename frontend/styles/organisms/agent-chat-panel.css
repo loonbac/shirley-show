@@ -168,15 +168,17 @@
   align-items: center;
   font-size: 0.75rem;
   font-weight: 500;
+  line-height: 1.35;
   color: var(--color-text-muted, #574f45);
   background-color: var(--color-surface-hover, #f4efe6);
   border: 1px solid var(--color-border-subtle, #ede7db);
   padding: 2px 8px;
   border-radius: 12px;
-  max-width: min(100%, 220px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wrap instead of truncating: the label is a sentence, so an ellipsis turns
+     it into a meaningless prefix. The badge sits in a column that can shrink,
+     so it is bounded by its container rather than a fixed width. */
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 
 .agent-chat-close-btn {
