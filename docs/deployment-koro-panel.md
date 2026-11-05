@@ -965,3 +965,32 @@ contenedor   el sistema de ficheros del contenedor
 Y se enumeran, no se recuerdan: `ls /tmp/*.py` en cada uno, no `rm` de nombres
 conocidos. Un `rm -f` de algo inexistente devuelve 0 y refuerza la falsa sensación
 de limpieza.
+
+#### Una medición limpia dos veces, o no es una medición
+
+Un número que sale limpio en la primera medición y no en la segunda **no es una
+medición: es una coincidencia**. Y el caso peligroso no es el que falla, es el que
+**sale limpio en la primera y nadie repite**:
+
+```
+314 / 340   salieron limpios, eran un botón sin clases     (markup inventado)
+9           salió limpio, era el separador del comando      (instrumento roto)
+8           salió limpio, era json.dumps escapando          (emisor roto)
+```
+
+Los tres eran plausibles, los tres se publicaron, y **ninguno describía la app**.
+
+De ahí una regla barata: **una cifra que decide algo se mide dos veces, por vías
+distintas.** No para confirmarla, sino para descubrir que la primera vía era el
+instrumento. Si las dos vías coinciden, hay algo; si no, lo que se estaba midiendo
+era la vía.
+
+Y una variante de lo mismo, verificada en esta sesión: **un delimitador dentro de
+capas de shell es tan frágil como un literal acentuado**, y **las llaves de una
+plantilla compiten con las del shell**. No son trampas nuevas: son «suponer que el
+canal transporta lo que escribo», la misma familia.
+
+Conviene saber además que **no se reproducen siempre**. Probado con dos y tres capas
+de `sh -c`, con `sudo` en medio, y con `@@`, `|` y `$` como separadores: en esta
+máquina llegan intactos. **Un mecanismo plausible no demuestra que ocurriera** — la
+atribución honesta es «puede pasar por esta vía», no «pasó por esta vía».
