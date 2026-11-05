@@ -604,6 +604,25 @@ Si el valor que se lee es el del navegador por defecto, no se aplicó nada.
 `@import` a CSS plano —así entra el reset—, o navegar a la página servida. Un
 `<link>` a `file://` desde `setContent` nunca funciona.
 
+**Segunda comprobación, y es la que faltaba**: que el elemento medido sea el que
+crees, y que el contenedor esté completo.
+
+Un `querySelector` con un nombre que suena bien puede devolver otro nodo, o
+`null`. Y medir un solo hijo de una rejilla mide una rejilla distinta:
+
+```
+medido con la fila completa (nombre, precio, capacidad, botón)
+  fila 390 · envoltorio 320 · input 320 · precio 156 · capacidad 156 · sin desborde
+
+medido con el campo de nombre solo
+  input 364 · envoltorio 364
+```
+
+El segundo número no es el input en su sitio: es el ancho que ocupa el campo
+cuando es el único hijo. **Un número que coincide exactamente con otro elemento
+del mismo contenedor suele ser el elemento equivocado.** Si el input mide lo mismo
+que la fila, se midió la fila.
+
 **Regla general**: un número de layout sin `box-sizing` documentado no significa
 nada. Citar una comparación —«idéntico con y sin la línea»— sobrevive a que el
 número absoluto sea irreproducible; citar el píxel no.

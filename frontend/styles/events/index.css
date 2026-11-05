@@ -770,10 +770,18 @@
    `min-width: 0` is inert here, and that is measured, not assumed. The grid item
    is the WRAPPER (`.events-type-field-name`, `grid-column: 1 / 3`), not this
    input; and the wrapper is `display: flex; flex-direction: column`, so a
-   min-width on a child of a flex column does not affect its width. Verified in
-   Chromium at 390px: identical measured width with and without this line, and no
-   horizontal overflow in either case. The absolute width depends on the grid
-   template around it, so the claim here is the comparison, not a pixel count. */
+   min-width on a child of a flex column does not affect its width.
+
+   Measured in Chromium at 390px with the REAL row from forms.js -- name, price,
+   capacity and the delete button, not the name field alone. A row with only the
+   name field is not the layout, and it measures differently:
+
+     row 390 · wrapper 320 · input 320 · price 156 · cap 156 · no overflow
+     identical with and without min-width: 0
+
+   The absolute numbers depend on the grid template and on having all three
+   fields; the claim here is the comparison. A number that matches another
+   element in the same container is usually the wrong element measured. */
 .events-type-name {
   min-width: 0;
 }
