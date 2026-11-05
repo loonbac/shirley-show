@@ -41,9 +41,24 @@ pub async fn serve_index(
 ) -> Response {
     let host = headers.get(header::HOST).and_then(|value| value.to_str().ok());
 
-    match state.surface.classify(host) {
-        PublicSurface::Door => serve_html(&state.frontend_dir, "index.html").await,
-        _ => serve_html(&state.frontend_dir, "landing/index.html").await,
+    // The panel host serves the panel at its root, the same way the door serves
+    // the door: `panel.shirleyshow.site` is the owner's entry point, and showing
+    // them the public landing there would make the one host they were told to
+    // use look like the site they already had.
+    //
+    // A single-host deployment keeps the landing at `/`: there `panel_host` is
+    // empty, the comparison is false, and nothing changes for the existing setup
+    // or its tests.
+    let serves_panel = match state.surface.classify(host) {
+        PublicSurface::Door => true,
+        PublicSurface::Application => state.surface.is_panel_host(host),
+        _ => false,
+    };
+
+    if serves_panel {
+        serve_html(&state.frontend_dir, "index.html").await
+    } else {
+        serve_html(&state.frontend_dir, "landing/index.html").await
     }
 }
 

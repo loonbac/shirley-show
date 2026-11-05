@@ -312,6 +312,46 @@ async fn test_the_landing_may_read_a_public_ticket_and_nothing_else() {
 }
 
     #[tokio::test]
+    async fn test_the_panel_host_serves_the_panel_at_its_root() {
+        // `panel.shirleyshow.site` is the address the owner is told to use. If it
+        // answers with the public landing, the one host that is supposed to be
+        // the way in looks like the site they already had, and they have to know
+        // the `/panel` path to get anywhere.
+        let (app, _tmp) = app();
+
+        let request = Request::builder()
+            .uri("/")
+            .header(header::HOST, "panel.shirleyshow.site")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        let html = String::from_utf8_lossy(&body);
+
+        assert!(
+            html.contains("/assets/js/main.js"),
+            "the panel host must serve the panel at `/`, not the public landing"
+        );
+
+        // And `/panel` keeps working, because it is where every existing bookmark
+        // and every link inside the app points.
+        let request = Request::builder()
+            .uri("/panel")
+            .header(header::HOST, "panel.shirleyshow.site")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.oneshot(request).await.unwrap().status(),
+            StatusCode::OK,
+            "`/panel` must keep answering: nothing else changed for it"
+        );
+    }
+
+    #[tokio::test]
     async fn test_the_door_host_serves_the_panel_bundle_at_its_root() {
         // The door is a mode of the panel application, not a page of the landing.
         // Serving the landing at `puerta.shirleyshow.site/` looks harmless — it

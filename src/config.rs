@@ -503,6 +503,15 @@ impl SurfaceConfig {
         door_allows_path(method, path)
     }
 
+    /// Whether `host` is the panel host of a configured split.
+    ///
+    /// Exposed instead of comparing `panel_host` at the call site: the comparison
+    /// needs the same normalisation `classify` uses, and duplicating that once is
+    /// how the bracket bug in `host_of` survived its own fix.
+    pub fn is_panel_host(&self, host: Option<&str>) -> bool {
+        !self.panel_host.is_empty() && normalize_host(host).as_deref() == Some(self.panel_host.as_str())
+    }
+
     /// Classifies a request by the `Host` header it arrived with.
     pub fn classify(&self, host: Option<&str>) -> PublicSurface {
         // No split configured: one host serves everything, as before. This is
