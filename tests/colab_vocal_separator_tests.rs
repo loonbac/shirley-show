@@ -75,28 +75,20 @@ fn test_colab_config_defaults_and_env_parsing() {
 }
 
 #[test]
-fn test_colab_config_model_ensembles() {
-    assert_eq!(INSTRUMENTAL_MODELS.len(), 4);
+fn test_colab_config_model_per_mode() {
+    // One model per mode. Measured on the production GPU: averaging four
+    // models gave leak 0.0904 against 0.0632 for the single instrument
+    // model, so the ensemble made separation worse for four times the GPU
+    // time. This test pins the outcome of that measurement, not a preference.
+    assert_eq!(INSTRUMENTAL_MODELS.len(), 1);
     assert_eq!(
         INSTRUMENTAL_MODELS[0],
         "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
     );
-    assert_eq!(
-        INSTRUMENTAL_MODELS[1],
-        "model_bs_roformer_ep_368_sdr_12.9628.ckpt"
-    );
-    assert_eq!(INSTRUMENTAL_MODELS[2], "melband_roformer_inst_v1e.ckpt");
-    assert_eq!(
-        INSTRUMENTAL_MODELS[3],
-        "mel_band_roformer_instrumental_becruily.ckpt"
-    );
 
-    assert_eq!(COROS_MODELS.len(), 4);
-    assert_eq!(COROS_MODELS[0], "bs_roformer_karaoke_frazer_becruily.ckpt");
-    assert_eq!(COROS_MODELS[1], "bs_roformer_karaoke_anvuew.ckpt");
-    assert_eq!(COROS_MODELS[2], "mel_band_roformer_karaoke_gabox_v2.ckpt");
+    assert_eq!(COROS_MODELS.len(), 1);
     assert_eq!(
-        COROS_MODELS[3],
+        COROS_MODELS[0],
         "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt"
     );
 

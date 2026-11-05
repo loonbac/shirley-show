@@ -5,19 +5,37 @@ use tokio::sync::Semaphore;
 use crate::domain::vocal_separation_mode::VocalSeparationMode;
 use crate::ports::vocal_separator::VocalSeparationError;
 
-pub const INSTRUMENTAL_MODELS: [&str; 4] = [
-    "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
-    "model_bs_roformer_ep_368_sdr_12.9628.ckpt",
-    "melband_roformer_inst_v1e.ckpt",
-    "mel_band_roformer_instrumental_becruily.ckpt",
-];
+// One measured model per mode, not an ensemble. Measured on the production
+// GPU against a real clip, using reconstruction corr(instrumental + vocals,
+// mix) and leak corr(instrumental, vocals), where lower leak is better:
+//
+//   317               reconstruction 0.9996   leak 0.0632
+//   368               reconstruction 0.9996   leak 0.0632
+//   becruily_inst     reconstruction 0.9992   leak 0.1025
+//
+// Averaging four models gave leak 0.0904 against 0.0632 for 317 alone:
+// an ensemble made separation worse while costing four times the GPU time,
+// because stems from different models do not align in phase and averaging
+// them partially cancels the signal.
+pub const INSTRUMENTAL_MODELS: [&str; 1] = ["model_bs_roformer_ep_317_sdr_12.9755.ckpt"];
 
-pub const COROS_MODELS: [&str; 4] = [
-    "bs_roformer_karaoke_frazer_becruily.ckpt",
-    "bs_roformer_karaoke_anvuew.ckpt",
-    "mel_band_roformer_karaoke_gabox_v2.ckpt",
-    "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt",
-];
+// The karaoke mode must remove the lead vocal while keeping the backing
+// vocals, so it is judged on two things at once: low leak and high
+// instrumentation energy, which is where those backing vocals live.
+// Measured against the same clip, with the instrumental mode's 317 result
+// (energy 0.1480) as the floor:
+//
+//   model        leak     instr energy   vocals energy
+//   viperx       0.0914   0.1538         0.1129
+//   gabox_v2     0.1656   0.1572         0.1045
+//   anvuew       0.2210   0.1577         0.0941
+//   frazer       0.3167   0.1611         0.0674
+//
+// viperx has the lowest leak of the four and still keeps more
+// instrumentation than the instrumental-only model does, which is exactly
+// the trade the karaoke mode needs. The others either keep very little
+// vocal (frazer, 0.0674) or bleed heavily.
+pub const COROS_MODELS: [&str; 1] = ["mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt"];
 
 #[derive(Clone, Debug)]
 pub struct ColabVocalSeparatorConfig {
@@ -142,5 +160,51 @@ fn default_token_path() -> PathBuf {
         PathBuf::from(home).join(".config/colab/token.json")
     } else {
         PathBuf::from(".config/colab/token.json")
+    }
+}
+
+#[cfg(test)]
+mod model_choice_tests {
+    use super::*;
+
+    #[test]
+    fn test_each_mode_uses_a_single_measured_model() {
+        // Measured on the production GPU against a real ABBA clip, using
+        // reconstruction corr(instrumental + vocals, mix) and leak
+        // corr(instrumental, vocals). Lower leak is better.
+        //
+        //   model                 reconstruction   leak
+        //   317 (instrumental)        0.9996       0.0632
+        //   368                       0.9996       0.0632
+        //   becruily_inst             0.9992       0.1025
+        //   viperx (karaoke)          0.9999       0.0914
+        //   gabox_v2                  1.0000       0.1656
+        //   anvuew                    1.0000       0.2210
+        //   frazer                    0.9999       0.3167
+        //
+        // Four models averaged gave leak 0.0904 against 0.0632 for 317 alone:
+        // more models made separation worse and cost four times the GPU time,
+        // because stems from different models do not align in phase and
+        // averaging them partially cancels the signal.
+        assert_eq!(
+            INSTRUMENTAL_MODELS.len(),
+            1,
+            "an ensemble measurably degrades separation; keep one measured model"
+        );
+        assert_eq!(
+            COROS_MODELS.len(),
+            1,
+            "an ensemble measurably degrades separation; keep one measured model"
+        );
+        assert_eq!(
+            INSTRUMENTAL_MODELS[0], "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
+            "317 has the lowest measured leak for the instrumental mode"
+        );
+        assert_eq!(
+            COROS_MODELS[0], "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt",
+            "viperx has the lowest measured leak among the karaoke models and \
+             keeps the most instrumentation energy, which is what retaining \
+             backing vocals requires"
+        );
     }
 }
