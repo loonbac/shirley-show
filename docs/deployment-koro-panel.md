@@ -855,6 +855,39 @@ Medido en esta rama, el mismo fichero a través de cuatro commits:
 
 `HEAD` cambió cuatro veces; el contenido, ninguna.
 
+
+#### Medir con el método bueno, no con el que está a mano
+
+Una consulta con un literal acentuado no significa lo mismo en todas las capas por
+las que pasa. Medido sobre la base real:
+
+```
+literal correcto    "No ingresó"   ->  0   (correcto: ninguna ingresada)
+literal sin tilde   "No ingreso"   ->  8   (TODAS figuran ingresadas)
+literal mojibake    "No ingresÃ³"   ->  8   (TODAS figuran ingresadas)
+```
+
+**Un `!=` con el literal corrupto no falla con un error: devuelve todas las filas.**
+Y la dirección del engaño es la peor posible, porque se lee como «todo el mundo ya
+entró». Un informe hecho así dice lo contrario de la verdad con aspecto de dato.
+
+La regla: **abrir SQLite con Python y comparar valores en Python**, nunca un
+literal acentuado pasado por capas de comillas, `ssh`, `sh -c` y `json.dumps`. El
+script lo hace bien por construcción: los literales van como **parámetro** `?`
+(`sys.argv`-style binding), no interpolados en el SQL.
+
+Y en una guarda, la dirección importa más que la detección:
+
+```
+guarda:  estado_checkin != ?        literal corrupto -> devuelve todas -> ABORTA
+```
+
+Falla **cerrado**. Una guarda que fallara abierto —dejando pasar el borrado porque
+la comparación no coincide con nada— sería peor que no tenerla. Pero un fallo
+cerrado permanente también es un problema: **aborta siempre y parece protección**.
+Por eso la guarda necesita su control negativo, el caso en que se la ve **no**
+abortar y borrar correctamente.
+
 #### «Host» es ambiguo, y por eso se enumeran tres sitios
 
 Decir «el host no tiene copias» es ambiguo: puede ser la máquina donde hablas o el
