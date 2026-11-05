@@ -185,6 +185,19 @@ mod wiring {
     }
 
     #[tokio::test]
+    async fn test_healthcheck_host_reaches_the_api() {
+        // The image's HEALTHCHECK calls `/api/presentations` on `localhost`.
+        // If this returns 404 the container is unhealthy and Docker restarts
+        // it forever. This is the exact request the healthcheck makes.
+        let (app, _tmp) = app_with_split();
+        assert_eq!(
+            status_for(app, "localhost:3001", "/api/presentations").await,
+            StatusCode::OK,
+            "the container healthcheck must pass, or the deploy loops"
+        );
+    }
+
+    #[tokio::test]
     async fn test_panel_host_reaches_the_api() {
         let (app, _tmp) = app_with_split();
         assert_eq!(
@@ -210,4 +223,32 @@ fn test_single_host_deployment_is_untouched() {
         single.classify(Some("127.0.0.1:3000")),
         PublicSurface::Application
     );
+}
+
+#[test]
+fn test_loopback_hosts_are_the_application() {
+    // The container healthcheck runs
+    //   curl -f http://localhost:3001/api/presentations
+    // so `localhost` and the loopback addresses arrive on the API with a Host
+    // that is neither the public site nor the panel. Treating them as closed
+    // makes the container report unhealthy, and Docker restarts it in a loop.
+    let cfg = SurfaceConfig::new(
+        Some("https://shirleyshow.site"),
+        Some("https://panel.shirleyshow.site"),
+    );
+
+    for host in [
+        Some("localhost"),
+        Some("localhost:3001"),
+        Some("127.0.0.1"),
+        Some("127.0.0.1:3001"),
+        Some("[::1]"),
+        Some("[::1]:3001"),
+    ] {
+        assert_eq!(
+            cfg.classify(host),
+            PublicSurface::Application,
+            "host {host:?} must reach the API: the container healthcheck depends on it"
+        );
+    }
 }

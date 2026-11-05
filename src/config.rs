@@ -488,6 +488,14 @@ impl SurfaceConfig {
             return PublicSurface::Application;
         }
 
+        // Loopback is the application, never the public site. The container
+        // healthcheck calls `curl -f http://localhost:3001/api/presentations`,
+        // so closing these hosts would mark the container unhealthy and Docker
+        // would restart it in a loop.
+        if is_loopback(&host) {
+            return PublicSurface::Application;
+        }
+
         if !self.site_host.is_empty()
             && (host == self.site_host || host == format!("www.{}", self.site_host))
         {
@@ -509,10 +517,30 @@ fn host_of(base_url: Option<&str>) -> Option<String> {
     (!host.is_empty()).then_some(host)
 }
 
+/// Whether a normalized host refers to this machine.
+///
+/// The IPv6 forms are normalized without brackets, so `[::1]:3001` arrives as
+/// `::1` and `[::1]` as `::1`.
+fn is_loopback(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+        || host.starts_with("127.")
+}
+
 /// Lowercases a `Host` header and drops any port.
 fn normalize_host(host: Option<&str>) -> Option<String> {
     let host = host?.trim().to_ascii_lowercase();
-    let host = host.split(':').next()?.trim();
+    // An IPv6 literal looks like `[::1]:3001`; splitting on the first colon
+    // would leave `[`, so the brackets are handled before the port.
+    let host = if host.starts_with('[') {
+        match host.find(']') {
+            Some(end) => host[..=end].to_string(),
+            None => host,
+        }
+    } else {
+        host.split(':').next().unwrap_or("").to_string()
+    };
+    let host = host.trim();
     (!host.is_empty()).then(|| host.to_string())
 }
 
