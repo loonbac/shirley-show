@@ -259,7 +259,6 @@
     </div>
     <div class="pres__footer-marca">Shirley Show</div>
     <div class="pres__footer-copy">© <span id="anio">2026</span> Shirley Show · Música en vivo</div>
-    <div style="margin-top:14px"><a class="pres__footer-acceso" href="/panel">Acceso al sistema</a></div>
   </footer>
 
   <!-- Full-screen viewer: the original gallery opened each tile -->
@@ -323,18 +322,5 @@
   document.getElementById('anio').textContent = new Date().getFullYear();
 </script>
 
-<!--
-  Compatibility. Ticket links already shared use the hash (#/ticket/<token>),
-  and a hash never reaches the server: only the client can forward it. If this
-  block is ever removed, tickets already printed stop working silently.
--->
-<script>
-  (function () {
-    var panelViews = /^#\/(ticket|eventos|evento|presentations|presentacion|puerta|panel)\b/;
-    if (panelViews.test(window.location.hash)) {
-      window.location.replace('/panel' + window.location.hash);
-    }
-  })();
-</script>
 </body>
 </html>

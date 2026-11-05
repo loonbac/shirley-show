@@ -34,7 +34,7 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
     expect(ticket.scan_token).toBeTruthy();
 
     // 2. Navegar a la vista pública de la entrada y descargar la foto
-    await page.goto(`/#/ticket/${ticket.scan_token}`);
+    await page.goto(`/panel#/ticket/${ticket.scan_token}`);
     await expect(page.locator('.public-ticket-event-title')).toContainText('Concierto VIP Shirley Show');
     await expect(page.locator('.public-ticket-qr-box svg')).toBeVisible();
 
@@ -109,7 +109,7 @@ test.describe('Modo Puerta y Escaneo de QR Musical E2E', () => {
     expect(qrValidation.cropDecoded).toBe('e3b0c44298fc1c149afbf4c8996fb924');
 
     // 4. Probar el Modo Puerta: navegar a #/puerta/:id
-    await page.goto(`/#/puerta/${evento.id}`);
+    await page.goto(`/panel#/puerta/${evento.id}`);
     await expect(page.locator('.door-camera-guide')).toBeVisible();
 
     // Obtener el secreto real de la entrada de Valeria desde SQLite
