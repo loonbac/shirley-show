@@ -634,6 +634,33 @@ SELECT nombre_comprador, estado_checkin FROM entradas
 Quédate con la segunda: una lista protege contra borrar de más **si está
 completa**; esta protege aunque no lo esté.
 
+#### Y la que no depende de la etiqueta, sino del hecho
+
+`estado_checkin` es el estado **declarado**. El esquema guarda además el hecho:
+
+```sql
+CHECK (
+  (estado_checkin = 'No ingresó' AND hora_ingreso IS NULL)
+  OR
+  (estado_checkin = 'Ingresó' AND hora_ingreso IS NOT NULL)
+)
+```
+
+Hoy las dos fuentes coinciden por construcción, así que cualquiera de las dos
+detecta un ingreso. Pero si una migración futura relajara ese `CHECK`, una fila
+podría quedar con `estado_checkin = 'No ingresó'` y `hora_ingreso` puesta: la
+guarda por estado la dejaría pasar, y borrarla destruiría un ingreso real.
+
+Comprueba las dos, con `OR`:
+
+```sql
+SELECT nombre_comprador, estado_checkin, hora_ingreso FROM entradas
+ WHERE evento_id = ? AND (estado_checkin != 'No ingresó' OR hora_ingreso IS NOT NULL);
+```
+
+La etiqueta puede estar mal escrita o desactualizada; la hora de ingreso, si
+existe, es porque alguien entró.
+
 #### Antes de ejecutar
 
 - `SELECT` que cuenta las filas del evento antes y después.
