@@ -607,6 +607,18 @@ Si el valor que se lee es el del navegador por defecto, no se aplicó nada.
 **Segunda comprobación, y es la que faltaba**: que el elemento medido sea el que
 crees, y que el contenedor esté completo.
 
+Y una tercera, que salió de cuatro mediciones fallidas del mismo atributo: **el
+contenedor no es solo el padre directo.** Añadir o quitar el `<section>` que
+envuelve la fila cambia el ancho del input:
+
+```
+con .events-types-section     fila 364  envoltorio 294  input 294
+sin la seccion                fila 390  envoltorio 320  input 320
+```
+
+Los dos son «el mismo componente» y miden distinto por 26 px. Un número sin el
+árbol completo que lo rodea no es comparable con otro número, ni siquiera propio.
+
 Un `querySelector` con un nombre que suena bien puede devolver otro nodo, o
 `null`. Y medir un solo hijo de una rejilla mide una rejilla distinta:
 
