@@ -420,10 +420,12 @@ if [ "$cmd" = "start" ]; then
         exit 1
     fi
     if [ -f "{fail_gpu_str}" ]; then
-        broken=$(cat "{fail_gpu_str}")
-        case "$*" in
-            *"--gpu $broken"*) exit 1 ;;
-        esac
+        while IFS= read -r broken || [ -n "$broken" ]; do
+            [ -z "$broken" ] && continue
+            case "$*" in
+                *"--gpu $broken"*) exit 1 ;;
+            esac
+        done < "{fail_gpu_str}"
     fi
     echo "start $@" >> "{log_str}"
     echo '{{"session":"sess-mock-42","proxyUrl":"http://127.0.0.1:8080"}}'
@@ -816,7 +818,7 @@ async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
     cfg.gpu_type = "g4".to_string();
-    cfg.gpu_fallback = Some("l4".to_string());
+    cfg.gpu_fallbacks = vec!["l4".to_string()];
     let sep = ColabVocalSeparator::new(cfg);
 
     let output_mp3 = fixture.temp_dir.path().join("fallback_out.mp3");
@@ -861,7 +863,7 @@ async fn test_start_without_fallback_still_reports_colab_unavailable() {
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
     cfg.gpu_type = "g4".to_string();
-    cfg.gpu_fallback = None;
+    cfg.gpu_fallbacks = Vec::new();
     let sep = ColabVocalSeparator::new(cfg);
 
     let output_mp3 = fixture.temp_dir.path().join("no_fallback_out.mp3");
@@ -874,5 +876,47 @@ async fn test_start_without_fallback_still_reports_colab_unavailable() {
 
     let res = sep.separate(req).await;
     assert_eq!(res.unwrap_err(), VocalSeparationError::ColabUnavailable);
+    assert_eq!(gpu.available_permits(), 1);
+}
+
+/// Which accelerators answer changes within the hour: G4 and A100 both refused
+/// in the same window that L4 answered. A single fallback only moves the
+/// failure one step, so the chain must keep going until one assigns.
+#[tokio::test]
+async fn test_start_walks_the_whole_gpu_chain_until_one_assigns() {
+    let fixture = MockColabEnv::new_fixture();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\na100\n").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let mut cfg = fixture.make_config(gpu.clone());
+    cfg.gpu_type = "g4".to_string();
+    cfg.gpu_fallbacks = vec!["a100".to_string(), "l4".to_string()];
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let output_mp3 = fixture.temp_dir.path().join("chain_out.mp3");
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: output_mp3,
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(120),
+    };
+
+    let res = sep.separate(req).await;
+    assert!(res.is_ok(), "the chain must reach a working GPU, got: {res:?}");
+
+    let log = fixture.read_log();
+    let starts: Vec<&str> = log
+        .lines()
+        .filter(|l| l.starts_with("start "))
+        .collect();
+    assert_eq!(
+        starts.len(),
+        1,
+        "only the GPU that assigned may be logged as started, log was: {log}"
+    );
+    assert!(
+        starts[0].contains("--gpu l4"),
+        "the chain must end on the working GPU, log was: {log}"
+    );
     assert_eq!(gpu.available_permits(), 1);
 }

@@ -42,13 +42,13 @@ pub struct ColabVocalSeparatorConfig {
     pub colab_bin: PathBuf,
     pub token_path: PathBuf,
     pub gpu_type: String,
-    /// GPU tried when `gpu_type` fails to assign. Colab can list an accelerator
-    /// as available while its assignment endpoint hangs until the client gives
-    /// up, which is indistinguishable from an outage to the user. G4 (RTX PRO
-    /// 6000 Blackwell) is the measured fastest option and stays the primary;
-    /// this is the escape hatch that keeps a separation from failing outright.
-    /// Set the variable to an empty string to disable the fallback.
-    pub gpu_fallback: Option<String>,
+    /// GPUs tried, in order, after `gpu_type` fails to assign. Colab lists an
+    /// accelerator as available while its assignment endpoint hangs until the
+    /// client gives up, and which accelerators are reachable changes over
+    /// minutes: G4 and A100 both refused within the same hour that L4 answered.
+    /// A single fallback only moves the failure one step, so this is a chain.
+    /// Empty disables it entirely.
+    pub gpu_fallbacks: Vec<String>,
     pub overlap: u32,
     /// Inference batch size. Measured on the production GPU: 25s at batch 1,
     /// 8.5s at batch 8, and flat above that (8.5s at 32 and 64), so 8 is the
@@ -74,16 +74,18 @@ impl ColabVocalSeparatorConfig {
 
         let gpu_type = std::env::var("SHIRLEY_COLAB_GPU").unwrap_or_else(|_| "g4".to_string());
 
-        let gpu_fallback = match std::env::var("SHIRLEY_COLAB_GPU_FALLBACK") {
-            Ok(raw) => {
-                let trimmed = raw.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            }
-            Err(_) => Some("l4".to_string()),
+        // A100 is the faster machine when it answers; L4 is the floor that has
+        // answered every time it was asked. Order matters: the first one that
+        // assigns wins, so the expensive-but-fast option is tried before the
+        // slow-but-reliable one.
+        let gpu_fallbacks: Vec<String> = match std::env::var("SHIRLEY_COLAB_GPU_FALLBACK") {
+            Ok(raw) => raw
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect(),
+            Err(_) => vec!["a100".to_string(), "l4".to_string()],
         };
 
         let overlap = std::env::var("SHIRLEY_COLAB_OVERLAP")
@@ -118,7 +120,7 @@ impl ColabVocalSeparatorConfig {
             colab_bin,
             token_path,
             gpu_type,
-            gpu_fallback,
+            gpu_fallbacks,
             overlap,
             batch_size,
             timeout_secs,

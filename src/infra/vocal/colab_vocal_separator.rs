@@ -859,10 +859,10 @@ impl VocalSeparator for ColabVocalSeparator {
                     // giving up; the primary GPU stays first because it is the
                     // measured fastest option.
                     let mut candidates = vec![this.config.gpu_type.clone()];
-                    if let Some(fallback) = this.config.gpu_fallback.as_ref()
-                        && *fallback != this.config.gpu_type
-                    {
-                        candidates.push(fallback.clone());
+                    for fallback in &this.config.gpu_fallbacks {
+                        if !candidates.contains(fallback) {
+                            candidates.push(fallback.clone());
+                        }
                     }
 
                     let mut started = None;
