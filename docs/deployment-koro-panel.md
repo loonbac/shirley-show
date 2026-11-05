@@ -728,3 +728,57 @@ existe, es porque alguien entró.
 Antes de borrar, no basta preguntarse «¿es la fila que quiero?». Hay que
 preguntarse además «¿ha producido ya un efecto que no puedo reconstruir?», y
 «¿depende mi lista de que esté completa?».
+
+#### Procedimiento del borrado, sin copias ambiguas
+
+Una copia en `/tmp` no tiene dueño ni historial, y una copia vieja es **más
+peligrosa que ninguna**: parece el script y no tiene las guardas. El procedimiento
+que evita las dos cosas:
+
+```bash
+# 1. Sacar el script del commit, no de un /tmp
+git show <commit>:scripts/purge-test-entries.py > /tmp/purge-<commit>.py
+md5sum /tmp/purge-<commit>.py          # anotar: lo prueba todo lo demás
+
+# 2. Copiarlo y comprobar que llegó igual
+scp /tmp/purge-<commit>.py root@host:/tmp/purge-<commit>.py
+ssh root@host 'md5sum /tmp/purge-<commit>.py'   # debe coincidir
+ssh root@host 'docker cp /tmp/purge-<commit>.py panel-app-shir:/tmp/purge.py'
+
+# 3. En seco, siempre
+ssh root@host 'docker exec panel-app-shir python3 /tmp/purge.py'
+
+# 4. Ejecutar solo si el seco dijo lo esperado
+ssh root@host 'docker exec -e DRY_RUN=0 panel-app-shir python3 /tmp/purge.py'
+
+# 5. Borrar la copia y comprobar que no quedan otras
+ssh root@host 'docker exec --user root panel-app-shir rm -f /tmp/purge.py; rm -f /tmp/purge-<commit>.py'
+ssh root@host 'ls /tmp/*.py 2>/dev/null; docker exec panel-app-shir sh -c "ls /tmp/*.py 2>/dev/null"'
+```
+
+El nombre lleva el commit: si aparece un `/tmp/purge-<otro>.py`, es viejo por
+definición.
+
+**El paso 5 no es cortesía.** Dos veces en esta sesión una limpieza se declaró
+completa y dejó una copia, porque se borraron las rutas recordadas y no lo que
+había en el directorio. `rm -f` de un nombre inexistente devuelve 0 y refuerza la
+falsa sensación de limpieza; `ls` es el instrumento.
+
+**Y el acta cita el commit, no el md5 suelto.** `git show <commit>:<ruta> | md5sum`
+se recalcula desde cualquier máquina: ata contenido **y** procedencia. Un md5
+apunta solo contenido, y no dice de dónde salió.
+
+#### Contar sentencias no es contar texto
+
+En el mismo fichero, `grep -c 'raise SystemExit'` daba **5** y hay **4**: el quinto
+era la frase de un comentario que explicaba el recuento. Para contar sentencias,
+el AST:
+
+```bash
+python3 -c "import ast,sys; print(len([n for n in ast.walk(ast.parse(open(sys.argv[1]).read())) if isinstance(n, ast.Raise)]))" fichero.py
+```
+
+Y el error simétrico: comparar dos módulos enteros para probar «solo cambió la
+cabecera» da distinto **porque el docstring es un nodo**. Ahí lo correcto es
+excluirlo y comparar el resto. **Las dos son la misma falta: medir el artefacto
+entero cuando importa una parte, o medir el texto cuando importa el código.**
