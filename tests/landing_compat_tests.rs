@@ -81,25 +81,48 @@ fn the_landing_does_not_load_the_panel_bundle() {
 }
 
 #[test]
-fn test_ticket_qr_payload_does_not_embed_a_domain() {
-    // The QR code printed on a ticket holds the 32-hex secret and nothing else,
-    // so moving the site to another domain cannot invalidate a printed ticket.
-    let ticket = fs::read_to_string("src/domain/ticketing/ticket.rs")
-        .expect("read ticket.rs");
+fn test_the_door_accepts_both_ticket_payload_forms() {
+    // Two forms describe the same credential and the door has to open for both:
+    //
+    //   1. the bare 32-hex secret, which is what every ticket printed so far
+    //      carries. It must keep working: a printed ticket cannot be reissued.
+    //   2. the same secret wrapped in a URL, for tickets printed from now on.
+    //
+    // What must NOT happen is mining a 32-hex prefix out of the buyer's link
+    // (`st_` + 64 hex). That string contains 32 hex in a row, so a naive
+    // `match(/[0-9a-fA-F]{32}/)` extracts a plausible secret that belongs to
+    // nobody and refuses a ticket that is perfectly valid.
+    let controller = fs::read_to_string("frontend/js/modules/events/door-controller.js")
+        .expect("read door-controller.js");
 
     assert!(
-        ticket.contains("cadena hexadecimal de 32 caracteres"),
-        "the QR secret must stay a 32-character hex string"
+        controller.contains("DOOR_SECRET_PATTERN"),
+        "the door must parse the credential with an explicit pattern"
     );
 
-    // A URL in the QR payload would bind printed tickets to one domain.
-    let qr_block_start = ticket
-        .find("QrSecret")
-        .expect("the ticket must have a QR secret type");
-    let qr_block = &ticket[qr_block_start..ticket.len().min(qr_block_start + 4000)];
+    // The boundaries are the whole fix: without the lookahead a 40-hex string is
+    // sliced into a valid-looking secret, and without the lookbehind a longer
+    // run is matched from an arbitrary offset.
     assert!(
-        !qr_block.contains("https://") && !qr_block.contains("http://"),
-        "the QR payload must never embed a domain"
+        controller.contains("(?!["),
+        "the pattern must not slice a 32-hex prefix out of a longer hex run"
+    );
+    assert!(
+        controller.contains("(?:"),
+        "the pattern must anchor to a boundary before the secret"
+    );
+    assert!(
+        controller.contains("st_[0-9a-fA-F]{64}"),
+        "the door must recognise the buyer's link and name it, instead of \
+         reporting a printing defect that does not exist"
+    );
+
+    // The printed payload stays the 32-hex secret, so moving the site to another
+    // domain cannot invalidate a ticket already in someone's hands.
+    let ticket = fs::read_to_string("src/domain/ticketing/ticket.rs").expect("read ticket.rs");
+    assert!(
+        ticket.contains("cadena hexadecimal de 32 caracteres"),
+        "the printed secret stays 32 hex: retrocompatibility is not optional"
     );
 }
 
