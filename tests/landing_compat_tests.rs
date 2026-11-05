@@ -217,3 +217,37 @@ fn the_public_ticket_never_carries_the_raw_scan_secret() {
         "the buyer still needs the QR image: it is their entry credential"
     );
 }
+
+#[test]
+fn the_printed_qr_payload_is_decided_by_the_server_not_the_client() {
+    // The ticket photo is drawn in the browser, so the QR payload could easily be
+    // derived from `window.location` there. That would print the *panel* domain,
+    // which sits behind Cloudflare Access: a buyer scanning their own ticket would
+    // land on a login screen instead of their ticket.
+    //
+    // The server owns the payload and the client only draws it.
+    let photo = fs::read_to_string("frontend/js/modules/events/ticket-photo.js")
+        .expect("read ticket-photo.js");
+
+    assert!(
+        photo.contains("entrada.qr_payload"),
+        "the printed QR payload must come from the server"
+    );
+
+    let qr_value_start = photo
+        .find("let valorQR")
+        .expect("the photo builder must compute the QR value");
+    let qr_value_block = &photo[qr_value_start..photo.len().min(qr_value_start + 600)];
+
+    assert!(
+        !qr_value_block.contains("window.location") && !qr_value_block.contains("location.origin"),
+        "the QR payload must never be derived from the browser's own location"
+    );
+
+    // And the server must actually send it.
+    let dto = fs::read_to_string("src/handlers/ticketing/dto.rs").expect("read dto.rs");
+    assert!(
+        dto.contains("pub qr_payload: Option<String>"),
+        "the authenticated DTO must carry the server-decided payload"
+    );
+}

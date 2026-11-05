@@ -172,8 +172,15 @@ export async function generarFotoEntrada(entrada, evento) {
     throw new Error("Esta entrada está pendiente de pago. Debes confirmar el pago antes de generar la imagen.");
   }
 
-  // Valor a codificar en el QR: el mismo que valida la puerta (codigo_qr)
+  // Valor a codificar en el QR: el mismo que valida la puerta (codigo_qr).
+  //
+  // `qr_payload` manda cuando viene: el servidor decide si la entrada nueva lleva
+  // el secreto envuelto en su URL publica o desnudo, y el cliente solo lo dibuja.
+  // Derivarlo aqui desde `window.location` imprimiria el dominio del panel, que
+  // esta detras de Access: el comprador que escaneara su propia entrada acabaria
+  // en una pantalla de login.
   let valorQR =
+    entrada.qr_payload ||
     entrada.codigo_qr ||
     entrada.qr ||
     "";

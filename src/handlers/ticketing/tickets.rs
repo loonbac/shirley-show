@@ -39,7 +39,7 @@ pub async fn list(
 
     let entradas = tickets
         .iter()
-        .map(|t| TicketDto::from_domain(t, false))
+        .map(|t| TicketDto::from_domain(t, false, state.public_base_url.as_deref()))
         .collect();
 
     Ok(Json(ListTicketsResponse { entradas }))
@@ -93,7 +93,7 @@ pub async fn sell(
     };
     let entradas = tickets
         .iter()
-        .map(|t| TicketDto::from_domain(t, true))
+        .map(|t| TicketDto::from_domain(t, true, state.public_base_url.as_deref()))
         .collect();
 
     (StatusCode::CREATED, Json(SellTicketsResponse { entradas })).into_response()
@@ -105,7 +105,7 @@ pub async fn get(
 ) -> Result<Json<TicketResponse>, TicketingError> {
     let ticket = state.ticketing.get_ticket.execute(&id)?;
     Ok(Json(TicketResponse {
-        entrada: TicketDto::from_domain(&ticket, true),
+        entrada: TicketDto::from_domain(&ticket, true, state.public_base_url.as_deref()),
     }))
 }
 
@@ -141,7 +141,7 @@ pub async fn update_contact(
     };
 
     Json(TicketResponse {
-        entrada: TicketDto::from_domain(&ticket, false),
+        entrada: TicketDto::from_domain(&ticket, false, state.public_base_url.as_deref()),
     })
     .into_response()
 }
@@ -160,7 +160,7 @@ pub async fn confirm_payment(
 ) -> Result<Json<TicketResponse>, TicketingError> {
     let ticket = state.ticketing.confirm_ticket_payment.execute(&id)?;
     Ok(Json(TicketResponse {
-        entrada: TicketDto::from_domain(&ticket, true),
+        entrada: TicketDto::from_domain(&ticket, true, state.public_base_url.as_deref()),
     }))
 }
 
