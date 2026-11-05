@@ -110,15 +110,31 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
         self
     }
 
-    pub fn execute(&self, scan_token: &str) -> Result<PublicTicketDto, AppError> {
-        let ticket = match self.ticket_repo.get_ticket_by_scan_token(scan_token)? {
+    /// Resolves the ticket behind either credential the buyer can arrive with.
+    ///
+    /// The buyer is never sent a link: what they receive is the photo of their
+    /// ticket, and the QR inside it carries `<base>/#/ticket/<codigo_qr>`. So the
+    /// 32-hex door secret is the *only* thing that reaches this route from a
+    /// phone camera, and refusing it here left the buyer staring at a landing
+    /// page with no ticket at all -- the one document they own, invisible.
+    ///
+    /// `scan_token` stays first because it is the narrower credential: it is
+    /// minted per ticket for the buyer's link and is not what the door compares.
+    /// Falling back to `codigo_qr` does not widen what a stranger can read: the
+    /// QR the buyer already holds is the door credential, and this route answers
+    /// with the same ticket either way.
+    pub fn execute(&self, token: &str) -> Result<PublicTicketDto, AppError> {
+        let ticket = match self.ticket_repo.get_ticket_by_scan_token(token)? {
             Some(t) => t,
-            None => {
-                return Err(AppError::not_found(
-                    "ticket_not_found",
-                    "Entrada no encontrada",
-                ));
-            }
+            None => match self.ticket_repo.get_ticket_by_qr_secret(token)? {
+                Some(t) => t,
+                None => {
+                    return Err(AppError::not_found(
+                        "ticket_not_found",
+                        "Entrada no encontrada",
+                    ));
+                }
+            },
         };
 
         let event = match self.event_repo.get_event(&ticket.evento_id)? {
