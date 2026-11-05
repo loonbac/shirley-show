@@ -123,10 +123,17 @@ async fn main() {
 
     println!("\n=== paso 3: script remoto ===");
     let script_path = work.join("remote.py");
+    // Same argument order as `colab_vocal_separator.rs`, and the same defaults
+    // the config uses (SHIRLEY_COLAB_OVERLAP=12, SHIRLEY_COLAB_BATCH_SIZE=8).
+    // This example went stale when `generate_remote_script` gained `batch_size`,
+    // and `cargo test` does not compile `examples/` -- only `cargo build`, which
+    // the Dockerfile runs in release mode -- so the breakage was invisible to
+    // every "suite is green" report.
     let code = generate_remote_script(
         mode,
         models,
         12,
+        8,
         "probe_password_123",
         "/content/input_audio",
     );

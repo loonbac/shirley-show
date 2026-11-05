@@ -118,9 +118,27 @@ console.log('Running Agent Chat UI Components and Behaviors Test Harness...');
   // Safe escaping verification: script and img tags must NOT exist as element nodes!
   assert.equal(assistantBubble.el.querySelectorAll('script').length, 0, 'No active script tags allowed');
   assert.equal(assistantBubble.el.querySelectorAll('img').length, 0, 'No active img tags allowed');
-  // Text content must preserve literal text and newlines
+  // Text content must preserve the literal characters, escaped.
   assert.ok(assistantBubble.el.textContent.includes("<script>alert('xss')</script>"));
-  assert.ok(assistantBubble.el.textContent.includes("Verso 1\nVerso 2"));
+
+  // Newlines become paragraph structure, not a literal "\n" in `textContent`.
+  //
+  // This assertion used to demand `"Verso 1\nVerso 2"`, which was true while the
+  // bubble set `textContent` directly. `a0a87ca` (PR #38, "render assistant
+  // replies as Markdown") made the assistant bubble go through the Markdown
+  // renderer, and that turns each line into its own paragraph -- correct for a
+  // chat surface, and the reason the old assertion started failing.
+  //
+  // The product is not broken: the three safety assertions above still hold. The
+  // assertion was pinned to the old producer. What matters is that both lines are
+  // present and that they are separate blocks.
+  const texto = assistantBubble.el.textContent;
+  assert.ok(texto.includes("Verso 1"), "the first line must survive rendering");
+  assert.ok(texto.includes("Verso 2"), "the second line must survive rendering");
+  assert.ok(
+    !texto.includes("Verso 1\nVerso 2"),
+    "newlines must become block structure, not stay literal inside one text node"
+  );
   // Tool card rendered
   assert.ok(assistantBubble.el.querySelector('.agent-tool-card') !== null);
 
@@ -321,8 +339,23 @@ console.log('Running Agent Chat UI Components and Behaviors Test Harness...');
       timestamp: Date.now(),
     },
   });
-  const textContent = lyricBubble.el.querySelector('.agent-message-text').textContent;
-  assert.equal(textContent, stanzas, 'Lyrics must strictly preserve multi-line breaks');
+  // Lyrics must keep every line, as separate blocks.
+  //
+  // This used to compare `textContent` against the raw string, which held while
+  // the bubble set `textContent` directly. Since `a0a87ca` (PR #38) the assistant
+  // bubble renders Markdown, and a blank line between stanzas becomes a paragraph
+  // break: the words survive, the literal "\n" does not. Asserting the structure
+  // is what the reader actually receives; asserting the raw bytes was testing the
+  // old producer.
+  const textEl = lyricBubble.el.querySelector('.agent-message-text');
+  const textContent = textEl.textContent;
+  for (const linea of ['Estrofa 1:', 'Bajo la luz dorada del escenario', 'Estrofa 2:', 'Shirley canta su melodía']) {
+    assert.ok(textContent.includes(linea), `lyric line must survive rendering: ${linea}`);
+  }
+  assert.ok(
+    textEl.querySelectorAll('p').length >= 2,
+    'the blank line between stanzas must become separate blocks, not one run of text'
+  );
 
   // C. Disabled state during pending prevents duplicate submits
   let sendCount = 0;
