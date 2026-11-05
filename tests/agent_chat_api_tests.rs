@@ -68,6 +68,9 @@ fn setup_test_app() -> (axum::Router, AppState, TempDir) {
         separation_timeout_secs: 600,
         remote_separation_timeout_secs: 1500,
         joshua_pc: None,
+        // Existing single-host behaviour: these requests carry no Host header,
+        // and the split is a deployment option, not a default.
+        surface: shirley_show::config::SurfaceConfig::new(None, None),
     };
     std::fs::create_dir_all(&config.data_dir).unwrap();
     std::fs::create_dir_all(&config.frontend_dir).unwrap();

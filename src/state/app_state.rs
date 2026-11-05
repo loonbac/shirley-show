@@ -45,6 +45,8 @@ pub struct AgentRuntime {
 #[derive(Clone)]
 pub struct AppState {
     pub pool: DbPool,
+    /// Decides what each request may reach, by its `Host` header.
+    pub surface: crate::config::SurfaceConfig,
     pub storage: Arc<LocalAudioStorage>,
     pub frontend_dir: PathBuf,
     pub item_repo: Arc<SqliteShowItemRepository>,
@@ -106,6 +108,7 @@ impl AppState {
             separation_timeout_secs: 600,
             remote_separation_timeout_secs: 1500,
             joshua_pc: None,
+            surface: crate::config::SurfaceConfig::new(None, None),
         });
         Self::new_with_all_components_and_config(
             pool,
@@ -231,6 +234,7 @@ impl AppState {
         };
         Self {
             pool,
+            surface: config.surface.clone(),
             destructive_registry,
             storage,
             frontend_dir: PathBuf::from("frontend"),

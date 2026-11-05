@@ -182,6 +182,8 @@ pub struct Config {
     pub separation_timeout_secs: u64,
     pub remote_separation_timeout_secs: u64,
     pub joshua_pc: Option<JoshuaPcConfig>,
+    /// Which host serves the public landing and which one serves the panel.
+    pub surface: SurfaceConfig,
 }
 
 impl Config {
@@ -200,6 +202,11 @@ impl Config {
             .unwrap_or_else(|_| PathBuf::from("frontend"));
 
         let groq = GroqConfig::from_env();
+
+        let surface = SurfaceConfig::new(
+            env::var("SHIRLEY_PUBLIC_BASE_URL").ok().as_deref(),
+            env::var("SHIRLEY_PANEL_BASE_URL").ok().as_deref(),
+        );
 
         let yt_dlp_bin = env::var("YT_DLP_BIN").ok().and_then(|val| {
             let trimmed = val.trim();
@@ -415,6 +422,112 @@ impl Config {
             separation_timeout_secs,
             remote_separation_timeout_secs,
             joshua_pc,
+            surface,
         })
+    }
+}
+
+/// Which surface a request is allowed to reach, decided from its `Host`.
+///
+/// The public landing and the management application share one container. The
+/// landing makes no `/api` calls at all, but `/api/agent/chat` has no
+/// authentication layer, so a single rule at the proxy must never be the only
+/// thing keeping the API closed: a misconfigured proxy, or anything that
+/// reaches the container directly, would publish it. The cut lives here.
+///
+/// Hosts are supplied explicitly rather than read from the environment so the
+/// rule can be tested without mutating process state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceConfig {
+    /// Host of the public landing, for example `shirleyshow.site`.
+    pub site_host: String,
+    /// Host of the management application, for example
+    /// `panel.shirleyshow.site`.
+    pub panel_host: String,
+}
+
+/// What a given request may reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublicSurface {
+    /// The public landing: only the landing document and its assets.
+    Landing,
+    /// The management application: panel, API, tickets and the door.
+    Application,
+    /// Unknown or missing host: everything stays closed.
+    Closed,
+}
+
+impl SurfaceConfig {
+    /// Builds the rule from configuration, tolerating a missing panel host.
+    ///
+    /// With no panel host the deployment behaves as a single host: everything
+    /// is served, which is the state production was in before the split. That
+    /// keeps an existing deployment working if the variable is not set yet.
+    pub fn new(site_base_url: Option<&str>, panel_base_url: Option<&str>) -> Self {
+        Self {
+            site_host: host_of(site_base_url).unwrap_or_default(),
+            panel_host: host_of(panel_base_url).unwrap_or_default(),
+        }
+    }
+
+    /// Classifies a request by the `Host` header it arrived with.
+    pub fn classify(&self, host: Option<&str>) -> PublicSurface {
+        // No split configured: one host serves everything, as before. This is
+        // checked first on purpose: otherwise a deployment that never opted in
+        // would close on every request without a Host header, which is how the
+        // existing tests (and any direct call) behave.
+        if self.panel_host.is_empty() {
+            return PublicSurface::Application;
+        }
+
+        let Some(host) = normalize_host(host) else {
+            return PublicSurface::Closed;
+        };
+
+        if host == self.panel_host {
+            return PublicSurface::Application;
+        }
+
+        if !self.site_host.is_empty()
+            && (host == self.site_host || host == format!("www.{}", self.site_host))
+        {
+            return PublicSurface::Landing;
+        }
+
+        PublicSurface::Closed
+    }
+}
+
+/// Extracts the bare hostname from a base URL such as `https://a.b:8080/x`.
+fn host_of(base_url: Option<&str>) -> Option<String> {
+    let url = base_url?.trim().trim_end_matches('/');
+    let without_scheme = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    let host = without_scheme.split('/').next()?.split(':').next()?;
+    let host = host.trim().to_ascii_lowercase();
+    (!host.is_empty()).then_some(host)
+}
+
+/// Lowercases a `Host` header and drops any port.
+fn normalize_host(host: Option<&str>) -> Option<String> {
+    let host = host?.trim().to_ascii_lowercase();
+    let host = host.split(':').next()?.trim();
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+impl PublicSurface {
+    /// The landing document and its assets.
+    pub fn serves_landing(self) -> bool {
+        matches!(self, Self::Landing | Self::Application)
+    }
+
+    pub fn serves_panel(self) -> bool {
+        matches!(self, Self::Application)
+    }
+
+    /// The API, including `/api/agent/chat`, which has no auth layer.
+    pub fn serves_api(self) -> bool {
+        matches!(self, Self::Application)
     }
 }
