@@ -1,14 +1,36 @@
-// The buyer receives a WhatsApp link shaped like `/#/ticket/st_<64 hex>`.
-// That hash never reaches the server, so the landing itself must fetch the
-// ticket and show the buyer their proof of purchase.
+// The buyer reaches this page two ways: the `st_<64 hex>` link sent over
+// WhatsApp, and the QR printed inside the photo of their ticket, which carries
+// `#/ticket/<door secret>`. Both resolve to the same card, and that card shows
+// the QR because it is the credential the door scans.
 //
-// The card deliberately carries no QR and no secret: `codigo_qr` is what the
-// door scans, and a QR rendered on the public site would let anyone who
-// photographs the buyer's screen walk in. The buyer only needs to prove the
-// purchase exists; the door proves it is valid.
+// The card does not repeat the price or the payment state. A paid ticket's QR is
+// the proof and the buyer knows what they paid; unpaid ones still get the
+// warning underneath, which is where that fact actually matters.
+//
+// What must never appear is the door secret as *plain text*: the QR encodes it
+// as modules, but a copyable hex string sitting in the markup is a leak.
 const { test, expect } = require('@playwright/test');
 
 const TOKEN = 'st_' + 'a'.repeat(64);
+
+// Shaped like the `qrcode` crate output: one path of `M<x> <y>h<w>v<h>` runs.
+// The landing parses those runs to redraw the code with the brand's ink.
+function qrSvgFixture(size = 45) {
+  const paso = 5, quiet = 20;
+  const runs = [];
+  for (const [fy, fx] of [[0, 0], [0, size - 7], [size - 7, 0]]) {
+    runs.push(`M${quiet + fx * paso} ${quiet + fy * paso}h${7 * paso}v${7 * paso}`);
+  }
+  for (let r = 8; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if ((r * 31 + c * 17) % 5 === 0) {
+        runs.push(`M${quiet + c * paso} ${quiet + r * paso}h${paso}v${paso}`);
+      }
+    }
+  }
+  const dim = quiet * 2 + size * paso;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${dim}" height="${dim}" viewBox="0 0 ${dim} ${dim}"><rect width="${dim}" height="${dim}" fill="#ffffff"/><path d="${runs.join('')}" fill="#000000"/></svg>`;
+}
 
 function ticketPayload(overrides = {}) {
   return {
@@ -20,6 +42,7 @@ function ticketPayload(overrides = {}) {
     precio: 'S/ 20',
     estado_pago: 'Pagado',
     estado_checkin: 'No ingresó',
+    qr_svg: qrSvgFixture(),
     ...overrides,
   };
 }
@@ -37,25 +60,26 @@ test('el comprador ve su entrada al abrir el enlace de WhatsApp', async ({ page 
   await expect(tarjeta).toBeVisible();
   await expect(tarjeta).toContainText('Elizabeth Sallo Roman');
   await expect(tarjeta).toContainText('Shirley Show y sus amigos sesión 3');
-  await expect(tarjeta).toContainText('Pagado');
+  await expect(tarjeta).toContainText('Tipo');
+  // Neither the price nor the payment state is repeated on a paid ticket.
+  const texto = await tarjeta.innerText();
+  expect(texto).not.toMatch(/Pagado/);
+  expect(texto).not.toMatch(/Precio/i);
 });
 
-test('la entrada no muestra ningún QR ni el secreto de la puerta', async ({ page }) => {
-  const pedidos = [];
-  page.on('request', (r) => pedidos.push(r.url()));
-
+test('la tarjeta muestra el QR pero nunca el secreto como texto', async ({ page }) => {
   await page.goto(`/#/ticket/${TOKEN}`);
   await expect(page.locator('.pres__ticket')).toBeVisible();
 
-  // No QR, in any form: no svg, no canvas, no image.
-  expect(await page.locator('.pres__ticket svg, .pres__ticket canvas, .pres__ticket img').count()).toBe(0);
+  // The QR *is* the credential the door scans, so it must be there.
+  await expect(page.locator('.pres__ticket .pres__ticket-qr canvas')).toHaveCount(1);
 
-  // And the rendered card never carries the scan secret the door reads.
+  // What must never be there is the secret as a copyable hex string: the code
+  // encodes it as modules, the markup must not spell it out.
   const texto = await page.locator('.pres__ticket').innerText();
   expect(texto).not.toMatch(/[0-9a-fA-F]{32}/);
   const html = await page.locator('.pres__ticket').innerHTML();
-  expect(html).not.toContain('<svg');
-  expect(html).not.toContain('<canvas');
+  expect(html).not.toMatch(/[0-9a-fA-F]{32}/);
 });
 
 test('la entrada sigue en el dispositivo en visitas posteriores', async ({ page }) => {

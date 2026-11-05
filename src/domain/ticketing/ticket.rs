@@ -1,5 +1,6 @@
 use qrcode::QrCode;
 use qrcode::render::svg;
+use qrcode::types::EcLevel;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::ticketing::Money;
@@ -330,7 +331,12 @@ impl Ticket {
         }
 
         let payload = self.qr_payload(public_base_url);
-        let code = QrCode::new(payload.as_bytes()).ok()?;
+        // Level H (30% recovery) because the landing and the printed photo both
+        // put the brand logo over the centre of the code. At the default level M
+        // the covered modules would eat the error budget and a phone at the door
+        // would fail to read it.
+        let code =
+            QrCode::with_error_correction_level(payload.as_bytes(), EcLevel::H).ok()?;
         let image = code
             .render::<svg::Color>()
             .min_dimensions(200, 200)
