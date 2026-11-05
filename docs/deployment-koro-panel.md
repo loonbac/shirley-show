@@ -1030,3 +1030,33 @@ separadores, llegan intactas.
 
 Antes de interpretar una salida, **mirar su forma**. Un comando que devuelve algo que
 parece de otro programa está diciendo que no se ejecutó lo que se creía.
+
+## 16. Purgar la caché de Cloudflare después de cada despliegue
+
+Los assets estáticos se sirven con `public, max-age=60, must-revalidate`
+(`src/router.rs`, `ASSET_CACHE_CONTROL`). Antes salían con `no-store`, y eso
+hacía que cada visita re-descargara 1,2 MB en 85 módulos con una cascada de
+imports de 6 niveles: el panel tardaba segundos en aparecer.
+
+Cloudflare **reescribe** ese `max-age` con su propio *Browser Cache TTL* (hoy
+4 h) para las extensiones que cachea, así que un despliegue que cambie JS o CSS
+puede quedarse invisible hasta cuatro horas. Por eso el despliegue termina con
+una purga:
+
+```bash
+TOK=$(grep '^CLOUDFLARE_API_TOKEN=' .env | cut -d= -f2-)
+curl -s -X POST -H "Authorization: Bearer $TOK" \
+     -H "Content-Type: application/json" \
+     -d '{"purge_everything":true}' \
+     "https://api.cloudflare.com/client/v4/zones/83854199272ff369ab7cfbc6cafa2eb8/purge_cache"
+```
+
+Se comprueba así: la primera petición responde `cf-cache-status: MISS` y la
+segunda `HIT` con `age: 0`.
+
+**No se purga el HTML**: se sirve con `no-cache` a propósito, porque es el
+documento que apunta a los puntos de entrada versionados y una copia vieja
+fijaría el bundle entero.
+
+**El `no-store` del endpoint de ticket se queda.** Ahí protege un secreto y no
+es caché de assets.
