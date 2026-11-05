@@ -741,44 +741,65 @@ Antes de borrar, no basta preguntarse «¿es la fila que quiero?». Hay que
 preguntarse además «¿ha producido ya un efecto que no puedo reconstruir?», y
 «¿depende mi lista de que esté completa?».
 
-#### Procedimiento del borrado, sin copias ambiguas
+#### Procedimiento del borrado: por tubería, sin copias
 
 Una copia en `/tmp` no tiene dueño ni historial, y una copia vieja es **más
-peligrosa que ninguna**: parece el script y no tiene las guardas. El procedimiento
-que evita las dos cosas:
+peligrosa que ninguna**: parece el script y no tiene las guardas. La solución no
+es nombrar mejor la copia, es **no crear copia**.
+
+`docker cp` no acepta stdin (responde «destination must be a directory»), pero
+`python3 -` sí. El script entra completo por tubería:
 
 ```bash
-# 1. Sacar el script del commit, no de un /tmp
-git show <commit>:scripts/purge-test-entries.py > /tmp/purge-<commit>.py
-md5sum /tmp/purge-<commit>.py          # anotar: lo prueba todo lo demás
+# En seco, siempre, sobre el contenido exacto del commit
+git show <commit>:scripts/purge-test-entries.py \
+  | ssh root@host 'docker exec -i panel-app-shir python3 -'
 
-# 2. Copiarlo y comprobar que llegó igual
-scp /tmp/purge-<commit>.py root@host:/tmp/purge-<commit>.py
-ssh root@host 'md5sum /tmp/purge-<commit>.py'   # debe coincidir
-ssh root@host 'docker cp /tmp/purge-<commit>.py panel-app-shir:/tmp/purge.py'
-
-# 3. En seco, siempre
-ssh root@host 'docker exec panel-app-shir python3 /tmp/purge.py'
-
-# 4. Ejecutar solo si el seco dijo lo esperado
-ssh root@host 'docker exec -e DRY_RUN=0 panel-app-shir python3 /tmp/purge.py'
-
-# 5. Borrar la copia y comprobar que no quedan otras
-ssh root@host 'docker exec --user root panel-app-shir rm -f /tmp/purge.py; rm -f /tmp/purge-<commit>.py'
-ssh root@host 'ls /tmp/*.py 2>/dev/null; docker exec panel-app-shir sh -c "ls /tmp/*.py 2>/dev/null"'
+# Y solo si el seco dijo lo esperado
+git show <commit>:scripts/purge-test-entries.py \
+  | ssh root@host 'docker exec -i -e DRY_RUN=0 panel-app-shir python3 -'
 ```
 
-El nombre lleva el commit: si aparece un `/tmp/purge-<otro>.py`, es viejo por
-definición.
+`DRY_RUN` va por entorno (`-e`), igual que antes. No hay fichero intermedio, así
+que no hay nada que limpiar después.
 
-**El paso 5 no es cortesía.** Dos veces en esta sesión una limpieza se declaró
-completa y dejó una copia, porque se borraron las rutas recordadas y no lo que
-había en el directorio. `rm -f` de un nombre inexistente devuelve 0 y refuerza la
-falsa sensación de limpieza; `ls` es el instrumento.
+Y tiene una propiedad que ninguna copia tiene: **el contenido y la procedencia
+viajan juntos en la misma tubería.** No hay ventana entre «copié» y «ejecuté»
+donde el fichero pueda cambiar. Esa ventana es justo lo que produjo las citas
+desfasadas y las limpiezas incompletas de esta sesión.
 
-**Y el acta cita el commit, no el md5 suelto.** `git show <commit>:<ruta> | md5sum`
-se recalcula desde cualquier máquina: ata contenido **y** procedencia. Un md5
-apunta solo contenido, y no dice de dónde salió.
+**Un límite de una herramienta no es un límite del problema.** Que `docker cp` no
+lea stdin es cierto; que no haya forma de alimentar al contenedor sin escribir un
+fichero, no. Antes de aceptar un compromiso, probar la alternativa obvia: aquí,
+`python3 -` o una redirección.
+
+#### El acta, con dos hashes y tres sitios
+
+```bash
+git show <commit>:scripts/purge-test-entries.py | md5sum   # anotar
+```
+
+```
+fuente   scripts/purge-test-entries.py @ <commit>
+md5      921b2ead…  (remedido del commit, no de una copia)
+copias   ls /tmp/*.py en LOCAL y VPS HOST -> 0 (el contenedor no recibe fichero)
+antes    N filas · M ingresadas (estado u hora)
+en seco  salida esperada
+después  N' filas · las dos reales confirmadas
+borradas nombre, estado previo, hora_ingreso
+```
+
+**El commit responde «¿de dónde salió?»; el md5 responde «¿qué se ejecutó?».** Un
+commit envejece cuando la rama avanza; un hash de contenido no. Sólo con el commit,
+el acta caduca en minutos. Sólo con el hash, se pierde la procedencia.
+
+**«Host» es ambiguo**: puede ser la máquina donde hablas o el host del VPS fuera
+del contenedor. Son dos sistemas de ficheros, y una copia vivió en el segundo
+mientras el primero se declaraba limpio. Se nombran los sitios.
+
+**Y se enumeran, no se recuerdan**: `ls /tmp/*.py`, no `rm` de nombres conocidos.
+`rm -f` de algo inexistente devuelve 0 y refuerza la falsa sensación de limpieza.
+
 
 #### Contar sentencias no es contar texto
 
@@ -795,10 +816,9 @@ cabecera» da distinto **porque el docstring es un nodo**. Ahí lo correcto es
 excluirlo y comparar el resto. **Las dos son la misma falta: medir el artefacto
 entero cuando importa una parte, o medir el texto cuando importa el código.**
 
-#### El acta cita dos hashes, porque responden preguntas distintas
+#### Un commit envejece; el contenido no
 
-Un commit envejece; el contenido no. Medido en esta rama, el mismo fichero a
-través de cuatro commits:
+Medido en esta rama, el mismo fichero a través de cuatro commits:
 
 ```
 7cf5932  921b2ead1ebfb8f2e5e0cb5b6583a3b7
@@ -807,15 +827,7 @@ través de cuatro commits:
 911ddc7  921b2ead1ebfb8f2e5e0cb5b6583a3b7
 ```
 
-`HEAD` cambió cuatro veces; el contenido no. Por eso el acta lleva los dos:
-
-- **el commit** responde «¿de dónde salió?», y permite
-  `git show <commit>:<ruta>` desde cualquier máquina;
-- **el hash del contenido** responde «¿qué se ejecutó exactamente?», y es lo único
-  que sigue siendo verdad cuando la rama avanza.
-
-Sólo con el commit, el acta envejece en minutos. Sólo con el hash, se pierde la
-procedencia y hay que confiar en un `/tmp`.
+`HEAD` cambió cuatro veces; el contenido, ninguna.
 
 #### «Host» es ambiguo, y por eso se enumeran tres sitios
 
