@@ -11,6 +11,26 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/landing/landing.css">
+  <!--
+    The ticket QR layout lives here, not only in landing.css.
+
+    Cloudflare rewrites `max-age` for .css to hours, so a buyer whose phone cached
+    the old stylesheet saw a 225px SVG inside an unstyled 307px box, jammed against
+    the left edge of the card. The HTML is served `no-cache`, so the rules that keep
+    the credential centred and legible travel with the document itself and cannot be
+    left behind in a stale cache.
+  -->
+  <style>
+    #entrada .pres__ticket-qr {
+      margin: 16px auto 0; padding: 10px;
+      width: 200px; max-width: 100%;
+      background: #fff; border: 1px solid var(--line); border-radius: 4px;
+    }
+    #entrada .pres__ticket-qr svg,
+    #entrada .pres__ticket-qr canvas {
+      display: block; width: 100%; height: auto; margin: 0 auto;
+    }
+  </style>
 </head>
 <body>
 <div class="pres">
@@ -395,20 +415,29 @@
       // purchase but cannot open a door, and the buyer who left the photo at
       // home has nothing to show.
       //
-      // Parsed as a document and adopted as a node, never assigned to
-      // `innerHTML`: the markup is server-generated today, and the day it stops
-      // being so, this line is the difference between a ticket and a script.
+      // Drawn here, from the modules the server encoded, rather than dropping in
+      // the server's SVG: the printed photo the buyer already keeps is the dotted
+      // brand QR, and a flat black grid on the page looked like a different
+      // ticket than the one in their hand. The modules -- what actually encodes
+      // the secret -- still come from the server; only the ink is ours. That keeps
+      // the payload out of this file, which is the rule the tests enforce.
       if (t.qr_svg) {
-        try {
-          var doc = new DOMParser().parseFromString(t.qr_svg, 'image/svg+xml');
-          var svg = doc.documentElement;
-          if (svg && svg.nodeName && svg.nodeName.toLowerCase() === 'svg') {
-            var caja = document.createElement('div');
-            caja.className = 'pres__ticket-qr';
-            caja.appendChild(document.importNode(svg, true));
-            cont.appendChild(caja);
-          }
-        } catch (e) {}
+        var caja = document.createElement('div');
+        caja.className = 'pres__ticket-qr';
+        var pintado = dibujarQrDeMarca(t.qr_svg, caja);
+        if (!pintado) {
+          // A canvas the browser cannot use must never cost the buyer their
+          // credential: fall back to the server's own SVG, adopted as a node and
+          // never assigned to `innerHTML`.
+          try {
+            var doc = new DOMParser().parseFromString(t.qr_svg, 'image/svg+xml');
+            var svg = doc.documentElement;
+            if (svg && svg.nodeName && svg.nodeName.toLowerCase() === 'svg') {
+              caja.appendChild(document.importNode(svg, true));
+            }
+          } catch (e) {}
+        }
+        if (caja.firstChild) cont.appendChild(caja);
       }
 
       var pie = document.createElement('p');
@@ -422,6 +451,117 @@
       cont.appendChild(pie);
 
       cont.hidden = false;
+    }
+
+    // Draws the credential with the brand's own ink: the dotted gradient QR the
+    // printed photo uses, from the modules the server encoded.
+    //
+    // The server's SVG is a flat black grid. The buyer keeps a printed photo
+    // whose QR is dotted, gradient and carries the logo, so the page and the
+    // photo looked like two different tickets. Only the *ink* changes here: the
+    // module matrix -- what actually encodes the secret -- is parsed straight
+    // out of the server's SVG, so this file never learns the payload.
+    //
+    // Returns false when the SVG cannot be read, and the caller falls back to
+    // the server's own SVG. A credential must never depend on a canvas.
+    function dibujarQrDeMarca(svgString, caja) {
+      // `M<x> <y>h<w>v<h>` is what the `qrcode` crate emits per run of modules.
+      var runs = [], m, pattern = /M(\d+)\s+(\d+)h(\d+)v(\d+)/g;
+      while ((m = pattern.exec(svgString))) {
+        runs.push([+m[1], +m[2], +m[3], +m[4]]);
+      }
+      if (!runs.length) return false;
+
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, step = Infinity;
+      for (var i = 0; i < runs.length; i++) {
+        var x = runs[i][0], y = runs[i][1], w = runs[i][2], h = runs[i][3];
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x + w > maxX) maxX = x + w;
+        if (y + h > maxY) maxY = y + h;
+        if (h > 0 && h < step) step = h;
+      }
+      if (!isFinite(step) || step <= 0) return false;
+
+      var size = Math.round((maxX - minX) / step);
+      if (size < 21 || size > 177) return false;
+
+      var MARGEN = 3; // quiet zone, in modules, matching the printed photo
+      var lienzo = size + MARGEN * 2;
+      var oscuro = {};
+      for (var j = 0; j < runs.length; j++) {
+        var rx = runs[j][0], ry = runs[j][1], rw = runs[j][2];
+        var fila = Math.round((ry - minY) / step);
+        for (var cx = rx; cx < rx + rw; cx += step) {
+          oscuro[fila + ':' + Math.round((cx - minX) / step)] = 1;
+        }
+      }
+
+      var ESCALA = 6; // canvas px per module; crisp on a 3x phone screen
+      var canvas = document.createElement('canvas');
+      canvas.width = lienzo * ESCALA;
+      canvas.height = lienzo * ESCALA;
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', 'Código QR de tu entrada');
+      var ctx = canvas.getContext && canvas.getContext('2d');
+      if (!ctx) return false;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.translate(MARGEN * ESCALA, MARGEN * ESCALA);
+      ctx.scale(ESCALA, ESCALA);
+
+      // Created *after* the scale: gradient coordinates are transformed by the
+      // current matrix when it is painted, so a gradient built from the raw
+      // canvas size would land six screen-widths away and paint one flat colour.
+      var grad = ctx.createLinearGradient(0, 0, lienzo, lienzo);
+      grad.addColorStop(0, '#0f1b2e');
+      grad.addColorStop(1, '#c0246f');
+      ctx.fillStyle = grad;
+
+      // Finder patterns, drawn whole so the 1:1:3:1:1 ratio survives.
+      var esquinas = [[0, 0], [0, size - 7], [size - 7, 0]];
+      for (var e = 0; e < esquinas.length; e++) {
+        var fy = esquinas[e][0], fx = esquinas[e][1];
+        redondeado(ctx, fx, fy, 7, 7, 1.0); ctx.fill();
+        ctx.save();
+        ctx.fillStyle = '#ffffff';
+        redondeado(ctx, fx + 1, fy + 1, 5, 5, 0.75); ctx.fill();
+        ctx.restore();
+        redondeado(ctx, fx + 2, fy + 2, 3, 3, 0.5); ctx.fill();
+      }
+
+      // Data modules as dots. Radius 0.48 keeps jsQR and ZXing decoding them.
+      ctx.beginPath();
+      for (var r = 0; r < size; r++) {
+        for (var c = 0; c < size; c++) {
+          if (!oscuro[r + ':' + c]) continue;
+          if (enEsquina(r, c, size)) continue;
+          ctx.moveTo(c + 0.5 + 0.48, r + 0.5);
+          ctx.arc(c + 0.5, r + 0.5, 0.48, 0, Math.PI * 2);
+        }
+      }
+      ctx.fill();
+
+      caja.appendChild(canvas);
+      return true;
+    }
+
+    // The three 7x7 finder corners are drawn as squares above, so their modules
+    // must not be painted again as dots.
+    function enEsquina(r, c, size) {
+      var e = size - 7;
+      return (r < 7 && c < 7) || (r < 7 && c >= e) || (r >= e && c < 7);
+    }
+
+    function redondeado(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
     }
 
     function leer() {
