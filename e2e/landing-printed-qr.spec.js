@@ -134,6 +134,96 @@ test.describe('QR impreso escaneado por el comprador', () => {
     expect(tieneTinta).toBeGreaterThan(1000);
   });
 
+  test('ningún módulo pintado queda cortado por el hueco del logo', async ({ page }) => {
+    // The hole is a square of modules that are never painted. An earlier landing
+    // painted a white shield 12% WIDER than that hole, starting at
+    // `desdeLogo - escudo`, so it reached into the painted ring and sliced the
+    // dots on its border. The printed photo never did it, which is why only the
+    // page looked broken while the photo looked right.
+    //
+    // So: every dark module outside the hole must still have ink at its centre.
+    await page.route('**/api/public/ticket/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: ticketBody() }),
+    );
+
+    await page.goto(`/#/ticket/${DOOR_SECRET}`);
+    const canvas = page.locator('#entrada .pres__ticket-qr canvas');
+    await expect(canvas).toHaveCount(1);
+
+    // The logo is painted asynchronously, and the shield only existed once it
+    // arrived. Measuring before this point passed on both versions and hid the
+    // defect — a test that never sees the code path it is testing.
+    await expect
+      .poll(
+        () =>
+          canvas.evaluate((el) => {
+            const ctx = el.getContext('2d');
+            const { data } = ctx.getImageData(Math.floor(el.width / 2) - 20, Math.floor(el.height / 2) - 20, 40, 40);
+            let oro = 0;
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i] > 120 && data[i + 1] > 90 && data[i + 2] < 120) oro++;
+            }
+            return oro;
+          }),
+        { timeout: 8000 },
+      )
+      .toBeGreaterThan(50);
+
+    const informe = await canvas.evaluate((el, svg) => {
+      // Same parse the landing does: `M<x> <y>h<w>v<h>` runs of modules.
+      const runs = [...svg.matchAll(/M(\d+)\s+(\d+)h(\d+)v(\d+)/g)].map((m) => [+m[1], +m[2], +m[3], +m[4]]);
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, step = Infinity;
+      for (const [x, y, w, h] of runs) {
+        if (x < minX) minX = x; if (y < minY) minY = y;
+        if (x + w > maxX) maxX = x + w; if (y + h > maxY) maxY = y + h;
+        if (h > 0 && h < step) step = h;
+      }
+      const size = Math.round((maxX - minX) / step);
+      const oscuro = new Set();
+      for (const [x, y, w] of runs) {
+        const fila = Math.round((y - minY) / step);
+        for (let cx = x; cx < x + w; cx += step) oscuro.add(fila + ':' + Math.round((cx - minX) / step));
+      }
+
+      // Read the hole from the canvas, never re-derive it here: a test that
+      // hard-codes the share compares against a different code than the one
+      // that was drawn, and passes on a drawing it never saw.
+      const logoMods = Number(el.dataset.qrLogoMods);
+      const desde = Math.floor((size - logoMods) / 2);
+      const enLogo = (r, c) => r >= desde && r < desde + logoMods && c >= desde && c < desde + logoMods;
+      const enEsquina = (r, c) => (r < 7 && c < 7) || (r < 7 && c >= size - 7) || (r >= size - 7 && c < 7);
+
+      // Canvas geometry, mirroring the landing: MARGEN 3 modules, 6 px each.
+      const ESCALA = el.width / (size + 6);
+      const ctx = el.getContext('2d');
+      const tinta = (r, c) => {
+        const px = Math.round((c + 3 + 0.5) * ESCALA);
+        const py = Math.round((r + 3 + 0.5) * ESCALA);
+        const { data } = ctx.getImageData(px, py, 1, 1);
+        return data[0] < 240 || data[1] < 240 || data[2] < 240;
+      };
+
+      let esperados = 0, conTinta = 0;
+      const cortados = [];
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          if (!oscuro.has(r + ':' + c)) continue;
+          if (enEsquina(r, c) || enLogo(r, c)) continue;
+          esperados++;
+          if (tinta(r, c)) conTinta++;
+          else if (cortados.length < 12) cortados.push(r + ':' + c);
+        }
+      }
+      return { esperados, conTinta, cortados, size, logoMods };
+    }, qrSvgFixture());
+
+    // Positive control: the fixture really does put modules outside the hole.
+    expect(informe.esperados).toBeGreaterThan(100);
+    // And not one of them may have been covered by anything.
+    expect(informe.cortados).toEqual([]);
+    expect(informe.conTinta).toBe(informe.esperados);
+  });
+
   test('la tarjeta no repite el precio ni el estado de pago', async ({ page }) => {
     // A paid ticket's QR is the proof; the buyer already knows what they paid.
     // Dropping both rows is what frees the height the QR now uses.
