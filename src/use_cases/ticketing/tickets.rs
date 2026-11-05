@@ -71,8 +71,18 @@ pub struct PublicTicketDto {
     pub precio: f64,
     pub estado_pago: String,
     pub estado_checkin: String,
+    /// The buyer's entry credential, as an SVG.
+    ///
+    /// It stays: without it the buyer cannot enter the venue, and this route is
+    /// how the WhatsApp link shows the ticket. The `scan_token` in that link is
+    /// the bearer credential by design (64 hex, unguessable).
     pub qr_svg: Option<String>,
-    pub codigo_qr: Option<String>,
+    // No raw `codigo_qr`, on purpose.
+    //
+    // The SVG already encodes it for the door to scan, so the hex string adds no
+    // capability to the buyer; it only makes the secret trivially copyable out of
+    // the JSON. Anything holding the SVG could decode it anyway, so this is a
+    // reduction in exposure, not a boundary.
 }
 
 #[derive(Clone)]
@@ -110,13 +120,7 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
             }
         };
 
-        let is_paid = ticket.estado_pago == PaymentStatus::Pagado;
         let qr_svg = ticket.render_qr_svg();
-        let codigo_qr = if is_paid {
-            Some(ticket.codigo_qr.as_str().to_string())
-        } else {
-            None
-        };
 
         Ok(PublicTicketDto {
             nombre_evento: event.nombre,
@@ -127,8 +131,9 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
             precio: ticket.precio.to_soles(),
             estado_pago: ticket.estado_pago.as_str().to_string(),
             estado_checkin: ticket.estado_checkin.as_str().to_string(),
+            // `render_qr_svg` already returns `None` for an unpaid ticket, so the
+            // pending case cannot leak a code by omission here.
             qr_svg,
-            codigo_qr,
         })
     }
 }

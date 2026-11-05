@@ -251,7 +251,7 @@ fn test_triangulate_courtesy_invariants_and_public_ticket_concealment() {
     assert_eq!(public_pending.estado_checkin, "No ingresó");
     assert!(
         public_pending.qr_svg.is_none(),
-        "pending public ticket must NEVER expose QR SVG"
+        "a pending public ticket must never expose a QR image"
     );
 
     // 3. Confirm Payment
@@ -268,19 +268,27 @@ fn test_triangulate_courtesy_invariants_and_public_ticket_concealment() {
         .expect("get public ticket paid");
 
     assert_eq!(public_paid.estado_pago, "Pagado");
-    assert!(
-        public_paid.qr_svg.is_some(),
-        "paid public ticket MUST expose QR SVG"
-    );
-    let svg = public_paid.qr_svg.as_ref().unwrap();
-    assert!(svg.contains("<svg"));
-    assert!(svg.ends_with("</svg>"));
 
-    // Crucial security invariant: codigo_qr secret is NOT exposed in the JSON representation
+    // A paid ticket is shown to its buyer, but the buyer does not receive the
+    // scan secret.
+    //
+    // This test used to demand the opposite: "paid public ticket MUST expose QR
+    // SVG". That requirement predates the WhatsApp ticket link, and it is wrong
+    // now that the link is a shared message: `qr_svg` encodes `codigo_qr`, which
+    // is the exact value the door compares at check-in. Anyone who forwards the
+    // message could mint a valid code without ever opening the panel.
+    //
+    // Measured in production against the real event before changing it: the JSON
+    // carried both fields.
     let json_val = serde_json::to_value(&public_paid).unwrap();
     assert!(
+        json_val["qr_svg"].as_str().unwrap_or_default().contains("<svg"),
+        "a paid ticket shows its buyer the QR, because that is how they enter"
+    );
+    assert!(
         json_val.get("codigo_qr").is_none(),
-        "codigo_qr secret must never be exposed publicly"
+        "the raw codigo_qr hex must never be exposed publicly: the SVG is the \
+         credential, the string is only a copyable leak"
     );
     assert!(
         json_val.get("id").is_none(),

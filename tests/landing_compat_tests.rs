@@ -162,3 +162,35 @@ fn test_landing_does_not_depend_on_has_selector() {
          without :has()"
     );
 }
+
+#[test]
+fn the_public_ticket_never_carries_the_raw_scan_secret() {
+    // Measured in production against the real event: the JSON the public route
+    // returned included `codigo_qr` in plain hex.
+    //
+    // The SVG has to stay: without it the buyer cannot enter the venue, and the
+    // WhatsApp link is how the ticket reaches them. The `scan_token` in that link
+    // is the bearer credential (64 hex, unguessable), so the page can show the
+    // code.
+    //
+    // What must not appear is the raw hex string. It adds no capability the SVG
+    // does not already carry, but it turns the secret into something anyone can
+    // copy, paste and forward without decoding an image.
+    let dto = fs::read_to_string("src/use_cases/ticketing/tickets.rs")
+        .expect("read tickets.rs");
+
+    let start = dto
+        .find("pub struct PublicTicketDto")
+        .expect("PublicTicketDto must exist");
+    let end = start + dto[start..].find('}').expect("struct must close");
+    let block = &dto[start..end];
+
+    assert!(
+        !block.contains("pub codigo_qr:"),
+        "the public ticket must not carry the raw scan secret in its JSON: the          SVG is the entry credential, the hex string is only a copyable leak"
+    );
+    assert!(
+        block.contains("pub qr_svg:"),
+        "the buyer still needs the QR image: it is their entry credential"
+    );
+}

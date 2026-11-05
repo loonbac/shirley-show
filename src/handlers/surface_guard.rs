@@ -31,6 +31,14 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
     let wants_application =
         path.starts_with("/api/") || path == "/panel" || path.starts_with("/panel/");
 
+    // One route is public by design: the buyer's proof of purchase. The ticket
+    // link shared over WhatsApp is a hash route, so the landing has to fetch the
+    // ticket itself, and the buyer is anonymous by definition. It is pinned to
+    // the exact prefix, with no wildcard behind it: `/api/public/ticket/{token}`
+    // reads one ticket by an unguessable token and does nothing else.
+    let is_public_ticket_read =
+        method == "GET" && path.starts_with("/api/public/ticket/");
+
     match surface {
         PublicSurface::Application => {}
         // The door is the only surface besides the panel that can write, and it
@@ -44,7 +52,15 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
         // `Closed` matters as much as `Landing`: a request that arrives with no
         // Host header, an IP, or a foreign domain is not a visitor of the
         // landing and must not reach an API that has no auth layer.
-        PublicSurface::Landing | PublicSurface::Closed => {
+        // Only the landing shows a buyer their ticket. `Closed` keeps refusing
+        // everything: an unknown host is not a deployment that opted into
+        // serving anonymous buyers.
+        PublicSurface::Landing => {
+            if wants_application && !is_public_ticket_read {
+                return refused();
+            }
+        }
+        PublicSurface::Closed => {
             if wants_application {
                 return refused();
             }

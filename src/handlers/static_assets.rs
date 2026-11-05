@@ -4,6 +4,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use http_body_util::Full;
 
+use crate::config::PublicSurface;
 use crate::state::AppState;
 
 /// Serves a file from the frontend directory as HTML.
@@ -25,15 +26,34 @@ async fn serve_html(frontend_dir: &std::path::Path, relative: &str) -> Response 
     }
 }
 
-/// Public landing: what a visitor sees at the site root.
-pub async fn serve_index(State(state): State<AppState>) -> Response {
-    serve_html(&state.frontend_dir, "landing/index.html").await
+/// The document served at `/`, decided by the host that asked.
+///
+/// The door runs on its own host, but it is a **mode of the panel application**,
+/// not a page of the landing: the doorman needs `main.js` to enter door mode, and
+/// the landing never loads it. Serving the landing there answered 200 and made
+/// the door unreachable — a 200 that hides a failure is worse than a 404.
+///
+/// The decision is made per request from the same `Host` the surface guard uses,
+/// so the two layers cannot disagree about which site this is.
+pub async fn serve_index(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let host = headers.get(header::HOST).and_then(|value| value.to_str().ok());
+
+    match state.surface.classify(host) {
+        PublicSurface::Door => serve_html(&state.frontend_dir, "index.html").await,
+        _ => serve_html(&state.frontend_dir, "landing/index.html").await,
+    }
 }
 
 /// The management panel, moved off the root so the landing can live there.
 ///
-/// Old links to `/#/ticket/<token>` and friends are forwarded to `/panel` with
-/// their hash preserved, so tickets already sold and shared keep working.
+/// Reached at `/panel` on the panel host. It is **not** linked from the landing
+/// and the landing does not forward to it: the panel lives behind Access on its
+/// own host, and `/api/agent/chat` spends paid tokens on every anonymous call.
+/// Old `/#/ticket/<token>` links are no longer forwarded; printed QR codes never
+/// depended on that forwarding because they carry no domain and no route.
 pub async fn serve_panel(State(state): State<AppState>) -> Response {
     serve_html(&state.frontend_dir, "index.html").await
 }

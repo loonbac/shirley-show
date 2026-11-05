@@ -568,7 +568,9 @@ async fn test_tickets_and_checkin_api_endpoints() {
     let confirmed_json = body_to_json(res.into_body()).await;
     assert_eq!(confirmed_json["entrada"]["estado_pago"], "Pagado");
 
-    // 9. GET /api/public/ticket/{scan_token} now has QR SVG
+    // 9. GET /api/public/ticket/{scan_token} serves the buyer's ticket with the
+    // QR image they need to enter, but not the raw `codigo_qr` hex: the SVG is
+    // the credential, the string is only a copyable leak.
     let req = Request::builder()
         .method("GET")
         .uri(format!("/api/public/ticket/{pending_scan_token}"))
@@ -578,7 +580,15 @@ async fn test_tickets_and_checkin_api_endpoints() {
     assert_eq!(res.status(), StatusCode::OK);
     let pub_paid_json = body_to_json(res.into_body()).await;
     assert_eq!(pub_paid_json["estado_pago"], "Pagado");
-    assert!(pub_paid_json["qr_svg"].as_str().unwrap().contains("<svg"));
+    assert!(
+        pub_paid_json["qr_svg"].as_str().unwrap().contains("<svg"),
+        "a paid ticket shows its buyer the QR: it is the entry credential"
+    );
+    assert!(
+        pub_paid_json.get("codigo_qr").is_none(),
+        "but the raw hex secret must not appear: the SVG is enough to scan, \
+         the string is only a copyable leak"
+    );
 
     // 9b. POST /api/entradas/checkin with invalid/malformed JSON body -> MUST return 400 Bad Request
     let req = Request::builder()
