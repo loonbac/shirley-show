@@ -297,12 +297,40 @@ impl Ticket {
         }
     }
 
-    pub fn render_qr_svg(&self) -> Option<String> {
+    /// The payload encoded in the printed ticket's QR code.
+    ///
+    /// Two forms describe the same door credential, and the door accepts both:
+    ///
+    /// 1. the bare 32-hex secret, which is what every ticket printed before this
+    ///    change carries, and
+    /// 2. the same secret wrapped in `<base>/#/ticket/<secret>`.
+    ///
+    /// The wrapped form is what new tickets get. It is the same secret on purpose:
+    /// `codigo_qr` is what `check_in` compares, so putting the buyer's
+    /// `scan_token` here would print a QR that no doorman could cash in.
+    ///
+    /// Without a configured base URL there is nothing to wrap the secret in, so
+    /// the bare form stays. A ticket printed without a domain is still a ticket.
+    pub fn qr_payload(&self, public_base_url: Option<&str>) -> String {
+        match public_base_url {
+            Some(base) => {
+                let trimmed = base.trim().trim_end_matches('/');
+                if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                    return format!("{trimmed}/#/ticket/{}", self.codigo_qr.as_str());
+                }
+                self.codigo_qr.as_str().to_string()
+            }
+            None => self.codigo_qr.as_str().to_string(),
+        }
+    }
+
+    pub fn render_qr_svg(&self, public_base_url: Option<&str>) -> Option<String> {
         if self.estado_pago != PaymentStatus::Pagado {
             return None;
         }
 
-        let code = QrCode::new(self.codigo_qr.as_str().as_bytes()).ok()?;
+        let payload = self.qr_payload(public_base_url);
+        let code = QrCode::new(payload.as_bytes()).ok()?;
         let image = code
             .render::<svg::Color>()
             .min_dimensions(200, 200)

@@ -89,6 +89,11 @@ pub struct PublicTicketDto {
 pub struct GetPublicTicket<E, T> {
     event_repo: Arc<E>,
     ticket_repo: Arc<T>,
+    /// Base URL new tickets wrap their door secret in.
+    ///
+    /// `None` keeps the bare 32-hex payload, which is what every ticket printed
+    /// before this change carries.
+    public_base_url: Option<String>,
 }
 
 impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
@@ -96,7 +101,13 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
         Self {
             event_repo,
             ticket_repo,
+            public_base_url: None,
         }
+    }
+
+    pub fn with_public_base_url(mut self, url: Option<String>) -> Self {
+        self.public_base_url = url;
+        self
     }
 
     pub fn execute(&self, scan_token: &str) -> Result<PublicTicketDto, AppError> {
@@ -120,7 +131,7 @@ impl<E: EventRepository, T: TicketRepository> GetPublicTicket<E, T> {
             }
         };
 
-        let qr_svg = ticket.render_qr_svg();
+        let qr_svg = ticket.render_qr_svg(self.public_base_url.as_deref());
 
         Ok(PublicTicketDto {
             nombre_evento: event.nombre,

@@ -208,7 +208,7 @@ pub async fn convert(
         Ok(tickets) => {
             let dtos = tickets
                 .iter()
-                .map(|t| TicketDto::from_domain(t, true))
+                .map(|t| TicketDto::from_domain(t, true, state.public_base_url.as_deref()))
                 .collect();
             (
                 StatusCode::CREATED,

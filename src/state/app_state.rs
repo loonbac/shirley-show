@@ -47,6 +47,11 @@ pub struct AppState {
     pub pool: DbPool,
     /// Decides what each request may reach, by its `Host` header.
     pub surface: crate::config::SurfaceConfig,
+    /// Base URL used to wrap a new ticket's door secret into its printed QR.
+    ///
+    /// `None` keeps the bare 32-hex payload, so a deployment without this
+    /// variable keeps printing tickets exactly as before.
+    pub public_base_url: Option<String>,
     pub storage: Arc<LocalAudioStorage>,
     pub frontend_dir: PathBuf,
     pub item_repo: Arc<SqliteShowItemRepository>,
@@ -189,7 +194,15 @@ impl AppState {
             let active_posters: Vec<String> = events.into_iter().filter_map(|e| e.imagen).collect();
             poster_storage.reconcile_orphans(&active_posters);
         }
-        let ticketing = TicketingServices::new(ticketing_repo, poster_storage);
+        let public_base_url = std::env::var("SHIRLEY_PUBLIC_BASE_URL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let ticketing = TicketingServices::new(
+            ticketing_repo,
+            poster_storage,
+            public_base_url.clone(),
+        );
         let destructive_registry = Arc::new(PendingDestructiveRegistry::new());
 
         let dispatcher = AgentToolDispatcher::from_components(
@@ -235,6 +248,10 @@ impl AppState {
         Self {
             pool,
             surface: config.surface.clone(),
+            public_base_url: std::env::var("SHIRLEY_PUBLIC_BASE_URL")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
             destructive_registry,
             storage,
             frontend_dir: PathBuf::from("frontend"),

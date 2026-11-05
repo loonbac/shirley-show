@@ -245,17 +245,33 @@ pub struct TicketDto {
     pub estado_checkin: String,
     pub hora_ingreso: Option<String>,
     pub qr_svg: Option<String>,
+    /// The exact payload printed into the ticket's QR code.
+    ///
+    /// The server decides this, not the client: the printed image must carry the
+    /// same credential the door will compare, wrapped the same way. A client
+    /// deriving it from `window.location` would print a panel-domain URL, and the
+    /// buyer scanning their own ticket would hit the Access login.
+    pub qr_payload: Option<String>,
     pub codigo_qr: Option<String>,
     pub fecha_creacion: String,
     pub fecha_actualizacion: String,
 }
 
 impl TicketDto {
-    pub fn from_domain(t: &Ticket, include_qr: bool) -> Self {
+    pub fn from_domain(t: &Ticket, include_qr: bool, public_base_url: Option<&str>) -> Self {
         let is_paid = t.estado_pago == PaymentStatus::Pagado;
-        let qr_svg = if include_qr { t.render_qr_svg() } else { None };
+        let qr_svg = if include_qr {
+            t.render_qr_svg(public_base_url)
+        } else {
+            None
+        };
         let codigo_qr = if include_qr && is_paid {
             Some(t.codigo_qr.as_str().to_string())
+        } else {
+            None
+        };
+        let qr_payload = if include_qr && is_paid {
+            Some(t.qr_payload(public_base_url))
         } else {
             None
         };
@@ -276,6 +292,7 @@ impl TicketDto {
             estado_checkin: t.estado_checkin.as_str().to_string(),
             hora_ingreso: t.hora_ingreso.clone(),
             qr_svg,
+            qr_payload,
             codigo_qr,
             fecha_creacion: t.fecha_creacion.clone(),
             fecha_actualizacion: t.fecha_actualizacion.clone(),

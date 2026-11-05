@@ -68,6 +68,7 @@ impl TicketingServices {
     pub fn new(
         repo: Arc<SqliteTicketingRepository>,
         poster_storage: Arc<LocalPosterStorage>,
+        public_base_url: Option<String>,
     ) -> Self {
         let creds_gen = Arc::new(OsRandomCredentials::new());
         Self {
@@ -105,7 +106,10 @@ impl TicketingServices {
             update_ticket_contact: Arc::new(UpdateTicketContact::new(repo.clone())),
             delete_ticket: Arc::new(DeleteTicket::new(repo.clone())),
             confirm_ticket_payment: Arc::new(ConfirmTicketPayment::new(repo.clone())),
-            get_public_ticket: Arc::new(GetPublicTicket::new(repo.clone(), repo.clone())),
+            get_public_ticket: Arc::new(
+                GetPublicTicket::new(repo.clone(), repo.clone())
+                    .with_public_base_url(public_base_url.clone()),
+            ),
             check_in_ticket: Arc::new(CheckInTicket::new(repo.clone())),
             repo,
             poster_storage,
