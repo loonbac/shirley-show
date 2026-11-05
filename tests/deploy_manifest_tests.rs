@@ -101,9 +101,39 @@ fn test_compose_yaml_structure_and_defaults() {
         content.contains("shirley-data:/app/data"),
         "compose.yaml must mount persistent volume"
     );
+
+    // The Colab token must be mounted AND writable.
+    //
+    // This assertion used to demand `:ro` in the file, with the message "must
+    // mount SSH key as read-only". It lost its subject in 1f79429 ("mount the
+    // Colab token read-write and document it"), which removed the id_ed25519
+    // mount together with its `:ro`, because the SSH backend had been replaced
+    // by Colab. From then on the only `:ro` left in the file was the Colab
+    // token's, so the assertion started failing for a reason its message did
+    // not describe.
+    //
+    // "Fixing" it by adding `:ro` back is the trap: colab-cli rewrites that file
+    // when an access_token expires, so a read-only mount makes every separation
+    // fail once the hour is up -- silently, in production, on a schedule. The
+    // compose is right and the assertion was wrong.
+    //
+    // So this pins the real invariant: the token is mounted, and it is NOT
+    // read-only. A future regression that adds `:ro` back now fails here,
+    // by name, instead of breaking the product an hour into the event.
+    // Match the MOUNT, not the environment variable that names the same path.
+    // `SHIRLEY_COLAB_TOKEN=...:-/home/shirley/...` contains the path too, and it
+    // is the first match in the file, so searching for the bare path selected the
+    // env var and the assertion could never fail. A mount has "host:container";
+    // the env var has ":-" in between. The leading colon is the discriminator.
+    let token_mount = content
+        .lines()
+        .find(|line| line.contains(":/home/shirley/.config/colab/token.json"))
+        .expect("compose.yaml must mount the Colab OAuth token");
     assert!(
-        content.contains(":ro"),
-        "compose.yaml must mount SSH key as read-only (:ro)"
+        !token_mount.trim_end().ends_with(":ro"),
+        "the Colab token must stay read-write: colab-cli rewrites it when the \
+         access_token expires, and a read-only mount breaks separation hourly. \
+         Mount in question: {token_mount}"
     );
     assert!(
         content.contains("JOSHUA_PC_HOST=${JOSHUA_PC_HOST:-}"),
