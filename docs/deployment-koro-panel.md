@@ -575,6 +575,39 @@ En esa sesión, `js/data = 14` se midió como ficheros en disco (14, correcto) y
 como etiquetas `<script src=` en el HTML servido (0, también correcto: la landing
 no carga ningún JS externo, su script es inline).
 
+### Una medición de layout sin el CSS aplicado no mide nada
+
+Quinta trampa de la misma familia, y la más silenciosa: un número de layout
+parece una medición y puede ser el resultado de los estilos por defecto del
+navegador.
+
+En Playwright, `page.setContent()` deja el documento en `about:blank`, así que
+**un `<link href="file://…">` no carga**. El `getBoundingClientRect()` devuelve
+entonces cifras medidas con el CSS del navegador, no con el del proyecto. La
+conclusión puede incluso ser correcta, con evidencia inválida: el peor caso.
+
+Y los números discrepan por una razón concreta: `.text-input` tiene
+`width: 100%` **más `padding` y `border`**. Sin el `box-sizing: border-box` de
+`base/reset.css`, el input desborda su envoltorio; con él, lo contiene. El mismo
+markup da 314, 337, 363 o 364 según qué hojas se hayan cargado.
+
+**La comprobación que invalida o valida la medición**, antes de creerla:
+
+```js
+const g = getComputedStyle(el).boxSizing;   // 'border-box' sólo con el reset
+document.styleSheets.length;                // 0 con setContent + file://
+```
+
+Si el valor que se lee es el del navegador por defecto, no se aplicó nada.
+
+**Cómo cargar el CSS real**: leer `frontend/styles/index.css` y resolver sus
+`@import` a CSS plano —así entra el reset—, o navegar a la página servida. Un
+`<link>` a `file://` desde `setContent` nunca funciona.
+
+**Regla general**: un número de layout sin `box-sizing` documentado no significa
+nada. Citar una comparación —«idéntico con y sin la línea»— sobrevive a que el
+número absoluto sea irreproducible; citar el píxel no.
+
 ### Verificar una lectura no se hace con una escritura
 
 `POST /api/entradas/checkin` **marca la entrada**. Comprobar con esa llamada que
