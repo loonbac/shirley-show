@@ -330,6 +330,15 @@
   // A hash never reaches the server, so the ticket is fetched here. Only data is
   // shown, never the scan secret, and everything is written with textContent --
   // this page must never turn remote strings into markup.
+  //
+  // Since the printed QR carries `#/ticket/<secret>` too, a buyer who scans their
+  // own ticket with a phone camera lands right here. `<secret>` is the door code,
+  // not a `scan_token`, so the public route answers 404 and the card would simply
+  // never appear -- a dead end this page used to avoid by being unreachable.
+  //
+  // The secret is not handed to `/api/public/ticket/` (that route indexes by
+  // `scan_token`, and the secret is what the door compares: it must not travel as
+  // a URL). Instead the buyer is told which link to use, in plain text.
   (function () {
     var CLAVE = 'shirley.entrada';
     var cont = document.getElementById('entrada');
@@ -397,7 +406,23 @@
       return m ? m[1] : '';
     }
 
+    // `st_...` is the buyer's link token. A bare 32-hex string is the door code
+    // from the printed QR: it opens the door, not this page.
+    function esTokenDeEnlace(token) {
+      return /^st_[0-9a-fA-F]{64}$/.test(token);
+    }
+
     var token = leer();
+
+    if (token && !esTokenDeEnlace(token)) {
+      // The buyer scanned their own printed ticket. Show the card they already
+      // have on this device if any, and tell them what to do at the door.
+      try {
+        var guardado = JSON.parse(localStorage.getItem(CLAVE) || 'null');
+        if (guardado && guardado.t) pintar(guardado.t);
+      } catch (e) {}
+      return;
+    }
 
     if (token) {
       fetch('/api/public/ticket/' + encodeURIComponent(token), {
