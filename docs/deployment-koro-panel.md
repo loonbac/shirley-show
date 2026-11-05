@@ -903,6 +903,34 @@ literal mojibake    "No ingresÃ³"   ->  8   (TODAS figuran ingresadas)
 Y la dirección del engaño es la peor posible, porque se lee como «todo el mundo ya
 entró». Un informe hecho así dice lo contrario de la verdad con aspecto de dato.
 
+**Y hay dos causas distintas que producen el mismo síntoma.** Distinguirlas importa,
+porque se arreglan de forma diferente:
+
+- **acentos en el canal**: el literal se corrompe al atravesar capas. Se arregla
+  leyendo por HTTP o por Python, sin pasar el texto por `sh -c`.
+- **escape en el emisor**: el literal llega intacto pero **ya escapado**.
+  `json.dumps` con su `ensure_ascii=True` por defecto convierte `ó` en la secuencia
+  de seis caracteres `\u00f3`, y SQLite **no interpreta `\u` en literales**: compara
+  contra esos seis caracteres, que nunca igualan al carácter real.
+
+Medido sobre la base real, aislando las dos:
+
+```
+literal escapado (\u00f3 como 6 chars)  hex 4E6F...5C7530306633   != -> 8   (todas)
+dato almacenado                          hex 4E6F...73C3B3         == real
+literal real                             hex 4E6F...73C3B3         != -> 0   (correcto)
+SQLite interpreta \u en un literal?                                   0   (no)
+```
+
+El síntoma es idéntico al de la corrupción de canal; la causa no. **Documentar sólo
+una de las dos habría dejado la otra circulando como «la trampa de acentos».**
+
+Y una advertencia sobre el control: si la comprobación se construye **por la misma
+vía** que el defecto, comparte el defecto. Con `json.dumps` en dos pasos,
+`ensure_ascii=True` y `False` dan el mismo resultado —`No ingres\\u00f3`—, así que
+la comparación no distingue nada. **Un control que comparte la vía del defecto no
+controla.**
+
 La regla: **abrir SQLite con Python y comparar valores en Python**, nunca un
 literal acentuado pasado por capas de comillas, `ssh`, `sh -c` y `json.dumps`. El
 script lo hace bien por construcción: los literales van como **parámetro** `?`
