@@ -852,18 +852,44 @@ impl VocalSeparator for ColabVocalSeparator {
                 _ => {
                     this.forget_session().await;
 
-                    let mut start_cmd = Command::new(&this.config.colab_bin);
-                    start_cmd.kill_on_drop(true);
-                    start_cmd.args(["start", "--gpu", &this.config.gpu_type, "--json"]);
-                    start_cmd.stdin(Stdio::null());
-                    start_cmd.stdout(Stdio::piped());
-                    start_cmd.stderr(Stdio::null());
+                    // Colab can report an accelerator as available while its
+                    // assignment endpoint hangs until the client gives up, so a
+                    // single attempt turns a temporary capacity problem into a
+                    // failed separation. Try the configured fallback before
+                    // giving up; the primary GPU stays first because it is the
+                    // measured fastest option.
+                    let mut candidates = vec![this.config.gpu_type.clone()];
+                    if let Some(fallback) = this.config.gpu_fallback.as_ref()
+                        && *fallback != this.config.gpu_type
+                    {
+                        candidates.push(fallback.clone());
+                    }
 
-                    let start_output =
+                    let mut started = None;
+                    for gpu in &candidates {
+                        let mut start_cmd = Command::new(&this.config.colab_bin);
+                        start_cmd.kill_on_drop(true);
+                        start_cmd.args(["start", "--gpu", gpu, "--json"]);
+                        start_cmd.stdin(Stdio::null());
+                        start_cmd.stdout(Stdio::piped());
+                        start_cmd.stderr(Stdio::null());
+
                         match tokio::time::timeout(start_timeout, start_cmd.output()).await {
-                            Ok(Ok(o)) if o.status.success() => o,
-                            _ => return Err(VocalSeparationError::ColabUnavailable),
-                        };
+                            Ok(Ok(o)) if o.status.success() => {
+                                started = Some(o);
+                                break;
+                            }
+                            _ => {
+                                if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                                    eprintln!("[separate] la GPU {gpu} no asigno; siguiente");
+                                }
+                            }
+                        }
+                    }
+
+                    let Some(start_output) = started else {
+                        return Err(VocalSeparationError::ColabUnavailable);
+                    };
 
                     // The runtime is already allocated at this point. When the
                     // output cannot be parsed there is no id to stop, so every

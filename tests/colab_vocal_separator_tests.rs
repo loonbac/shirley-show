@@ -377,6 +377,9 @@ struct MockColabFixture {
     colab_bin: PathBuf,
     log_file: PathBuf,
     trigger_fail_start: PathBuf,
+    /// Holds a GPU name; `start --gpu <name>` fails only for that accelerator,
+    /// which is how a per-GPU assignment outage is simulated.
+    trigger_fail_gpu: PathBuf,
     trigger_fail_exec: PathBuf,
     trigger_bad_sha: PathBuf,
     trigger_bad_duration: PathBuf,
@@ -390,6 +393,7 @@ impl MockColabFixture {
         let colab_bin = temp_dir.path().join("mock_colab.sh");
         let log_file = temp_dir.path().join("colab_calls.log");
         let trigger_fail_start = temp_dir.path().join("fail_start");
+        let trigger_fail_gpu = temp_dir.path().join("fail_gpu");
         let trigger_fail_exec = temp_dir.path().join("fail_exec");
         let trigger_bad_sha = temp_dir.path().join("bad_sha");
         let trigger_bad_duration = temp_dir.path().join("bad_duration");
@@ -402,6 +406,7 @@ impl MockColabFixture {
 
         let log_str = log_file.display().to_string();
         let fail_start_str = trigger_fail_start.display().to_string();
+        let fail_gpu_str = trigger_fail_gpu.display().to_string();
         let fail_exec_str = trigger_fail_exec.display().to_string();
         let bad_sha_str = trigger_bad_sha.display().to_string();
         let bad_dur_str = trigger_bad_duration.display().to_string();
@@ -413,6 +418,12 @@ cmd="$1"
 if [ "$cmd" = "start" ]; then
     if [ -f "{fail_start_str}" ]; then
         exit 1
+    fi
+    if [ -f "{fail_gpu_str}" ]; then
+        broken=$(cat "{fail_gpu_str}")
+        case "$*" in
+            *"--gpu $broken"*) exit 1 ;;
+        esac
     fi
     echo "start $@" >> "{log_str}"
     echo '{{"session":"sess-mock-42","proxyUrl":"http://127.0.0.1:8080"}}'
@@ -501,6 +512,7 @@ fi
             colab_bin,
             log_file,
             trigger_fail_start,
+            trigger_fail_gpu,
             trigger_fail_exec,
             trigger_bad_sha,
             trigger_bad_duration,
@@ -791,4 +803,76 @@ exit 0
         !stop_line.contains("--session"),
         "the stop must be session-less when no id could be parsed, got: {stop_line}"
     );
+}
+
+/// Colab can list an accelerator as available while its assignment endpoint
+/// hangs or refuses, so the primary GPU failing must not fail the separation
+/// outright. The fallback is tried, and the run must land on it.
+#[tokio::test]
+async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
+    let fixture = MockColabEnv::new_fixture();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let mut cfg = fixture.make_config(gpu.clone());
+    cfg.gpu_type = "g4".to_string();
+    cfg.gpu_fallback = Some("l4".to_string());
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let output_mp3 = fixture.temp_dir.path().join("fallback_out.mp3");
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: output_mp3,
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(120),
+    };
+
+    let res = sep.separate(req).await;
+    assert!(
+        res.is_ok(),
+        "the fallback GPU must carry the separation, got: {res:?}"
+    );
+
+    let log = fixture.read_log();
+    let starts: Vec<&str> = log
+        .lines()
+        .filter(|l| l.starts_with("start "))
+        .collect();
+    assert_eq!(
+        starts.len(),
+        1,
+        "the broken GPU must not be logged as started, log was: {log}"
+    );
+    assert!(
+        starts[0].contains("--gpu l4"),
+        "the run must land on the fallback GPU, log was: {log}"
+    );
+    assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
+}
+
+/// Negative control for the test above: with the fallback disabled the same
+/// broken primary must still surface as ColabUnavailable. Without this, the
+/// fallback test could pass for the wrong reason.
+#[tokio::test]
+async fn test_start_without_fallback_still_reports_colab_unavailable() {
+    let fixture = MockColabEnv::new_fixture();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let mut cfg = fixture.make_config(gpu.clone());
+    cfg.gpu_type = "g4".to_string();
+    cfg.gpu_fallback = None;
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let output_mp3 = fixture.temp_dir.path().join("no_fallback_out.mp3");
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: output_mp3,
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(120),
+    };
+
+    let res = sep.separate(req).await;
+    assert_eq!(res.unwrap_err(), VocalSeparationError::ColabUnavailable);
+    assert_eq!(gpu.available_permits(), 1);
 }
