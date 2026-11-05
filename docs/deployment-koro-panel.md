@@ -504,3 +504,88 @@ colab exec --session <id> -c 'print("VIVA")'   # funciona si está viva
 colab stop
 colab exec --session <id> -c 'print("VIVA")'   # "no active runtime with endpoint"
 ```
+---
+
+## 12. Verificar un despliegue sin confundir estados viejos
+
+Cuatro veces en una sola sesión, el agente que despliega reportó una imagen y el
+agente que verifica midió otra. Ninguna de las dos partes se equivocó al medir;
+se midieron **momentos distintos**.
+
+### La regla que no basta
+
+«Un pedido, un deploy; gana el último mensaje» ordena los pedidos, pero no dice
+nada del estado. El problema real es que se verifica un estado que ya cambió.
+
+### La que sí
+
+Al leer un despliegue, no basta la etiqueta de la imagen. Hay que leer también el
+arranque:
+
+```bash
+docker inspect panel-app-shir --format 'imagen={{.Config.Image}} arranque={{.State.StartedAt}}'
+```
+
+Si el `StartedAt` es **posterior** a tu propio pedido, la imagen que estás mirando
+ya es la que pediste y el reporte que esperabas se produjo. Comprobar la etiqueta
+sola deja los dos casos indistinguibles.
+
+```
+imagen=shirley-show:14290bf arranque=2026-11-05T14:11:15.59558965Z
+estado=Up 11 minutes (healthy)
+```
+
+### Discriminadores que no funcionan
+
+Tres instrumentos mintieron en esa sesión, siempre en la misma dirección: daban
+un resultado limpio sobre un sistema sano.
+
+| Instrumento | Qué dio | Realidad |
+| --- | --- | --- |
+| `docker exec … sh -c "grep …"` con acentos | `0` | el `ó` se rompe entre capas de comillas |
+| `strings` sobre el binario, buscando un campo serde | `0` | el nombre del campo no es una cadena garantizada |
+| Copiar solo `shirley-show.sqlite3` | tabla vacía | falta el `-wal`: en modo WAL los datos recientes viven ahí |
+
+Para acentos: descargar por HTTP o usar Python, nunca `grep` anidado en
+`docker exec`.
+
+Para campos de un DTO: el JSON real del endpoint o el fichero fuente. Nunca las
+cadenas del binario.
+
+Para un snapshot de base en WAL: copiar los tres ficheros (`.sqlite3`, `-wal`,
+`-shm`) o usar `VACUUM INTO`.
+
+### La señal de alarma
+
+Las tres trampas produjeron una respuesta **demasiado limpia**: `0`, `404`, tabla
+vacía. Cuando el instrumento da un resultado perfectamente nítido sobre algo que
+debería tener matices, hay que sospechar del instrumento antes que del sistema.
+
+### Invariantes: siempre con su comando
+
+Un invariante sin unidad no se puede verificar: dos personas pueden medir cosas
+distintas y ambas tener razón.
+
+```
+mal:   js/data = 14
+bien:  ls /app/frontend/js/data | wc -l = 14
+```
+
+En esa sesión, `js/data = 14` se midió como ficheros en disco (14, correcto) y
+como etiquetas `<script src=` en el HTML servido (0, también correcto: la landing
+no carga ningún JS externo, su script es inline).
+
+### Verificar una lectura no se hace con una escritura
+
+`POST /api/entradas/checkin` **marca la entrada**. Comprobar con esa llamada que
+un código se puede leer gasta la entrada en producción. Para verificar lecturas:
+`GET`, SQL, o un contenedor aislado con copia de la base.
+
+Y si se prueba una venta o un evento, **nunca contra los datos del dueño**:
+
+```bash
+docker run -v /tmp/prueba-data:/app/data …    # directorio vacío
+```
+
+Un solo `POST /api/eventos` contra la base real crea un evento que hay que borrar
+después, y el borrado es una operación sobre datos ajenos.
