@@ -8,6 +8,46 @@ Este documento establece la filosofía, los estándares y los patrones para cons
 
 ---
 
+## 0. Producción está en vivo: retrocompatibilidad obligatoria
+
+Este sistema está desplegado y **en uso real**. Hay eventos con entradas ya
+vendidas, impresas y escaneadas. Un cambio que rompa algo se descubre en la
+puerta, con gente esperando entrar.
+
+### Regla central
+
+Ningún cambio puede invalidar datos, códigos o clientes que ya existen. Antes
+de modificar algo, preguntarse: **¿qué ya está en el mundo que depende de esto?**
+
+### Invariantes que no se rompen
+
+- **Los códigos QR de las entradas ya emitidas siguen siendo válidos.** Hoy el
+  QR contiene solo el secreto de 32 hex (`codigo_qr`), no una URL. No cambiar el
+  formato del código, ni el algoritmo de validación, ni el de check-in.
+- **Los datos existentes siguen legibles.** Migraciones aditivas y con valor por
+  defecto; nunca destructivas. No renombrar ni eliminar columnas o tablas con
+  datos vivos. Un campo nuevo va nullable o con default.
+- **Los enlaces públicos ya compartidos siguen funcionando.** Si se comparte un
+  enlace de entrada o de evento, mover de dominio o de ruta exige redirección
+  permanente desde la ruta anterior, no solo cambiar la nueva.
+- **La API mantiene sus contratos.** Campos y rutas existentes se conservan; lo
+  nuevo se agrega. Si hay que cambiar una forma de respuesta, se versiona o se
+  acompaña con compatibilidad durante la transición.
+- **El check-in en puerta nunca se degrada.** Es el camino crítico: si algo falla
+  ahí, la gente no entra. Cualquier cambio en escaneo, validación o estado de
+  entrada necesita prueba con una entrada real ya emitida.
+
+### Cómo verificar antes de dar algo por terminado
+
+1. **Reproducir con datos reales, no inventados.** Una entrada emitida antes del
+   cambio debe seguir validando después.
+2. **Comprobar el efecto, no la intención.** Que el test pase no prueba que los
+   datos vivos sobrevivieron: comprobarlo sobre una copia de producción.
+3. **Declarar el riesgo.** Si el cambio toca esquema, contratos, rutas o dominio,
+   decirlo explícitamente y explicar el plan de compatibilidad.
+4. **Ante la duda, no romper.** Es preferible una capa de compatibilidad temporal
+   que un evento arruinado.
+
 ## 1. Filosofía Central: Modularidad y Componibilidad con Propósito
 
 1. **Cohesión antes que fragmentación.** Cada módulo representa una capacidad o responsabilidad reconocible. Un archivo puede contener varias funciones estrechamente relacionadas; no debe acumular responsabilidades ajenas.

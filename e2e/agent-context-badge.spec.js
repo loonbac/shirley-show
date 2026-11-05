@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 // catalogue label read "Modo catálogo (creará un nuevo sh..." -- a truncated
 // sentence that tells the user nothing.
 test('el badge de modo del asistente no corta el texto', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/panel');
 
   // Ctrl+K opens the assistant; the floating trigger only exists once a
   // presentation exists, and this test intentionally starts from an empty

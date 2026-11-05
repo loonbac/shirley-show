@@ -33,7 +33,7 @@ test.describe('Asistente: respuestas en Markdown', () => {
   ].join('\n');
 
   test('un turno del asistente se renderiza como Markdown, no como texto plano', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/panel');
     await page.waitForLoadState('networkidle');
 
     // Inject one assistant turn and one user turn through the live app modules.
@@ -97,7 +97,7 @@ test.describe('Asistente: respuestas en Markdown', () => {
   });
 
   test('el HTML del modelo nunca se convierte en elementos', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/panel');
     await page.waitForLoadState('networkidle');
 
     const result = await page.evaluate(async () => {

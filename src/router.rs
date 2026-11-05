@@ -16,11 +16,25 @@ pub fn create_router(state: AppState) -> Router {
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-cache, no-store, must-revalidate"),
         ))
-        .service(ServeDir::new(frontend_dir));
+        .service(ServeDir::new(frontend_dir.clone()));
 
     Router::new()
         .route("/", get(static_assets::serve_index))
+        .route("/panel", get(static_assets::serve_panel))
+        .route("/panel/", get(static_assets::serve_panel))
         .nest_service("/assets", frontend_service)
+        // The landing is self-contained: its stylesheet and images live under
+        // /landing, so they need their own static service. Keeping it separate
+        // means the panel bundle and the landing cannot interfere.
+        .nest_service(
+            "/landing",
+            ServiceBuilder::new()
+                .layer(SetResponseHeaderLayer::overriding(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+                ))
+                .service(ServeDir::new(frontend_dir.join("landing"))),
+        )
         .route("/api/presentations", get(presentations::list::list))
         .route("/api/presentations", post(presentations::create::create))
         .route("/api/presentations/{id}", get(presentations::get::get))
