@@ -432,3 +432,75 @@ Con `SHIRLEY_COLAB_DEBUG_OUTPUT=1` el apagado diferido se registra:
 [release] generation 1 owns=true
 [release] stop gpu-g4-... ok=true
 ```
+
+## 11. Apagado de la GPU: quién la apaga y cuándo
+
+La GPU de Colab cuesta mientras existe. Hay tres mecanismos, y conviene saber
+cuál actúa en cada caso porque el log los distingue.
+
+### 11.1 Liberación al terminar, con ventana de reutilización
+
+Al acabar una separación la máquina **no** se apaga: se queda 180 s para que una
+segunda petición cercana la reutilice. Una tarea diferida la apaga al vencer la
+ventana. Verificado en producción: `Connected: true` durante 120 s,
+`No active runtime` a los 150 s.
+
+### 11.2 Barrido al arrancar
+
+Si el proceso muere por SIGKILL, OOM o reinicio duro, **ningún destructor corre**
+(se muere con el proceso) y la GPU seguiría facturando hasta que Colab la expira.
+El proceso nuevo es el primero capaz de limpiarlo, y al arrancar no hay ningún
+turno en curso:
+
+```text
+Barrido de GPU al arrancar: runtimes huérfanos liberados=true
+```
+
+### 11.3 El barrido respeta un arrendamiento
+
+`colab stop` **sin `--session` libera todos los runtimes de la cuenta**, no solo
+los propios. Un barrido ciego mataría el trabajo de otra instancia viva.
+
+Por eso el arranque consulta `<data>/colab-runtime-owner.pid`:
+
+| pid del arrendamiento | significado | acción |
+| --- | --- | --- |
+| no existe | nadie reclamó | barrer |
+| pid muerto | lo dejó un proceso que ya no está | barrer |
+| pid vivo y no somos nosotros | otra instancia trabaja | **omitir** |
+| pid vivo y somos nosotros | es nuestro propio arranque | barrer |
+
+Al omitir, el log dice:
+
+```text
+Barrido de GPU al arrancar: omitido, otra instancia sigue viva
+```
+
+**Eso es un resultado correcto, no un fallo.** Significa que el arrendamiento
+está protegiendo trabajo ajeno.
+
+### 11.4 Límites conocidos
+
+- **Dentro de un contenedor el pid propio es siempre 1**, así que un contenedor
+  nuevo ve `pid == self` y reclama el arrendamiento. Es lo correcto para
+  reemplazar al anterior, que es el caso de un redespliegue, pero **no distingue
+  dos contenedores en máquinas distintas**.
+- **No hay vigilante periódico.** Existió uno cada 60 s y se retiró: apagaba GPUs
+  ajenas a mitad de vuelo, y como todas las instancias comparten cuenta de Colab,
+  también las propias. Su rastro era invisible porque solo registraba con
+  `SHIRLEY_COLAB_DEBUG_OUTPUT`, que en producción no está definida.
+- Si un release falla en silencio y no hay redespliegue, la GPU vive hasta que
+  Colab la reclama por inactividad. Es el hueco que queda, y es más barato que
+  apagar el trabajo de otro.
+
+### 11.5 Cómo comprobarlo sin engañarse
+
+`colab status` **no basta**: el `Idle` puede ser de una sesión anterior y una GPU
+recién arrancada sin trabajo la recoge Colab sola. La prueba real es preguntar por
+la sesión concreta:
+
+```sh
+colab exec --session <id> -c 'print("VIVA")'   # funciona si está viva
+colab stop
+colab exec --session <id> -c 'print("VIVA")'   # "no active runtime with endpoint"
+```
