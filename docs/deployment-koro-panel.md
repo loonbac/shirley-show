@@ -1060,3 +1060,68 @@ fijaría el bundle entero.
 
 **El `no-store` del endpoint de ticket se queda.** Ahí protege un secreto y no
 es caché de assets.
+
+## 17. Si el panel vuelve a parecer lento: la cascada, no la cabecera
+
+Antes de tocar `Cache-Control` otra vez, leer esto. La caché ya se arregló y
+**no es el problema que queda.**
+
+### Lo que se arregló y lo que no
+
+`ASSET_CACHE_CONTROL` (`src/router.rs`) pasó de `no-store` a
+`public, max-age=60, must-revalidate`. Eso eliminó la re-descarga de 1,2 MB en
+cada visita. **Lo que no elimina es la latencia del primer load**, porque el
+bundle son **85 módulos alcanzables en una cascada de imports de 6 niveles**.
+
+### Los números, medidos
+
+```
+peso del bundle        1,2 MB   (1076 KB js + 137 KB css) en 145 archivos
+módulos alcanzables    85
+profundidad de cascada 6 niveles
+TTFB en el origen      1,5 ms
+TTFB por el túnel      ~0,8 s
+```
+
+Un navegador descubre los imports nivel por nivel: hasta no parsear el nivel N
+no sabe qué pedir del nivel N+1. Con 6 niveles y ~0,8 s por viaje, el primer
+load paga del orden de **6 × 0,8 s solo en espera de red**, antes de ejecutar
+nada.
+
+### Dónde se cachea de verdad, y dónde no
+
+```
+landing  /assets/js/main.js   public, max-age=14400 (lo reescribe Cloudflare)
+                              cf-cache-status: HIT con age creciente
+landing  /                    no-cache · cf-cache-status: DYNAMIC
+panel    /assets/js/main.js   302 a Access; el panel NUNCA se cachea en el borde
+```
+
+**El panel va detrás de Cloudflare Access, y Access corta antes de la caché.**
+Ahí el navegador ve los 60 s del origen, no las 4 h que Cloudflare impone a la
+landing. Por eso subir el `max-age` del origen no arregla el panel: solo alarga
+la vida en el navegador de cada usuario.
+
+### Qué mirar, en orden
+
+1. **Reducir la profundidad de la cascada.** Es la palanca real. Agrupar
+   módulos o aplanar los imports de los niveles 3-6 baja el número de viajes
+   secuenciales; ninguna cabecera lo hace.
+2. **Comprobar que no volvió el `no-store`.** Si alguien lo reintroduce «por
+   seguridad», vuelve la re-descarga de 1,2 MB. El test
+   `test_static_assets_are_cacheable_while_html_is_not` lo detecta.
+3. **Subir `max-age` solo si el problema es de visitas repetidas**, no del
+   primer load. Y recordar que el despliegue termina con purga (§16), así que
+   un `max-age` largo no deja el deploy invisible en el borde, pero sí en el
+   navegador de quien ya tenía la copia.
+
+### Un señuelo que existe en producción
+
+`/app/data/shirley.db` — **0 bytes, 0 tablas**. No lo crea la aplicación: no
+hay ninguna referencia a ese nombre en `src/`, `compose.yaml` ni la
+configuración. La base real es `/app/data/shirley-show.sqlite3`.
+
+Está al lado de la real, y un fichero de base vacío es exactamente lo que
+alguien abre un día creyendo que es la base. No se borró desde el runbook
+porque tocar el volumen de datos no es tarea de una nota de despliegue; queda
+anotado para quien pueda hacerlo con criterio.
