@@ -67,6 +67,36 @@ test.describe('QR impreso escaneado por el comprador', () => {
     await expect(page.locator('#entrada')).toContainText('Mayela Salinas');
   });
 
+  test('la tarjeta dibuja el QR que la puerta escanea', async ({ page }) => {
+    // The QR is the credential. A card that proves the purchase but shows no QR
+    // leaves a buyer with nothing to present if they left the photo at home.
+    await page.route('**/api/public/ticket/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: ticketBody() }),
+    );
+
+    await page.goto(`/#/ticket/${DOOR_SECRET}`);
+    await expect(page.locator('#entrada')).toBeVisible();
+
+    await expect(page.locator('#entrada .pres__ticket-qr svg')).toHaveCount(1);
+  });
+
+  test('la tarjeta no promete que basta con dar el nombre', async ({ page }) => {
+    // `door_allows_path` in src/config.rs does not expose the ticket list to the
+    // door host: the doorman can only scan a QR. The old footer said the
+    // opposite, which stages a scene at the door. Assert the absence of the
+    // promise, not the presence of its replacement.
+    await page.route('**/api/public/ticket/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: ticketBody() }),
+    );
+
+    await page.goto(`/#/ticket/${DOOR_SECRET}`);
+    await expect(page.locator('#entrada')).toBeVisible();
+
+    const pie = await page.locator('#entrada .pres__ticket-pie').innerText();
+    expect(pie.toLowerCase()).not.toContain('basta con dar tu nombre');
+    expect(pie.toLowerCase()).toContain('qr');
+  });
+
   test('el enlace del comprador sigue funcionando', async ({ page }) => {
     // Control: the `st_...` token must keep working, so the fix above cannot be
     // "make every hash fetch" by dropping the link token.
