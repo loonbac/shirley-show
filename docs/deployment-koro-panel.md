@@ -619,6 +619,32 @@ sin la seccion                fila 390  envoltorio 320  input 320
 Los dos son «el mismo componente» y miden distinto por 26 px. Un número sin el
 árbol completo que lo rodea no es comparable con otro número, ni siquiera propio.
 
+Y una cuarta comprobación, que salió de la anterior: **copiar el markup del código
+fuente, no escribirlo de memoria.** Las clases de un átomo traen propiedades
+invisibles en el nombre del componente. Medido en la misma fila:
+
+```
+botón sin clases (inventado)      input 314
+botón real (btn btn-ghost btn-sm) input 294
+```
+
+La diferencia son los 20 px de `min-width: var(--touch-target-min)` que `.btn`
+declara (`atoms/button.css:7`), y en una columna `auto` son 20 px menos para las
+otras dos. **Un componente inventado mide distinto que el componente que existe.**
+
+Y hay un tercer escenario que nadie había medido, porque no se ve en una captura:
+`forms.js` termina la fila con `.filter(Boolean)`, así que **con un solo tipo de
+entrada el botón no se renderiza**:
+
+```
+2+ tipos  4 hijos  botón 44px  input 294
+1 tipo    3 hijos  sin botón   input 338
+```
+
+44 px exactos, que es el `min-width` del botón. La app real pasa la mayor parte del
+tiempo en el segundo caso. **El estado por defecto también es un escenario.**
+
+
 Un `querySelector` con un nombre que suena bien puede devolver otro nodo, o
 `null`. Y medir un solo hijo de una rejilla mide una rejilla distinta:
 
