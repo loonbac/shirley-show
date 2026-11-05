@@ -31,7 +31,7 @@ fn setup_test_env() -> (axum::Router, TempDir, PathBuf) {
     fs::create_dir_all(&landing_dir).expect("create landing dir");
     fs::write(
         landing_dir.join("index.html"),
-        "<!DOCTYPE html><html><head><title>Test landing</title></head><body><header class=\"pres-hero\"></header></body></html>",
+        "<!DOCTYPE html><html><head><title>Test landing</title></head><body><header class=\"pres__hero\"></header></body></html>",
     )
     .expect("write landing index.html");
 
@@ -213,7 +213,7 @@ async fn test_root_serves_the_public_landing() {
     let html = String::from_utf8_lossy(&body);
 
     assert!(
-        html.contains("pres-hero"),
+        html.contains("pres__hero"),
         "the root must serve the public landing, not the panel"
     );
     assert!(

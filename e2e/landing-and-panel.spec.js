@@ -9,7 +9,7 @@ test('la raíz sirve la landing pública, no el panel', async ({ page }) => {
   await page.goto('/');
 
   // Landing markers.
-  await expect(page.locator('.pres-hero')).toBeVisible();
+  await expect(page.locator('.pres__hero')).toBeVisible();
   await expect(page.getByText('Música en vivo para tus eventos')).toBeVisible();
 
   // The panel UI must not be what loads at the root.
@@ -42,5 +42,5 @@ test('la raíz sin hash no redirige: se queda en la landing', async ({ page }) =
   await page.goto('/');
   await page.waitForTimeout(400);
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.locator('.pres-hero')).toBeVisible();
+  await expect(page.locator('.pres__hero')).toBeVisible();
 });
