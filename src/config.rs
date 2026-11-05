@@ -592,9 +592,11 @@ fn host_of(base_url: Option<&str>) -> Option<String> {
     let without_scheme = url
         .trim_start_matches("https://")
         .trim_start_matches("http://");
-    let host = without_scheme.split('/').next()?.split(':').next()?;
-    let host = host.trim().to_ascii_lowercase();
-    (!host.is_empty()).then_some(host)
+    let authority = without_scheme.split('/').next()?;
+    // Delegate the authority parsing to the same function that handles a Host
+    // header: both have to survive `[::1]:3001`, and duplicating the split is
+    // exactly how this one kept the bug after the other was fixed.
+    normalize_host(Some(authority))
 }
 
 /// Whether a normalized host refers to this machine.
