@@ -271,3 +271,20 @@ mod wiring {
         assert!(!refused, "the panel must reach the door routes too");
     }
 }
+
+#[test]
+fn test_the_door_does_not_close_the_event() {
+    // `finalizeEvent` lives in `controllers.js`, which the door does not
+    // import. The doc-comment used to claim the door closed the event; pinning
+    // the refusal here stops anyone from widening the allowlist to match it.
+    let cfg = three_hosts();
+    for path in [
+        "/api/eventos/abc/finalizar",
+        "/api/eventos/abc/reabrir",
+    ] {
+        assert!(
+            !cfg.door_allows("POST", path),
+            "the door must not reach POST {path}: only the panel closes an event"
+        );
+    }
+}
