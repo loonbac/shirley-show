@@ -53,10 +53,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # >= 3.12; bookworm ships 3.11, so uv provisions a 3.12 interpreter for it.
 # The binary keeps the name `colab`.
 # Install uv from its standalone installer and pin the CLI release.
+# uv 0.12 rejects the old bin-directory flag on `tool install`;
+# UV_TOOL_BIN_DIR is the supported way to put the binary on PATH.
+# UV_TOOL_DIR keeps the tool environment out of /root (mode 700): otherwise
+# /usr/local/bin/colab is a symlink that the shirley user (UID 1000) cannot follow.
+# UV_PYTHON_INSTALL_DIR does the same for uv's managed Python 3.12: the colab
+# shebang points at that interpreter, which UID 1000 could not reach in /root.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && /root/.local/bin/uv tool install --python 3.12 \
-        --bin-dir /usr/local/bin 'google-colab-cli==0.8.0' \
-    && colab --version
+    && UV_TOOL_BIN_DIR=/usr/local/bin UV_TOOL_DIR=/usr/local/lib/uv-tools UV_PYTHON_INSTALL_DIR=/usr/local/lib/uv-python /root/.local/bin/uv tool install --python 3.12 \
+        'google-colab-cli==0.8.0' \
+    && colab version
 
 # Non-root user. UID/GID 1000 matches the typical deploy host user, so a bind
 # mount of the data directory keeps the right owner.

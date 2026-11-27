@@ -93,6 +93,41 @@ fn test_dockerfile_official_google_colab_cli() {
         content.contains("uv tool install"),
         "Dockerfile must install google-colab-cli via uv tool install"
     );
+    // uv 0.12 rejects `--bin-dir` on `uv tool install`; the supported way to
+    // place the CLI on PATH is the UV_TOOL_BIN_DIR environment variable.
+    assert!(
+        content.contains("UV_TOOL_BIN_DIR=/usr/local/bin"),
+        "Dockerfile must set UV_TOOL_BIN_DIR=/usr/local/bin for uv tool install"
+    );
+    // The default tool environment lives under /root/.local, which is mode
+    // 700: /usr/local/bin/colab is then a symlink the shirley user (UID 1000)
+    // cannot follow. UV_TOOL_DIR keeps the tool environment outside /root.
+    assert!(
+        content.contains("UV_TOOL_DIR=/usr/local/lib/uv-tools"),
+        "Dockerfile must set UV_TOOL_DIR=/usr/local/lib/uv-tools so UID 1000 can run colab"
+    );
+    // UV_TOOL_DIR alone is not enough: uv provisions the managed Python 3.12
+    // under /root/.local/share/uv/python by default, and /root is mode 700.
+    // The colab shebang points at that interpreter, so UID 1000 gets
+    // Permission denied unless UV_PYTHON_INSTALL_DIR moves it outside /root.
+    assert!(
+        content.contains("UV_PYTHON_INSTALL_DIR=/usr/local/lib/uv-python"),
+        "Dockerfile must set UV_PYTHON_INSTALL_DIR=/usr/local/lib/uv-python so UID 1000 can follow the colab shebang"
+    );
+    assert!(
+        !content.contains("--bin-dir"),
+        "Dockerfile must not pass --bin-dir to uv tool install (uv 0.12 rejects it)"
+    );
+    // The official CLI exposes `colab version`; `colab --version` exits 2 with
+    // "No such option: --version" and breaks the image build.
+    assert!(
+        content.contains("colab version"),
+        "Dockerfile must verify the CLI with 'colab version'"
+    );
+    assert!(
+        !content.contains("--version"),
+        "Dockerfile must not use 'colab --version' (the CLI has no --version option)"
+    );
 }
 
 #[test]
