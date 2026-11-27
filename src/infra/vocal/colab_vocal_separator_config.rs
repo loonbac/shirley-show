@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -236,6 +236,30 @@ pub fn request_timeout_for(configured: Duration, deadline: Option<Duration>) -> 
     }
 }
 
+/// The value to hand `colab exec --timeout` for a step that still has `budget`.
+///
+/// The official CLI does not wait for the process to finish: it fails the call
+/// when the kernel prints nothing for `--timeout` seconds, and its default is
+/// 30. That default is shorter than a real separation spends silent — the
+/// remote script installs packages and loads the separation models before it
+/// prints anything — so production died at 30s with empty stdout and this on
+/// stderr:
+///
+/// ```text
+/// TimeoutError: Timeout waiting for output: no message from the kernel for
+/// 30s. Use --timeout to allow longer silences.
+/// ```
+///
+/// The kernel silence allowed is therefore the whole budget the step still has,
+/// in whole seconds rounded up, so our own tokio timeout remains the only bound
+/// that can cut a healthy separation short. `--timeout 0` means "no limit" in
+/// the CLI and is never emitted: that would remove the bound instead of
+/// raising it.
+pub fn cli_silence_timeout_secs(budget: Duration) -> u64 {
+    let rounded_up = budget.as_secs() + u64::from(budget.subsec_nanos() > 0);
+    rounded_up.max(1)
+}
+
 #[derive(Clone, Debug)]
 pub struct ColabVocalSeparatorConfig {
     pub colab_bin: PathBuf,
@@ -262,6 +286,16 @@ pub struct ColabVocalSeparatorConfig {
     pub ffprobe_bin: PathBuf,
     pub openssl_bin: PathBuf,
     pub gpu: Arc<Semaphore>,
+    /// Optional mirror of the one-line failure diagnostics that are always
+    /// written to stderr.
+    ///
+    /// The product error deliberately hides stderr from the user, so the only
+    /// channel is the process log; production is read with `docker logs` and a
+    /// test cannot observe that stream. This sink lets a test assert the same
+    /// line without changing what production does: the `eprintln!` is
+    /// unconditional, and the sink only observes it. `None` (the default) adds
+    /// nothing.
+    pub diagnostic_sink: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl ColabVocalSeparatorConfig {
@@ -355,6 +389,7 @@ impl ColabVocalSeparatorConfig {
             ffprobe_bin,
             openssl_bin,
             gpu,
+            diagnostic_sink: None,
         }
     }
 
