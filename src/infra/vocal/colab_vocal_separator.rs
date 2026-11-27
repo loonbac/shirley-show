@@ -10,7 +10,10 @@ use uuid::Uuid;
 
 use super::colab_orphan_reaper::stop_ok;
 use super::colab_remote_script::generate_remote_script;
-use super::colab_vocal_separator_config::ColabVocalSeparatorConfig;
+use super::colab_vocal_separator_config::{
+    ColabVocalSeparatorConfig, gpu_assign_window, gpu_attempt_timeout, gpu_chain,
+    pipeline_reserve,
+};
 use crate::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
 };
@@ -418,6 +421,105 @@ impl ColabVocalSeparator {
         stop_ok(&output.status, &output.stderr)
     }
 
+    /// Walks the accelerator chain until one assigns, cycling while the request
+    /// budget remains.
+    ///
+    /// The product rule is that a paid request must not fail because one
+    /// accelerator's assignment endpoint answered 503: it tries the configured
+    /// primary, then each configured fallback in order, then starts over. Every
+    /// attempt is individually bounded, because the previous arithmetic gave the
+    /// first candidate the entire request timeout — a hanging G4 or A100 spent
+    /// all 600s and the fallbacks were never reached.
+    ///
+    /// The assignment window is computed ONCE from the budget available when
+    /// assignment starts (half of it), and the other half is reserved for
+    /// upload/exec/download. Each attempt is bounded by what is left of that fixed
+    /// window; re-halving the remaining budget per attempt let 4 rounds of 3 GPUs
+    /// spend nearly everything and leave the pipeline seconds.
+    ///
+    /// A timed-out attempt stops its session before the next candidate so the
+    /// account is not left with an active session that turns the following
+    /// request into a 412.
+    ///
+    /// Every candidate the configuration names but the CLI does not accept is
+    /// skipped without an attempt (`14` was one).
+    async fn assign_session(&self, deadline: Instant) -> Result<String, VocalSeparationError> {
+        let candidates = gpu_chain(&self.config.gpu_type, &self.config.gpu_fallbacks);
+
+        // Fixed once: the pipeline reserve never shrinks because we retried.
+        let initial_budget = deadline.saturating_duration_since(Instant::now());
+        let assign_deadline = Instant::now() + gpu_assign_window(initial_budget);
+        if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+            eprintln!(
+                "[separate] ventana de asignacion {:?} (reserva {:?}), cadena {candidates:?}",
+                gpu_assign_window(initial_budget),
+                pipeline_reserve(initial_budget)
+            );
+        }
+
+        for round in 0..self.config.gpu_max_rounds {
+            for gpu in &candidates {
+                let remaining_window = assign_deadline.saturating_duration_since(Instant::now());
+                let attempt_timeout =
+                    gpu_attempt_timeout(remaining_window, self.config.gpu_attempt_timeout);
+                if attempt_timeout.is_zero() {
+                    if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                        eprintln!("[separate] sin presupuesto para asignar GPU ({gpu} pendiente)");
+                    }
+                    return Err(VocalSeparationError::ColabUnavailable);
+                }
+
+                // The official CLI names the session client-side (`-s`), and it
+                // only accepts uppercase GPU names (`G4`, `A100`, `L4`).
+                let session_name = generate_session_name();
+                let mut start_cmd = Command::new(&self.config.colab_bin);
+                start_cmd.kill_on_drop(true);
+                start_cmd.args(["new", "-s", &session_name, "--gpu", gpu]);
+                start_cmd.stdin(Stdio::null());
+                start_cmd.stdout(Stdio::null());
+                start_cmd.stderr(Stdio::null());
+
+                match tokio::time::timeout(attempt_timeout, start_cmd.status()).await {
+                    Ok(Ok(st)) if st.success() => {
+                        if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                            eprintln!("[separate] la GPU {gpu} asigno (ronda {round})");
+                        }
+                        return Ok(session_name);
+                    }
+                    Ok(Ok(_)) => {
+                        if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                            eprintln!("[separate] la GPU {gpu} no asigno; siguiente");
+                        }
+                    }
+                    Ok(Err(_)) => {
+                        if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                            eprintln!("[separate] no se pudo ejecutar colab new para {gpu}; siguiente");
+                        }
+                    }
+                    Err(_) => {
+                        // A late assignment is a live session nobody is going to
+                        // use. `colab new -s NAME` names the session client-side
+                        // and the endpoint keeps working after the client gives
+                        // up (L4 once answered 120s late), so the abandoned
+                        // session may well exist. Leaving it is not harmless:
+                        // the next `new` is refused with 412 Precondition Failed
+                        // because a session is already active, and it bills GPU
+                        // time for work nobody will run.
+                        let stopped = self.stop_session(&session_name).await;
+                        if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                            eprintln!(
+                                "[separate] la GPU {gpu} agoto {:?} sin responder; stop={stopped}; siguiente",
+                                attempt_timeout
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(VocalSeparationError::ColabUnavailable)
+    }
+
     async fn execute_pipeline(
         &self,
         session_id: &str,
@@ -747,52 +849,15 @@ impl VocalSeparator for ColabVocalSeparator {
                     this.forget_session().await;
 
                     // Colab can report an accelerator as available while its
-                    // assignment endpoint hangs until the client gives up, so a
-                    // single attempt turns a temporary capacity problem into a
-                    // failed separation. Try the configured fallback before
-                    // giving up; the primary GPU stays first because it is the
-                    // measured fastest option.
-                    let mut candidates = vec![this.config.gpu_type.clone()];
-                    for fallback in &this.config.gpu_fallbacks {
-                        if !candidates.contains(fallback) {
-                            candidates.push(fallback.clone());
-                        }
-                    }
-
-                    // The official CLI names the session client-side (`-s`), and
-                    // it only accepts uppercase GPU names (`G4`, `A100`, `L4`).
-                    // The configured values stay lowercase; they are uppercased
-                    // only at the command boundary.
-                    let session_name = generate_session_name();
-
-                    let mut started = false;
-                    for gpu in &candidates {
-                        let gpu_arg = gpu.to_ascii_uppercase();
-                        let mut start_cmd = Command::new(&this.config.colab_bin);
-                        start_cmd.kill_on_drop(true);
-                        start_cmd.args(["new", "-s", &session_name, "--gpu", &gpu_arg]);
-                        start_cmd.stdin(Stdio::null());
-                        start_cmd.stdout(Stdio::null());
-                        start_cmd.stderr(Stdio::null());
-
-                        match tokio::time::timeout(start_timeout, start_cmd.status()).await {
-                            Ok(Ok(st)) if st.success() => {
-                                started = true;
-                                break;
-                            }
-                            _ => {
-                                if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
-                                    eprintln!("[separate] la GPU {gpu} no asigno; siguiente");
-                                }
-                            }
-                        }
-                    }
-
-                    if !started {
-                        return Err(VocalSeparationError::ColabUnavailable);
-                    }
-
-                    session_name
+                    // assignment endpoint refuses (503) or hangs until the
+                    // client gives up. Rather than spend the whole budget on the
+                    // first candidate, walk the chain with a short bound per
+                    // attempt and cycle while the request budget lasts. Credits
+                    // are not the constraint here: capacity on a given
+                    // accelerator is, so rotating is what turns a temporary
+                    // outage into a completed separation.
+                    let deadline = Instant::now() + start_timeout;
+                    this.assign_session(deadline).await?
                 }
             };
 
