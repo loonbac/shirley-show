@@ -121,6 +121,37 @@ new instance id in `new_contract`; `GET /instances/{id}/` wraps the instance in
 `ports["22/tcp"][0].HostPort`. The adapter also accepts unwrapped responses,
 legacy `status`, and proxy `ssh_host`/`ssh_port` when the direct port is absent.
 
+### Control-plane API versions and filters
+
+- `POST /api/v0/bundles/` validates **every filter as an operator object**:
+  `{"eq": true}`, `{"gte": 0.99}`, `{"in": [...]}`, `{"lte": <max_dph>}`.
+  Scalars produce HTTP 400 `bad_request` with
+  `"<field>: Input should be a valid dictionary"`. The GPU whitelist is sent
+  as `gpu_name.in` (including `RTX 4080S`); `limit` is 100 so a page of cheap
+  CN offers cannot hide non-CN offers. CN/HK stays a client-side check on
+  `geolocation`, never an API filter.
+- Real bundles rows carry `verified` as null/absent (the server already
+  filtered on it) and report `gpu_ram`/`disk_space` as fractional numbers, so
+  the client-side check only rejects an explicit `verified: false` and parses
+  those fields as floats.
+- `PUT /api/v0/asks/{id}/` must send `client_id: "me"` and
+  `runtype: "ssh_direc ssh_proxy"` (not `"ssh"`), plus image, disk and label.
+- Listing moved: `GET /api/v0/instances/` returns HTTP 410
+  `deprecated_endpoint`. Both the boot orphan sweep and the five-minute safety
+  reaper use `GET /api/v1/instances/`, with
+  `select_filters={"label":{"eq":"shirley-show"}}` and `next_token`
+  pagination. The label is still checked client-side and the parser accepts a
+  wrapped `instances` array, an object map, a bare array/object or a `data`
+  wrapper. Single-instance `GET`/`DELETE` and `ssh/` stay on v0.
+
+Observability follows the repository convention (`eprintln!`, no new crate):
+`[vast] INFO` / `[vast] WARN` lines cover offers found and chosen GPU, dph and
+geolocation, rent result, state transitions, ssh readiness, upload/script/
+download timings, verification, retention/destroy and reaper actions. HTTP
+errors include the endpoint path, status and a response body truncated to 300
+characters with the API key scrubbed. The key and the `Authorization` header
+are never printed.
+
 ## How it is built
 
 Locally, without pushing:
