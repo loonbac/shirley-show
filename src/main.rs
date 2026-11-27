@@ -34,11 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let colab_bin = std::env::var("SHIRLEY_COLAB_BIN")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("colab"));
+        let token_path =
+            shirley_show::infra::vocal::colab_vocal_separator_config::token_path_from_env();
         // The lease tells us whether a runtime belongs to a *living* sibling.
-        // `colab stop` with no session frees every runtime in the account, so
-        // sweeping while another instance is alive would destroy its work. This
-        // was measured: a periodic sweep killed a separation mid-flight and the
-        // user saw `separation_failed` with no explanation.
+        // Sweeping while another instance is alive would destroy its work: a
+        // blind sweep killed a separation mid-flight and the user saw
+        // `separation_failed` with no explanation. When it is safe, the sweep
+        // enumerates the official CLI's sessions and stops each by name.
         let foreign_owner =
             shirley_show::infra::vocal::colab_orphan_reaper::claim_runtime_lease(&config.data_dir);
         let decision =
@@ -46,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if decision == shirley_show::infra::vocal::colab_orphan_reaper::ReapDecision::Stop {
             let stopped = shirley_show::infra::vocal::colab_orphan_reaper::stop_all_runtimes(
                 &colab_bin,
+                &token_path,
                 std::time::Duration::from_secs(60),
             )
             .await;

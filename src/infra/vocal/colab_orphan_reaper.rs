@@ -126,17 +126,99 @@ fn process_is_running(pid: u32) -> bool {
 fn process_is_running(_pid: u32) -> bool {
     false
 }
-pub async fn stop_all_runtimes(colab_bin: &std::path::Path, timeout: Duration) -> bool {
-    let mut cmd = Command::new(colab_bin);
-    cmd.kill_on_drop(true);
-    cmd.args(["stop"]);
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::null());
-    cmd.stderr(Stdio::null());
-    matches!(
-        tokio::time::timeout(timeout, cmd.status()).await,
-        Ok(Ok(status)) if status.success()
-    )
+/// Whether a `colab stop -s NAME` outcome counts as a successful cleanup.
+///
+/// The official CLI exits 0 when it stopped the named session, and 1 when that
+/// session no longer exists. Both are a successful cleanup: the session is gone
+/// either way. Any other non-zero exit is a real failure.
+pub fn stop_ok(status: &std::process::ExitStatus, stderr: &[u8]) -> bool {
+    if status.success() {
+        return true;
+    }
+    let err = String::from_utf8_lossy(stderr);
+    err.to_ascii_lowercase().contains("not found")
+}
+
+/// The path where the official CLI records its sessions (`~/.config/colab-cli/sessions.json`).
+pub fn sessions_json_path() -> std::path::PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
+        std::path::PathBuf::from(home).join(".config/colab-cli/sessions.json")
+    } else {
+        std::path::PathBuf::from(".config/colab-cli/sessions.json")
+    }
+}
+
+/// Enumerates the session names recorded by the official CLI.
+///
+/// The CLI keeps sessions as a JSON object keyed by session name; a flat array
+/// of names (or of objects carrying a name field) is also accepted defensively.
+/// A missing or unreadable file yields an empty list, which is safe: there is
+/// nothing to stop.
+pub fn enumerate_session_names(sessions_json: &std::path::Path) -> Vec<String> {
+    let content = match std::fs::read_to_string(sessions_json) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let value: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    match value {
+        serde_json::Value::Object(map) => map.keys().cloned().collect(),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|item| match item {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Object(o) => ["name", "session", "id"]
+                    .iter()
+                    .find_map(|k| match o.get(*k) {
+                        Some(serde_json::Value::String(s)) => Some(s.clone()),
+                        _ => None,
+                    }),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Stops every orphan runtime the official CLI currently knows about.
+///
+/// The old session-less `colab stop` frees *every* runtime in the account, so
+/// the sweep now enumerates the session names from the CLI's own sessions.json
+/// and stops each one individually. The boot sweep and the periodic sweep share
+/// this path. The token is synced to the legacy path first so the CLI can
+/// authenticate.
+pub async fn stop_all_runtimes(
+    colab_bin: &std::path::Path,
+    token_source: &std::path::Path,
+    timeout: Duration,
+) -> bool {
+    let _ = crate::infra::vocal::colab_vocal_separator_config::sync_token_to_legacy(
+        token_source,
+        &crate::infra::vocal::colab_vocal_separator_config::legacy_token_path(),
+    );
+    let names = enumerate_session_names(&sessions_json_path());
+    let mut all_ok = true;
+    for name in names {
+        let mut cmd = Command::new(colab_bin);
+        cmd.kill_on_drop(true);
+        cmd.args(["stop", "-s", &name]);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::piped());
+        let output = match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(o)) => o,
+            _ => {
+                all_ok = false;
+                continue;
+            }
+        };
+        if !stop_ok(&output.status, &output.stderr) {
+            all_ok = false;
+        }
+    }
+    all_ok
 }
 
 /// Arranca el vigilante periódico y devuelve su handle.
@@ -150,6 +232,7 @@ pub async fn stop_all_runtimes(colab_bin: &std::path::Path, timeout: Duration) -
 /// cada minuto es un buen equilibrio entre reaccionar y no estorbar.
 pub fn spawn_periodic_reaper(
     colab_bin: std::path::PathBuf,
+    token_source: std::path::PathBuf,
     interval: Duration,
     has_active_work: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
     inside_retention: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
@@ -159,7 +242,7 @@ pub fn spawn_periodic_reaper(
             tokio::time::sleep(interval).await;
             let decision = reap_decision(has_active_work(), inside_retention());
             if decision == ReapDecision::Stop {
-                let stopped = stop_all_runtimes(&colab_bin, Duration::from_secs(60)).await;
+                let stopped = stop_all_runtimes(&colab_bin, &token_source, Duration::from_secs(60)).await;
                 if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
                     eprintln!("[reaper] barrido periódico: liberados={stopped}");
                 }

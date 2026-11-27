@@ -383,6 +383,9 @@ struct MockColabFixture {
     trigger_fail_exec: PathBuf,
     trigger_bad_sha: PathBuf,
     trigger_bad_duration: PathBuf,
+    /// When present, `stop` exits 1 with "Session not found" on stderr, which
+    /// the adapter must treat as a successful cleanup.
+    trigger_stop_not_found: PathBuf,
     sample_wav: PathBuf,
     token_file: PathBuf,
 }
@@ -397,6 +400,7 @@ impl MockColabFixture {
         let trigger_fail_exec = temp_dir.path().join("fail_exec");
         let trigger_bad_sha = temp_dir.path().join("bad_sha");
         let trigger_bad_duration = temp_dir.path().join("bad_duration");
+        let trigger_stop_not_found = temp_dir.path().join("stop_not_found");
 
         let sample_wav = temp_dir.path().join("sample_input.wav");
         write_silence_wav(&sample_wav, 1);
@@ -404,36 +408,44 @@ impl MockColabFixture {
         let token_file = temp_dir.path().join("token.json");
         std::fs::write(&token_file, r#"{"refresh_token":"valid_token_123"}"#).unwrap();
 
+        // Keep the official CLI's legacy token copy inside this scratch dir, not
+        // the real user config, when `ensure_legacy_token` runs during `separate`.
+        unsafe {
+            std::env::set_var(
+                "SHIRLEY_COLAB_LEGACY_TOKEN",
+                temp_dir.path().join("colab-cli/token.json"),
+            );
+        }
+
         let log_str = log_file.display().to_string();
         let fail_start_str = trigger_fail_start.display().to_string();
         let fail_gpu_str = trigger_fail_gpu.display().to_string();
         let fail_exec_str = trigger_fail_exec.display().to_string();
         let bad_sha_str = trigger_bad_sha.display().to_string();
         let bad_dur_str = trigger_bad_duration.display().to_string();
+        let stop_not_found_str = trigger_stop_not_found.display().to_string();
         let temp_dir_str = temp_dir.path().display().to_string();
 
         let script = format!(
             r#"#!/bin/sh
 cmd="$1"
-if [ "$cmd" = "start" ]; then
+if [ "$cmd" = "new" ]; then
     if [ -f "{fail_start_str}" ]; then
         exit 1
     fi
     if [ -f "{fail_gpu_str}" ]; then
         while IFS= read -r broken || [ -n "$broken" ]; do
             [ -z "$broken" ] && continue
+            broken_upper=$(printf '%s' "$broken" | tr 'a-z' 'A-Z')
             case "$*" in
-                *"--gpu $broken"*) exit 1 ;;
+                *"--gpu $broken_upper"*) exit 1 ;;
             esac
         done < "{fail_gpu_str}"
     fi
-    echo "start $@" >> "{log_str}"
-    echo '{{"session":"sess-mock-42","proxyUrl":"http://127.0.0.1:8080"}}'
+    echo "new $@" >> "{log_str}"
     exit 0
 elif [ "$cmd" = "upload" ]; then
     echo "upload $@" >> "{log_str}"
-    # Remember what actually arrived so the size probe can answer truthfully.
-    # The upload is judged on the runtime contents, never on the exit code.
     for arg in "$@"; do
         if [ -f "$arg" ]; then
             cp "$arg" "{temp_dir_str}/uploaded"
@@ -448,23 +460,21 @@ elif [ "$cmd" = "exec" ]; then
     fi
     echo "exec $@" >> "{log_str}"
 
-    # The upload is judged by what the runtime holds, not by the CLI exit
-    # code, so the fake must answer the size probe. Without this the probe is
-    # mistaken for the separation script and every lifecycle test fails.
-    case "$*" in
-        *"SIZE="*)
-            if [ -f "{temp_dir_str}/uploaded" ]; then
-                echo "SIZE=$(wc -c < "{temp_dir_str}/uploaded" | tr -d ' ')"
-            else
-                echo "SIZE=absent"
-            fi
-            exit 0
-            ;;
-    esac
-
-    # Extract script file (last argument)
+    # Extract the script file (last argument)
     for last; do true; done
     script_file="$last"
+
+    # The upload is judged by what the runtime holds, so the fake answers the
+    # size probe when it sees one. The probe is itself a script executed with
+    # `-f`, so it is detected by content, not by flag shape.
+    if grep -q "SIZE=" "$script_file" 2>/dev/null; then
+        if [ -f "{temp_dir_str}/uploaded" ]; then
+            echo "SIZE=$(wc -c < "{temp_dir_str}/uploaded" | tr -d ' ')"
+        else
+            echo "SIZE=absent"
+        fi
+        exit 0
+    fi
 
     PASSWORD=$(python3 -c 'import re, sys; m=re.search(r"PASSWORD\s*=\s*\"([^\"]+)\"", open(sys.argv[1]).read()); print(m.group(1) if m else "")' "$script_file")
 
@@ -490,8 +500,21 @@ elif [ "$cmd" = "exec" ]; then
 
     echo "{{\"url\":\"file://$mock_enc\",\"sha256\":\"$SHA\",\"duration\":$DUR,\"size\":$SIZE}}"
     exit 0
+elif [ "$cmd" = "status" ]; then
+    echo "status $@" >> "{log_str}"
+    exit 0
+elif [ "$cmd" = "download" ]; then
+    echo "download $@" >> "{log_str}"
+    for last; do true; done
+    dest="$last"
+    cp "{temp_dir_str}/mock_generated.mp3" "$dest"
+    exit 0
 elif [ "$cmd" = "stop" ]; then
     echo "stop $@" >> "{log_str}"
+    if [ -f "{stop_not_found_str}" ]; then
+        echo "Session not found" >&2
+        exit 1
+    fi
     exit 0
 else
     echo "unknown command $cmd" >> "{log_str}"
@@ -518,6 +541,7 @@ fi
             trigger_fail_exec,
             trigger_bad_sha,
             trigger_bad_duration,
+            trigger_stop_not_found,
             sample_wav,
             token_file,
         }
@@ -576,14 +600,15 @@ async fn test_colab_vocal_separator_full_successful_pipeline_lifecycle() {
     assert!(res.size_bytes > 0);
     assert!(output_mp3.is_file());
 
-    // Lifecycle on success is now start -> upload -> exec, and the stop is
-    // deferred: the machine is kept for the retention window so a second
-    // request reuses it. Asserting "stop happened" here would pin the old
-    // contract, in which every request paid a cold start.
+    // Lifecycle on success is now new -> upload -> exec -> download, and the
+    // stop is deferred: the machine is kept for the retention window so a
+    // second request reuses it. Asserting "stop happened" here would pin the
+    // old contract, in which every request paid a cold start.
     let log = fixture.read_log();
-    assert!(log.contains("start"), "Must call colab start");
+    assert!(log.contains("new"), "Must call colab new");
     assert!(log.contains("upload"), "Must call colab upload");
     assert!(log.contains("exec"), "Must call colab exec");
+    assert!(log.contains("download"), "Must call colab download");
     assert!(
         !log.contains("stop"),
         "a successful run must keep the machine for the retention window, not stop it"
@@ -636,7 +661,7 @@ async fn test_colab_vocal_separator_exec_failure_still_runs_stop() {
     assert_eq!(res.unwrap_err(), VocalSeparationError::SeparationFailed);
 
     let log = fixture.read_log();
-    assert!(log.contains("start"));
+    assert!(log.contains("new"));
     assert!(log.contains("stop"), "Must call stop even on exec failure");
     assert_eq!(gpu.available_permits(), 1);
 }
@@ -719,11 +744,11 @@ async fn test_colab_vocal_separator_duration_exceeded_before_gpu() {
     let res = sep.separate(req).await;
     assert_eq!(res.unwrap_err(), VocalSeparationError::DurationExceeded);
 
-    // Verify colab start was NEVER called
+    // Verify colab new was NEVER called
     let log = fixture.read_log();
     assert!(
-        !log.contains("start"),
-        "colab start must not be called when duration > 600s"
+        !log.contains("new"),
+        "colab new must not be called when duration > 600s"
     );
     assert_eq!(gpu.available_permits(), 1);
 }
@@ -751,7 +776,7 @@ fn test_remote_script_treats_no_vocals_as_instrumental() {
 }
 
 #[tokio::test]
-async fn test_start_with_unparseable_output_stops_every_runtime() {
+async fn test_start_failure_does_not_issue_stop() {
     let temp_dir = TempDir::new().unwrap();
     let log_file = temp_dir.path().join("calls.log");
     let colab_bin = temp_dir.path().join("mock_colab.sh");
@@ -760,12 +785,14 @@ async fn test_start_with_unparseable_output_stops_every_runtime() {
     let token_file = temp_dir.path().join("token.json");
     std::fs::write(&token_file, r#"{"refresh_token":"t"}"#).unwrap();
 
-    // start reports success but prints something that is not JSON: the GPU is
-    // already allocated, so the adapter must issue a session-less stop.
+    // The session name is generated client-side, so a failing `new` means no
+    // session was allocated: the adapter must return ColabUnavailable and must
+    // NOT issue any stop (there is nothing to free, and bare `colab stop` is
+    // forbidden by the official CLI contract).
     let script = format!(
         r#"#!/bin/sh
 echo "$@" >> "{}"
-if [ "$1" = "start" ]; then echo "not-json-at-all"; exit 0; fi
+if [ "$1" = "new" ]; then exit 1; fi
 exit 0
 "#,
         log_file.display()
@@ -774,6 +801,14 @@ exit 0
     let mut perms = std::fs::metadata(&colab_bin).unwrap().permissions();
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     std::fs::set_permissions(&colab_bin, perms).unwrap();
+
+    // Keep the legacy token copy inside the scratch dir.
+    unsafe {
+        std::env::set_var(
+            "SHIRLEY_COLAB_LEGACY_TOKEN",
+            temp_dir.path().join("colab-cli/token.json"),
+        );
+    }
 
     let mut cfg = ColabVocalSeparatorConfig::from_env(
         temp_dir.path().to_path_buf(),
@@ -797,13 +832,9 @@ exit 0
     ));
 
     let log = std::fs::read_to_string(&log_file).unwrap_or_default();
-    let stop_line = log
-        .lines()
-        .find(|l| l.starts_with("stop"))
-        .expect("a stop must be issued after an unparseable start");
     assert!(
-        !stop_line.contains("--session"),
-        "the stop must be session-less when no id could be parsed, got: {stop_line}"
+        !log.contains("stop"),
+        "a session-less stop must never run when `new` failed, got: {log}"
     );
 }
 
@@ -838,7 +869,7 @@ async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
     let log = fixture.read_log();
     let starts: Vec<&str> = log
         .lines()
-        .filter(|l| l.starts_with("start "))
+        .filter(|l| l.starts_with("new "))
         .collect();
     assert_eq!(
         starts.len(),
@@ -846,7 +877,7 @@ async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
         "the broken GPU must not be logged as started, log was: {log}"
     );
     assert!(
-        starts[0].contains("--gpu l4"),
+        starts[0].contains("--gpu L4"),
         "the run must land on the fallback GPU, log was: {log}"
     );
     assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
@@ -907,7 +938,7 @@ async fn test_start_walks_the_whole_gpu_chain_until_one_assigns() {
     let log = fixture.read_log();
     let starts: Vec<&str> = log
         .lines()
-        .filter(|l| l.starts_with("start "))
+        .filter(|l| l.starts_with("new "))
         .collect();
     assert_eq!(
         starts.len(),
@@ -915,8 +946,405 @@ async fn test_start_walks_the_whole_gpu_chain_until_one_assigns() {
         "only the GPU that assigned may be logged as started, log was: {log}"
     );
     assert!(
-        starts[0].contains("--gpu l4"),
+        starts[0].contains("--gpu L4"),
         "the chain must end on the working GPU, log was: {log}"
     );
     assert_eq!(gpu.available_permits(), 1);
+}
+
+/// The official CLI contract, pinned through the mock log: `new -s NAME --gpu
+/// GPU` (uppercase GPU), `upload -s`, `exec -s -f`, `download -s`, and stop
+/// never used without `-s`.
+#[tokio::test]
+async fn test_command_arguments_match_official_cli() {
+    let fixture = MockColabEnv::new_fixture();
+    let gpu = Arc::new(Semaphore::new(1));
+    let cfg = fixture.make_config(gpu);
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let output_mp3 = fixture.temp_dir.path().join("final_out.mp3");
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: output_mp3,
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+
+    sep.separate(req).await.expect("separation should succeed");
+
+    let log = fixture.read_log();
+
+    let new_line = log
+        .lines()
+        .find(|l| l.starts_with("new "))
+        .expect("new called");
+    assert!(new_line.contains("-s"), "new must pass -s, got: {new_line}");
+    assert!(
+        new_line.contains("shirley-"),
+        "session name must be generated as shirley-<hex>, got: {new_line}"
+    );
+    assert!(
+        new_line.contains("--gpu G4"),
+        "gpu must be uppercase when passed to the CLI, got: {new_line}"
+    );
+
+    let upload_line = log
+        .lines()
+        .find(|l| l.starts_with("upload "))
+        .expect("upload called");
+    assert!(upload_line.contains("-s"), "upload must pass -s, got: {upload_line}");
+
+    let exec_line = log
+        .lines()
+        .find(|l| l.starts_with("exec ") && l.contains("colab_script_"))
+        .expect("exec of the separation script called");
+    assert!(exec_line.contains("-s"), "exec must pass -s, got: {exec_line}");
+    assert!(exec_line.contains("-f"), "exec must pass the script with -f, got: {exec_line}");
+    assert!(exec_line.contains("colab_script_"), "exec must run the generated script, got: {exec_line}");
+    assert!(!exec_line.contains("--json"), "exec must not use --json, got: {exec_line}");
+    assert!(!exec_line.contains("--session"), "no legacy --session flag, got: {exec_line}");
+    let tokens: Vec<&str> = exec_line.split_whitespace().collect();
+    assert!(
+        !tokens.contains(&"-c"),
+        "no inline -c flag, got: {exec_line}"
+    );
+
+    let download_line = log
+        .lines()
+        .find(|l| l.starts_with("download "))
+        .expect("download called");
+    assert!(download_line.contains("-s"), "download must pass -s, got: {download_line}");
+}
+
+/// A `colab stop` outcome of exit 0, or of exit 1 with a "not found" message
+/// (the session the already gone), is a successful cleanup. Anything else is a
+/// real failure.
+#[cfg(unix)]
+#[test]
+fn test_stop_ok_treats_not_found_as_success() {
+    use std::os::unix::process::ExitStatusExt;
+    use shirley_show::infra::vocal::colab_orphan_reaper::stop_ok;
+
+    let ok = std::process::ExitStatus::from_raw(0);
+    assert!(stop_ok(&ok, b""));
+
+    let not_found = std::process::ExitStatus::from_raw(1 << 8);
+    assert!(stop_ok(&not_found, b"Session not found"));
+    assert!(stop_ok(&not_found, b"nothing here; session not found"));
+
+    assert!(!stop_ok(&not_found, b"Permission denied"));
+    let other = std::process::ExitStatus::from_raw(2 << 8);
+    assert!(!stop_ok(&other, b""));
+}
+
+/// When `stop` reports the session is already gone (exit 1, "not found"), the
+/// adapter treats it as a successful cleanup: the pipeline returns the real
+/// separation error (InvalidSeparatorOutput), not a masked SeparationFailed.
+#[tokio::test]
+async fn test_stop_on_missing_session_is_treated_as_success() {
+    let fixture = MockColabEnv::new_fixture();
+    // The separation itself fails on sha mismatch (InvalidSeparatorOutput), and
+    // the subsequent stop reports the session is gone.
+    std::fs::write(&fixture.trigger_bad_sha, b"bad").unwrap();
+    std::fs::write(&fixture.trigger_stop_not_found, b"gone").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let cfg = fixture.make_config(gpu.clone());
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let output_mp3 = fixture.temp_dir.path().join("final_out.mp3");
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: output_mp3,
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+
+    let res = sep.separate(req).await;
+    assert_eq!(res.unwrap_err(), VocalSeparationError::InvalidSeparatorOutput);
+    assert_eq!(gpu.available_permits(), 1);
+
+    let log = fixture.read_log();
+    assert!(log.contains("stop"), "stop must be attempted on error");
+}
+
+/// The legacy token copy must never overwrite a newer destination: the CLI
+/// rewrites its token file when it refreshes the access token.
+#[test]
+fn test_token_sync_does_not_overwrite_newer_destination() {
+    use std::time::{Duration, SystemTime};
+    use shirley_show::infra::vocal::colab_vocal_separator_config::sync_token_to_legacy;
+
+    let temp = TempDir::new().unwrap();
+    let src = temp.path().join("src_token.json");
+    let dst = temp.path().join("colab-cli/token.json");
+    std::fs::write(&src, r#"{"refresh_token":"source"}"#).unwrap();
+    std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    std::fs::write(&dst, r#"{"refresh_token":"destination"}"#).unwrap();
+
+    // Make the destination newer than the source.
+    let src_file = std::fs::File::open(&src).unwrap();
+    src_file
+        .set_modified(SystemTime::now() - Duration::from_secs(3600))
+        .unwrap();
+
+    sync_token_to_legacy(&src, &dst).unwrap();
+
+    let dst_contents = std::fs::read_to_string(&dst).unwrap();
+    assert!(
+        dst_contents.contains("destination"),
+        "a newer destination must not be overwritten: {dst_contents}"
+    );
+}
+
+/// The legacy token is copied when the destination is missing or older, and it
+/// lands with 0600 permissions.
+#[test]
+fn test_token_sync_copies_when_destination_missing_or_older() {
+    use std::time::{Duration, SystemTime};
+    use shirley_show::infra::vocal::colab_vocal_separator_config::sync_token_to_legacy;
+
+    let temp = TempDir::new().unwrap();
+    let src = temp.path().join("src_token.json");
+    std::fs::write(&src, r#"{"refresh_token":"source"}"#).unwrap();
+
+    // Missing destination -> copy.
+    let dst = temp.path().join("colab-cli/token.json");
+    sync_token_to_legacy(&src, &dst).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&dst).unwrap(),
+        r#"{"refresh_token":"source"}"#
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&dst).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "legacy token must be 0600");
+    }
+
+    // Source newer than destination -> overwrite.
+    std::fs::write(&src, r#"{"refresh_token":"source-v2"}"#).unwrap();
+    let dst_file = std::fs::File::open(&dst).unwrap();
+    dst_file
+        .set_modified(SystemTime::now() - Duration::from_secs(3600))
+        .unwrap();
+    sync_token_to_legacy(&src, &dst).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&dst).unwrap(),
+        r#"{"refresh_token":"source-v2"}"#
+    );
+}
+
+/// The boot/periodic reaper enumerates session names from the official CLI's
+/// sessions.json and stops each by name.
+#[test]
+fn test_reaper_enumerates_sessions_from_json() {
+    use shirley_show::infra::vocal::colab_orphan_reaper::enumerate_session_names;
+
+    let temp = TempDir::new().unwrap();
+    let sessions = temp.path().join("sessions.json");
+    std::fs::write(&sessions, r#"{"alpha":{},"beta":{},"gamma":{}}"#).unwrap();
+
+    let names = enumerate_session_names(&sessions);
+    assert_eq!(names.len(), 3);
+    for expected in ["alpha", "beta", "gamma"] {
+        assert!(names.contains(&expected.to_string()), "missing {expected}: {names:?}");
+    }
+
+    // A missing file yields an empty list rather than a panic.
+    assert!(enumerate_session_names(&temp.path().join("nope.json")).is_empty());
+}
+
+/// Exact argument-shape test for the official CLI contract, including session
+/// reuse: the first run creates a session with `new -s shirley-<hex> --gpu
+/// G4`, stores a second run inside the retention window reuses the same id
+/// (checking liveness with `status -s`), and no forbidden flags (`--json`,
+/// `--public-api`, `--session`, bare `stop`) ever appear.
+#[tokio::test]
+async fn test_official_cli_arguments_exact_shape_and_session_reuse() {
+    let fixture = MockColabEnv::new_fixture();
+    let gpu = Arc::new(Semaphore::new(1));
+    let cfg = fixture.make_config(gpu);
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("final_out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+
+    // First run creates a session.
+    sep.separate(req.clone()).await.expect("first separation should succeed");
+
+    // Second run inside the retention window must reuse the same session id.
+    let req2 = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("final_out2.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+    sep.separate(req2).await.expect("second separation should succeed");
+
+    let log = fixture.read_log();
+
+    // The mock logs `echo "<cmd> $@"`, so the echoed prefix and the full
+    // argument list both start with the subcommand: a line is
+    // `new new -s shirley-<hex> --gpu G4`. `parts[0]` is the echo prefix,
+    // `parts[1]` is the real subcommand, and `parts[2..]` are the arguments.
+    let new_lines: Vec<&str> = log.lines().filter(|l| l.starts_with("new ")).collect();
+    assert_eq!(new_lines.len(), 1, "the session must be created exactly once, log: {log}");
+    let new_parts: Vec<&str> = new_lines[0].split_whitespace().collect();
+    assert_eq!(new_parts[1..], ["new", "-s", new_parts[3], "--gpu", "G4"]);
+    let session_name = new_parts[3];
+    assert!(session_name.starts_with("shirley-"), "session name must be shirley-<hex>, got {session_name}");
+    let hex = &session_name["shirley-".len()..];
+    assert_eq!(hex.len(), 8, "hex id must be exactly 8 chars, got {hex}");
+    assert!(hex.chars().all(|c| c.is_ascii_hexdigit()), "id must be hex, got {hex}");
+
+    // The second run reused the id: its liveness was checked with `status -s <id>`.
+    let status_lines: Vec<Vec<&str>> = log
+        .lines()
+        .filter(|l| l.starts_with("status "))
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    assert_eq!(status_lines.len(), 1, "exactly one liveness status, log: {log}");
+    assert_eq!(status_lines[0][1..], ["status", "-s", session_name]);
+
+    let upload_lines: Vec<Vec<&str>> = log
+        .lines()
+        .filter(|l| l.starts_with("upload "))
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    assert_eq!(upload_lines.len(), 2, "two uploads (one per run), log: {log}");
+    for up in &upload_lines {
+        assert_eq!(up[1..], ["upload", "-s", session_name, up[4], "/content/input_audio"]);
+    }
+
+    let exec_lines: Vec<Vec<&str>> = log
+        .lines()
+        .filter(|l| l.starts_with("exec ") && l.contains("colab_script_"))
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    assert_eq!(exec_lines.len(), 2, "two separation execs (one per run), log: {log}");
+    for el in &exec_lines {
+        assert_eq!(el[1..], ["exec", "-s", session_name, "-f", el[5]]);
+    }
+
+    let download_lines: Vec<Vec<&str>> = log
+        .lines()
+        .filter(|l| l.starts_with("download "))
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    assert_eq!(download_lines.len(), 2, "two downloads (one per run), log: {log}");
+    for dl in &download_lines {
+        assert_eq!(dl[1..], ["download", "-s", session_name, dl[4], dl[5]]);
+    }
+
+    // Forbidden forms must never appear.
+    assert!(
+        log.lines().all(|l| !l.starts_with("stop") || l.contains("-s")),
+        "every stop must carry -s, log: {log}"
+    );
+    assert!(!log.contains("--json"), "--json is forbidden, log: {log}");
+    assert!(!log.contains("--public-api"), "--public-api is forbidden, log: {log}");
+    assert!(!log.contains("--session"), "--session is forbidden, log: {log}");
+}
+
+/// `sync_token_to_legacy` must not overwrite the destination when the mtimes are
+/// equal (the destination is neither newer nor older).
+#[test]
+fn test_token_sync_does_not_overwrite_on_equal_mtime() {
+    use std::time::{Duration, SystemTime};
+    use shirley_show::infra::vocal::colab_vocal_separator_config::sync_token_to_legacy;
+
+    let temp = TempDir::new().unwrap();
+    let src = temp.path().join("src_token.json");
+    let dst = temp.path().join("colab-cli/token.json");
+    std::fs::write(&src, r#"{"refresh_token":"source"}"#).unwrap();
+    std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+    std::fs::write(&dst, r#"{"refresh_token":"destination"}"#).unwrap();
+
+    // Both files share the exact same mtime: the destination is neither newer
+    // nor older, so it must be left untouched.
+    let mtime = SystemTime::now() - Duration::from_secs(3600);
+    std::fs::File::open(&src).unwrap().set_modified(mtime).unwrap();
+    std::fs::File::open(&dst).unwrap().set_modified(mtime).unwrap();
+
+    sync_token_to_legacy(&src, &dst).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&dst).unwrap(),
+        r#"{"refresh_token":"destination"}"#,
+        "equal mtime must not overwrite the destination"
+    );
+}
+
+/// `sync_token_to_legacy` with source == destination is a no-op: it returns Ok
+/// and leaves the file untouched.
+#[test]
+fn test_token_sync_source_eq_dest_is_noop() {
+    use shirley_show::infra::vocal::colab_vocal_separator_config::sync_token_to_legacy;
+
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("token.json");
+    std::fs::write(&path, r#"{"refresh_token":"v"}"#).unwrap();
+
+    assert!(sync_token_to_legacy(&path, &path).is_ok());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        r#"{"refresh_token":"v"}"#
+    );
+}
+
+/// Boot lease: a live pid in `<data>/colab-runtime-owner.pid` makes
+/// `claim_runtime_lease` return true (a foreign owner), which drives
+/// `boot_reap_decision` to Keep.
+#[cfg(unix)]
+#[test]
+fn test_boot_lease_live_sibling_claims_and_keeps() {
+    use shirley_show::infra::vocal::colab_orphan_reaper::{
+        ReapDecision, boot_reap_decision, claim_runtime_lease,
+    };
+
+    let temp = TempDir::new().unwrap();
+    // pid 1 is always running on unix, so it stands in for a live sibling.
+    std::fs::write(temp.path().join("colab-runtime-owner.pid"), "1").unwrap();
+
+    assert!(claim_runtime_lease(temp.path()), "a live pid must claim a foreign owner");
+    assert_eq!(boot_reap_decision(true), ReapDecision::Keep);
+    assert_eq!(boot_reap_decision(false), ReapDecision::Stop);
+}
+
+/// `enumerate_session_names` must parse a sessions.json whose array mixes string
+/// entries and object entries carrying a name/session/id field, in addition to
+/// the object-keyed form.
+#[test]
+fn test_reaper_enumerates_object_and_string_entries() {
+    use shirley_show::infra::vocal::colab_orphan_reaper::enumerate_session_names;
+
+    let temp = TempDir::new().unwrap();
+
+    // Object form: keys are session names.
+    let obj = temp.path().join("sessions_obj.json");
+    std::fs::write(&obj, r#"{"alpha":{},"beta":{},"gamma":{}}"#).unwrap();
+    let names = enumerate_session_names(&obj);
+    assert_eq!(names.len(), 3);
+    for expected in ["alpha", "beta", "gamma"] {
+        assert!(names.contains(&expected.to_string()), "missing {expected}: {names:?}");
+    }
+
+    // Array form mixing strings and objects carrying name/session/id.
+    let arr = temp.path().join("sessions_arr.json");
+    std::fs::write(
+        &arr,
+        r#"["sess-one", {"name":"sess-two"}, {"session":"sess-three"}, {"id":"sess-four"}]"#,
+    )
+    .unwrap();
+    let names = enumerate_session_names(&arr);
+    assert_eq!(names.len(), 4);
+    for expected in ["sess-one", "sess-two", "sess-three", "sess-four"] {
+        assert!(names.contains(&expected.to_string()), "missing {expected}: {names:?}");
+    }
 }
