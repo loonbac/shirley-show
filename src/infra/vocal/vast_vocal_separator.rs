@@ -34,16 +34,54 @@ use crate::ports::vocal_separator::{
 
 const REMOTE_INPUT_PATH: &str = "/content/input_audio";
 
+/// Same convention as the Colab adapter: no new logging dependency, and no
+/// credential ever appears in a line (the API key is only used in a header
+/// and scrubbed from any response body we print).
+macro_rules! vast_info {
+    ($($arg:tt)*) => { eprintln!("[vast] INFO {}", format_args!($($arg)*)) };
+}
+macro_rules! vast_warn {
+    ($($arg:tt)*) => { eprintln!("[vast] WARN {}", format_args!($($arg)*)) };
+}
+
+/// Flatten and redact before printing: Vast error bodies can echo input.
+fn sanitized_body(text: &str, secret: &str) -> String {
+    let flat: String = text
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    let redacted = if secret.is_empty() {
+        flat
+    } else {
+        flat.replace(secret, "<redacted>")
+    };
+    let mut out: String = redacted.chars().take(300).collect();
+    if redacted.chars().count() > 300 {
+        out.push_str("...");
+    }
+    out
+}
+
 /// 24 GB-class cards that run these RoFormers economically. No Blackwell:
-/// the product decision is cheapest adequate GPU, not the fastest one.
-const ECONOMIC_GPUS: [&str; 6] = [
-    "rtx 3090",
-    "rtx 4090",
-    "rtx a5000",
-    "rtx a6000",
-    "l4",
-    "a10",
+/// the product decision is cheapest adequate GPU, not the fastest one. The
+/// canonical spellings are also sent to Vast's `gpu_name.in` filter.
+const ECONOMIC_GPUS: [&str; 7] = [
+    "RTX 4090",
+    "RTX 3090",
+    "RTX A5000",
+    "RTX A6000",
+    "L4",
+    "A10",
+    "RTX 4080S",
 ];
+
+fn normalized_gpu(name: &str) -> String {
+    name.trim()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
 
 #[derive(Clone, Debug)]
 struct Lease {
@@ -64,10 +102,11 @@ struct Offer {
     rented: Option<bool>,
     reliability2: Option<f64>,
     num_gpus: Option<u64>,
-    gpu_ram: Option<u64>,
+    /// Real offers report numeric RAM/disk as floats (e.g. `155.75`).
+    gpu_ram: Option<f64>,
     cuda_max_good: Option<f64>,
     inet_down: Option<f64>,
-    disk_space: Option<u64>,
+    disk_space: Option<f64>,
 }
 
 impl Offer {
@@ -80,16 +119,11 @@ impl Offer {
     }
 
     fn acceptable(&self, max_dph: f64) -> bool {
-        let gpu = self
-            .gpu_name
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !ECONOMIC_GPUS.iter().any(|allowed| gpu == *allowed) {
+        let gpu = normalized_gpu(self.gpu_name.as_deref().unwrap_or(""));
+        if !ECONOMIC_GPUS
+            .iter()
+            .any(|allowed| normalized_gpu(allowed) == gpu)
+        {
             return false;
         }
         // Vast hosts in these regions broke package downloads during the live
@@ -104,15 +138,17 @@ impl Offer {
         {
             return false;
         }
-        self.verified == Some(true)
+        // `verified` is a server-side filter: real bundles rows carry it as
+        // null/absent, so only an explicit false is disqualifying here.
+        self.verified != Some(false)
             && self.rentable == Some(true)
             && self.rented == Some(false)
             && self.reliability2.is_some_and(|v| v >= 0.99)
             && self.num_gpus == Some(1)
-            && self.gpu_ram.is_some_and(|v| v >= 20_000)
+            && self.gpu_ram.is_some_and(|v| v >= 20_000.0)
             && self.cuda_max_good.is_some_and(|v| v >= 12.4)
             && self.inet_down.is_some_and(|v| v >= 500.0)
-            && self.disk_space.is_some_and(|v| v >= 40)
+            && self.disk_space.is_some_and(|v| v >= 40.0)
             && self.dph_total.is_some_and(|v| v.is_finite() && v >= 0.0 && v <= max_dph)
             && self.id().is_some()
     }
@@ -132,22 +168,48 @@ fn unwrap_instance(value: &Value) -> Option<Value> {
     }
 }
 
+/// Vast v1 normally returns `instances: [...]`, but older shapes and bare
+/// arrays/objects still occur. Accept all of them rather than guessing one.
 fn unwrap_instances(value: &Value) -> Vec<Value> {
     match value {
-        Value::Object(map) => match map.get("instances") {
-            Some(Value::Array(items)) => items.clone(),
-            Some(Value::Object(inner)) => vec![Value::Object(inner.clone())],
-            _ => Vec::new(),
-        },
+        Value::Object(map) => {
+            if let Some(items) = map.get("instances") {
+                return match items {
+                    Value::Array(items) => items.clone(),
+                    Value::Object(inner) => vec![Value::Object(inner.clone())],
+                    _ => Vec::new(),
+                };
+            }
+            if let Some(data) = map.get("data") {
+                return unwrap_instances(data);
+            }
+            if map.contains_key("id") {
+                return vec![value.clone()];
+            }
+            if !map.is_empty() && map.values().all(Value::is_object) {
+                return map.values().cloned().collect();
+            }
+            Vec::new()
+        }
         Value::Array(items) => items.clone(),
         _ => Vec::new(),
     }
+}
+
+fn instance_id(instance: &Value) -> Option<String> {
+    instance.get("id").and_then(|value| {
+        value
+            .as_u64()
+            .map(|n| n.to_string())
+            .or_else(|| value.as_str().map(str::to_string))
+    })
 }
 
 fn instance_state(instance: &Value) -> String {
     instance
         .get("actual_status")
         .or_else(|| instance.get("status"))
+        .or_else(|| instance.get("cur_state"))
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim()
@@ -230,63 +292,160 @@ impl VastVocalSeparator {
         }
     }
 
-    /// Errors never carry the key: only the status code and the path are used.
-    async fn api(
+    /// The list endpoint moved to `/api/v1/instances/`. Keep the v0 base for
+    /// every endpoint that works there (bundles, asks, single instance, ssh).
+    fn v1_base(&self) -> String {
+        let base = self.config.api_base.trim_end_matches('/');
+        if let Some(prefix) = base.strip_suffix("/api/v0") {
+            format!("{prefix}/api/v1")
+        } else if let Some(prefix) = base.strip_suffix("/v0") {
+            format!("{prefix}/v1")
+        } else {
+            format!("{base}/v1")
+        }
+    }
+
+    /// Errors never carry the key: only the path, status and a scrubbed,
+    /// truncated response body are logged.
+    async fn api_at(
         &self,
+        base: &str,
         method: Method,
         path: &str,
         body: Option<Value>,
+        query: &[(&str, &str)],
     ) -> Result<Value, VocalSeparationError> {
+        let method_name = method.as_str().to_string();
         let url = format!(
             "{}/{}",
-            self.config.api_base.trim_end_matches('/'),
+            base.trim_end_matches('/'),
             path.trim_start_matches('/')
         );
         let mut request = self
             .client
             .request(method, url)
             .header("Authorization", format!("Bearer {}", self.config.api_key));
+        if !query.is_empty() {
+            request = request.query(query);
+        }
         if let Some(body) = body {
             request = request.json(&body);
         }
-        let response = tokio::time::timeout(self.config.http_timeout, request.send())
-            .await
-            .map_err(|_| VocalSeparationError::ColabUnavailable)?
-            .map_err(|_| VocalSeparationError::ColabUnavailable)?;
+        let response = match tokio::time::timeout(self.config.http_timeout, request.send()).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
+                vast_warn!("{method_name} {path} request failed: {error}");
+                return Err(VocalSeparationError::ColabUnavailable);
+            }
+            Err(_) => {
+                vast_warn!("{method_name} {path} timed out");
+                return Err(VocalSeparationError::ColabUnavailable);
+            }
+        };
         let status = response.status();
-        let text = tokio::time::timeout(self.config.http_timeout, response.text())
-            .await
-            .map_err(|_| VocalSeparationError::ColabUnavailable)?
-            .map_err(|_| VocalSeparationError::ColabUnavailable)?;
+        let text = match tokio::time::timeout(self.config.http_timeout, response.text()).await {
+            Ok(Ok(text)) => text,
+            _ => {
+                vast_warn!("{method_name} {path} body timed out (status {})", status.as_u16());
+                return Err(VocalSeparationError::ColabUnavailable);
+            }
+        };
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            vast_warn!(
+                "{method_name} {path} rejected credentials: status {} body {}",
+                status.as_u16(),
+                sanitized_body(&text, &self.config.api_key)
+            );
             return Err(VocalSeparationError::ColabUnavailable);
         }
         if !status.is_success() {
+            vast_warn!(
+                "{method_name} {path} failed: status {} body {}",
+                status.as_u16(),
+                sanitized_body(&text, &self.config.api_key)
+            );
             return Err(VocalSeparationError::ColabUnavailable);
         }
         if text.trim().is_empty() {
             return Ok(Value::Null);
         }
-        serde_json::from_str(&text).map_err(|_| VocalSeparationError::ColabUnavailable)
+        match serde_json::from_str(&text) {
+            Ok(value) => Ok(value),
+            Err(_) => {
+                vast_warn!(
+                    "{method_name} {path} returned invalid JSON: status {} body {}",
+                    status.as_u16(),
+                    sanitized_body(&text, &self.config.api_key)
+                );
+                Err(VocalSeparationError::ColabUnavailable)
+            }
+        }
+    }
+
+    async fn api(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Value, VocalSeparationError> {
+        self.api_at(&self.config.api_base, method, path, body, &[])
+            .await
+    }
+
+    /// Paginated v1 listing, narrowed with the documented `select_filters`
+    /// label filter. The response shape is parsed defensively by `unwrap_instances`.
+    async fn list_instances(&self) -> Result<Vec<Value>, VocalSeparationError> {
+        let filter = json!({ "label": { "eq": self.config.label } }).to_string();
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..8 {
+            let mut query = vec![
+                ("limit", "25"),
+                ("select_filters", filter.as_str()),
+            ];
+            if let Some(token) = cursor.as_deref() {
+                query.push(("after_token", token));
+            }
+            let listing = self
+                .api_at(&self.v1_base(), Method::GET, "instances/", None, &query)
+                .await?;
+            let next = listing
+                .get("next_token")
+                .and_then(Value::as_str)
+                .filter(|token| !token.is_empty())
+                .map(str::to_string);
+            all.extend(unwrap_instances(&listing));
+            cursor = next;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        vast_info!("v1 instance listing: found={}", all.len());
+        Ok(all)
     }
 
     async fn destroy_instance(&self, instance_id: &str) -> bool {
         let path = format!("instances/{instance_id}/");
-        matches!(self.api(Method::DELETE, &path, None).await, Ok(_))
+        let ok = matches!(self.api(Method::DELETE, &path, None).await, Ok(_));
+        if ok {
+            vast_info!("destroy instance {instance_id}: ok");
+        } else {
+            vast_warn!("destroy instance {instance_id}: failed");
+        }
+        ok
     }
 
     /// Releases every instance this app left behind. Called on application boot
     /// so a hard restart cannot leave an orphan billing indefinitely.
     pub async fn destroy_orphans(&self) -> usize {
-        let Ok(listing) = self.api(Method::GET, "instances/", None).await else {
+        let Ok(listing) = self.list_instances().await else {
             return 0;
         };
         let mut removed = 0;
-        for instance in unwrap_instances(&listing) {
+        vast_info!("orphan sweep at boot: candidates={}", listing.len());
+        for instance in listing {
             let label = instance.get("label").and_then(Value::as_str).unwrap_or("");
-            let id = instance
-                .get("id")
-                .and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(str::to_string)));
+            let id = instance_id(&instance);
             if label != self.config.label {
                 continue;
             }
@@ -327,8 +486,11 @@ impl VastVocalSeparator {
             cmd.stdout(Stdio::null());
             cmd.stderr(Stdio::null());
             match tokio::time::timeout(Duration::from_secs(30), cmd.status()).await {
-                Ok(Ok(status)) if status.success() => {}
-                _ => return Err(VocalSeparationError::SeparationFailed),
+                Ok(Ok(status)) if status.success() => vast_info!("ssh key generated"),
+                _ => {
+                    vast_warn!("ssh key generation failed");
+                    return Err(VocalSeparationError::SeparationFailed);
+                }
             }
         }
         #[cfg(unix)]
@@ -346,24 +508,31 @@ impl VastVocalSeparator {
             return Err(VocalSeparationError::SeparationFailed);
         }
         let registered = self.api(Method::GET, "ssh/", None).await?;
-        if !registered.to_string().contains(&key) {
+        let already_registered = registered.to_string().contains(&key);
+        if !already_registered {
             self.api(Method::POST, "ssh/", Some(json!({ "ssh_key": key })))
                 .await?;
         }
+        vast_info!("ssh key ready: already_registered={already_registered}");
         Ok((private, key))
     }
 
+    /// Vast validates every filter as an operator object; scalars return 400.
+    /// The GPU whitelist is sent server-side, while CN/HK stays a client-side
+    /// check on `geolocation`, so a full page can reach non-CN offers.
     fn bundle_query(&self) -> Value {
         json!({
-            "verified": true,
-            "rentable": true,
-            "rented": false,
-            "reliability2": 0.99,
-            "num_gpus": 1,
-            "gpu_ram": 20_000,
-            "cuda_max_good": 12.4,
-            "inet_down": 500,
-            "disk_space": 40,
+            "verified": {"eq": true},
+            "rentable": {"eq": true},
+            "rented": {"eq": false},
+            "reliability2": {"gte": 0.99},
+            "num_gpus": {"eq": 1},
+            "gpu_ram": {"gte": 20_000},
+            "cuda_max_good": {"gte": 12.4},
+            "inet_down": {"gte": 500},
+            "disk_space": {"gte": 40},
+            "gpu_name": {"in": ECONOMIC_GPUS},
+            "dph_total": {"lte": self.config.max_dph},
             "type": "on-demand",
             "order": [["dph_total", "asc"]],
             "limit": 100
@@ -380,11 +549,16 @@ impl VastVocalSeparator {
             .cloned()
             .or_else(|| response.as_array().cloned())
             .unwrap_or_default();
+        let received = values.len();
         let mut offers: Vec<Offer> = values
             .into_iter()
             .filter_map(|value| serde_json::from_value(value).ok())
             .filter(|offer: &Offer| offer.acceptable(self.config.max_dph))
             .collect();
+        vast_info!(
+            "offers found: received={received} acceptable={} (CN/HK excluded client-side)",
+            offers.len()
+        );
         offers.sort_by(|a, b| {
             a.dph_total
                 .unwrap_or(f64::MAX)
@@ -410,37 +584,63 @@ impl VastVocalSeparator {
             .is_some_and(|status| instance_state(&status) == "running")
     }
 
-    async fn rent_offer(&self, offer: &Offer, deadline: Instant) -> Result<Lease, VocalSeparationError> {
+    async fn rent_offer(
+        &self,
+        offer: &Offer,
+        deadline: Instant,
+    ) -> Result<Lease, VocalSeparationError> {
         let id = offer
             .id()
             .ok_or(VocalSeparationError::ColabUnavailable)?;
+        vast_info!(
+            "chosen offer: id={id} gpu={} dph={} geolocation={}",
+            offer.gpu_name.as_deref().unwrap_or("?"),
+            offer.dph_total.unwrap_or(f64::NAN),
+            offer.geolocation.as_deref().unwrap_or("?")
+        );
         let response = self
             .api(
                 Method::PUT,
                 &format!("asks/{id}/"),
                 Some(json!({
+                    "client_id": "me",
                     "image": self.config.image,
                     "disk": 40,
-                    "runtype": "ssh",
+                    "runtype": "ssh_direc ssh_proxy",
                     "label": self.config.label,
                 })),
             )
             .await?;
-        let instance_id = response
-            .get("new_contract")
-            .or_else(|| response.get("instance_id"))
-            .or_else(|| response.get("id"))
-            .and_then(|v| v.as_u64().map(|n| n.to_string()).or_else(|| v.as_str().map(str::to_string)))
+        let instance_id = instance_id(&response)
+            .or_else(|| {
+                response
+                    .get("new_contract")
+                    .or_else(|| response.get("instance_id"))
+                    .and_then(|value| {
+                        value
+                            .as_u64()
+                            .map(|n| n.to_string())
+                            .or_else(|| value.as_str().map(str::to_string))
+                    })
+            })
             .ok_or(VocalSeparationError::ColabUnavailable)?;
+        vast_info!("rent result: instance={instance_id}");
 
+        let mut previous_state = String::new();
         loop {
             if Instant::now() >= deadline {
+                vast_warn!("instance {instance_id} launch deadline expired");
                 break;
             }
             if let Some(status) = self.instance_status(&instance_id).await {
                 let state = instance_state(&status);
+                if state != previous_state {
+                    vast_info!("instance {instance_id} state: {state}");
+                    previous_state = state.clone();
+                }
                 if state == "running" {
                     if let Some((host, port)) = connection_details(&status) {
+                        vast_info!("instance {instance_id} ssh ready at {host}:{port}");
                         return Ok(Lease {
                             instance_id,
                             host,
@@ -448,8 +648,10 @@ impl VastVocalSeparator {
                             last_used: Instant::now(),
                         });
                     }
+                    vast_warn!("instance {instance_id} running without ssh details");
                 }
                 if is_dead_state(&state) {
+                    vast_warn!("instance {instance_id} entered dead state {state}");
                     break;
                 }
             }
@@ -474,7 +676,10 @@ impl VastVocalSeparator {
                     .min(deadline.saturating_duration_since(Instant::now()));
             match self.rent_offer(&offer, rent_deadline).await {
                 Ok(lease) => return Ok(lease),
-                Err(_) => continue, // try the next offer
+                Err(_) => {
+                    vast_warn!("offer {} could not be rented; trying next", offer.id().unwrap_or_default());
+                    continue; // try the next offer
+                }
             }
         }
         Err(VocalSeparationError::ColabUnavailable)
@@ -509,6 +714,7 @@ impl VastVocalSeparator {
                         && lease.last_used.elapsed() >= this.config.retention
                 });
             if expired {
+                vast_info!("retention expired for instance {instance_id}: destroying");
                 let _ = this.destroy_instance(&instance_id).await;
                 this.forget_instance(&instance_id).await;
             }
@@ -526,29 +732,27 @@ impl VastVocalSeparator {
                 if this.config.gpu.available_permits() == 0 {
                     continue;
                 }
-                let Ok(listing) = this.api(Method::GET, "instances/", None).await else {
+                let Ok(listing) = this.list_instances().await else {
                     continue;
                 };
                 let current = this.lease.lock().await.clone();
-                for instance in unwrap_instances(&listing) {
+                vast_info!("safety reaper: candidates={}", listing.len());
+                for instance in listing {
                     let label = instance.get("label").and_then(Value::as_str).unwrap_or("");
                     if label != this.config.label {
                         continue;
                     }
-                    let id = instance.get("id").and_then(|v| {
-                        v.as_u64()
-                            .map(|n| n.to_string())
-                            .or_else(|| v.as_str().map(str::to_string))
-                    });
-                    let Some(id) = id else {
+                    let Some(id) = instance_id(&instance) else {
                         continue;
                     };
                     let still_warm = current.as_ref().is_some_and(|lease| {
                         lease.instance_id == id && lease.last_used.elapsed() < this.config.retention
                     });
                     if still_warm {
+                        vast_info!("safety reaper: keeping warm instance {id}");
                         continue;
                     }
+                    vast_info!("safety reaper: stale instance {id}, destroying");
                     let _ = this.destroy_instance(&id).await;
                     this.forget_instance(&id).await;
                 }
@@ -724,6 +928,7 @@ impl VastVocalSeparator {
             .source_path
             .to_str()
             .ok_or(VocalSeparationError::SeparationFailed)?;
+        let upload_started = Instant::now();
         self.scp(
             lease,
             private_key,
@@ -732,6 +937,7 @@ impl VastVocalSeparator {
             left(),
         )
         .await?;
+        vast_info!("upload completed in {}ms", upload_started.elapsed().as_millis());
 
         let work_dir = self.config.data_dir.join("vast").join("work");
         tokio::fs::create_dir_all(&work_dir)
@@ -758,6 +964,7 @@ impl VastVocalSeparator {
         // worker image exports its venv PATH from /etc/profile.d/venv.sh.
         let script_file = std::fs::File::open(&script_path)
             .map_err(|_| VocalSeparationError::SeparationFailed)?;
+        let script_started = Instant::now();
         let output = self
             .ssh_command(
                 lease,
@@ -767,6 +974,10 @@ impl VastVocalSeparator {
                 left(),
             )
             .await?;
+        vast_info!(
+            "remote script completed in {}ms",
+            script_started.elapsed().as_millis()
+        );
         let _ = tokio::fs::remove_file(&script_path).await;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let result = parse_execution_result(&stdout)
@@ -780,6 +991,7 @@ impl VastVocalSeparator {
             .output_path
             .to_str()
             .ok_or(VocalSeparationError::InvalidSeparatorOutput)?;
+        let download_started = Instant::now();
         self.scp(
             lease,
             private_key,
@@ -788,17 +1000,31 @@ impl VastVocalSeparator {
             left(),
         )
         .await?;
+        vast_info!(
+            "download completed in {}ms",
+            download_started.elapsed().as_millis()
+        );
 
         // 3. Same verification as Colab: SHA-256 and ffprobe duration against
         //    the single JSON line printed by the shared script.
         let local_hash = self.sha256(&request.output_path, left()).await?;
-        if local_hash != result.sha256.to_lowercase() {
+        let hash_matches = local_hash == result.sha256.to_lowercase();
+        vast_info!("verification sha256_match={hash_matches}");
+        if !hash_matches {
+            vast_warn!("verification failed: sha256 mismatch");
             return Err(VocalSeparationError::InvalidSeparatorOutput);
         }
         let local_duration = self
             .run_ffprobe_duration(&request.output_path, left())
             .await?;
-        if (local_duration - result.duration).abs() > 2.0 {
+        let duration_delta = (local_duration - result.duration).abs();
+        vast_info!(
+            "verification duration: reported={} local={} delta={duration_delta}",
+            result.duration,
+            local_duration
+        );
+        if duration_delta > 2.0 {
+            vast_warn!("verification failed: duration delta > 2s");
             return Err(VocalSeparationError::InvalidSeparatorOutput);
         }
         let size_bytes = tokio::fs::metadata(&request.output_path)
@@ -834,8 +1060,10 @@ impl VastVocalSeparator {
             }
         };
         if self.instance_is_running(&lease.instance_id).await {
+            vast_info!("reusing warm instance {}", lease.instance_id);
             return true;
         }
+        vast_warn!("warm instance {} is not running; destroying", lease.instance_id);
         let _ = self.destroy_instance(&lease.instance_id).await;
         self.forget_instance(&lease.instance_id).await;
         false
@@ -889,12 +1117,16 @@ impl VastVocalSeparator {
         }
 
         let deadline = Instant::now() + request.timeout;
+        vast_info!("separation started: timeout={}s", request.timeout.as_secs());
         let (private_key, _) = self.ensure_ssh_key().await?;
         // S3/S4: a GPU already rented for this app is reused instead of
         // paying a cold start for the next separation.
         let lease = if self.warm_instance_available().await {
             match self.lease.lock().await.clone() {
-                Some(lease) => lease,
+                Some(lease) => {
+                    vast_info!("using already rented instance {}", lease.instance_id);
+                    lease
+                }
                 None => self.acquire_instance(deadline).await?,
             }
         } else {
@@ -904,6 +1136,12 @@ impl VastVocalSeparator {
         // A rental that lands after the deadline or after the caller went away
         // has no consumer; destroy it here instead of caching a billing leak.
         if cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
+            vast_warn!(
+                "instance {} has no consumer (cancelled={} deadline_passed={}); destroying",
+                lease.instance_id,
+                cancelled.load(Ordering::SeqCst),
+                Instant::now() >= deadline
+            );
             let _ = self.destroy_instance(&lease.instance_id).await;
             self.forget_instance(&lease.instance_id).await;
             drop(permit);
@@ -927,12 +1165,22 @@ impl VastVocalSeparator {
             }
         };
         if healthy {
+            vast_info!(
+                "keeping instance {} warm for {}s",
+                lease.instance_id,
+                self.config.retention.as_secs()
+            );
             self.remember_instance(lease.clone()).await;
             self.schedule_release(lease.instance_id.clone());
         } else {
+            vast_warn!(
+                "releasing instance {} after failed/cancelled separation",
+                lease.instance_id
+            );
             let _ = self.destroy_instance(&lease.instance_id).await;
             self.forget_instance(&lease.instance_id).await;
         }
+        vast_info!("separation finished: ok={}", result.is_ok());
         drop(permit);
         result
     }

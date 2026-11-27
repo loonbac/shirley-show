@@ -8,7 +8,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
@@ -44,6 +44,15 @@ struct Calls {
     deletes: Vec<String>,
     ssh_posts: Vec<Value>,
     instance_gets: usize,
+    list_queries: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+enum V1ListShape {
+    #[default]
+    Wrapped,
+    ObjectMap,
+    ArrayRoot,
 }
 
 #[derive(Clone)]
@@ -61,6 +70,8 @@ struct Inner {
     proxy_only: bool,
     /// Accept the older unwrapped response shape as well.
     unwrapped: bool,
+    /// Vast v1 may wrap the list differently; exercise all documented shapes.
+    v1_list_shape: V1ListShape,
     calls: Calls,
 }
 
@@ -75,16 +86,54 @@ impl FakeState {
                 die_on_next_health: false,
                 proxy_only: false,
                 unwrapped: false,
+                v1_list_shape: V1ListShape::Wrapped,
                 calls: Calls::default(),
             })),
         }
     }
 }
 
-async fn bundles(State(state): State<FakeState>, Json(body): Json<Value>) -> Json<Value> {
-    state.inner.lock().unwrap().calls.bundles.push(body);
+/// The live Vast API rejects scalar filters with 400. The fake must do the
+/// same, otherwise an adapter that sends `"verified": true` looks healthy.
+const FILTER_FIELDS: [&str; 11] = [
+    "verified",
+    "rentable",
+    "rented",
+    "reliability2",
+    "num_gpus",
+    "gpu_ram",
+    "cuda_max_good",
+    "inet_down",
+    "disk_space",
+    "gpu_name",
+    "dph_total",
+];
+
+fn non_dictionary_filter(body: &Value) -> Option<&'static str> {
+    FILTER_FIELDS
+        .iter()
+        .copied()
+        .find(|field| body.get(*field).is_some_and(|value| !value.is_object()))
+}
+
+async fn bundles(
+    State(state): State<FakeState>,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    state.inner.lock().unwrap().calls.bundles.push(body.clone());
+    if let Some(field) = non_dictionary_filter(&body) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "success": false,
+                "error": "bad_request",
+                "msg": format!("{field}: Input should be a valid dictionary")
+            })),
+        )
+            .into_response();
+    }
     let offers = state.inner.lock().unwrap().offers.clone();
-    Json(json!({ "offers": offers }))
+    Json(json!({ "offers": offers })).into_response()
 }
 
 async fn rent(
@@ -144,9 +193,48 @@ async fn delete_instance(
     Json(json!({ "deleted": id }))
 }
 
-async fn list_instances(State(state): State<FakeState>) -> Json<Value> {
-    let instances = state.inner.lock().unwrap().instances.clone();
-    Json(json!({ "instances": instances }))
+/// Vast retired the v0 listing; the exact body is from the live probe.
+async fn deprecated_list_instances() -> axum::response::Response {
+    (
+        StatusCode::GONE,
+        Json(json!({
+            "success": false,
+            "error": "deprecated_endpoint",
+            "msg": "Use /api/v1/instances/ instead."
+        })),
+    )
+        .into_response()
+}
+
+async fn list_instances_v1(
+    State(state): State<FakeState>,
+    RawQuery(query): RawQuery,
+) -> axum::response::Response {
+    let mut inner = state.inner.lock().unwrap();
+    inner.calls.list_queries.push(query.unwrap_or_default());
+    let instances = inner.instances.clone();
+    let shape = inner.v1_list_shape;
+    drop(inner);
+    match shape {
+        V1ListShape::Wrapped => Json(json!({
+            "success": true,
+            "instances_found": instances.len(),
+            "total_instances": instances.len(),
+            "label_counts": {},
+            "next_token": null,
+            "instances": instances
+        }))
+        .into_response(),
+        V1ListShape::ObjectMap => {
+            let map = instances
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| (index.to_string(), value))
+                .collect::<serde_json::Map<String, Value>>();
+            Json(Value::Object(map)).into_response()
+        }
+        V1ListShape::ArrayRoot => Json(instances).into_response(),
+    }
 }
 
 async fn get_ssh_keys(State(state): State<FakeState>) -> Json<Value> {
@@ -168,7 +256,8 @@ async fn spawn_fake_vast(state: FakeState) -> (String, tokio::task::JoinHandle<(
         .route("/api/v0/bundles/", post(bundles))
         .route("/api/v0/asks/{id}/", put(rent))
         .route("/api/v0/instances/{id}/", get(get_instance).delete(delete_instance))
-        .route("/api/v0/instances/", get(list_instances))
+        .route("/api/v0/instances/", get(deprecated_list_instances))
+        .route("/api/v1/instances/", get(list_instances_v1))
         .route("/api/v0/ssh/", get(get_ssh_keys).post(post_ssh_key))
         .with_state(state);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -357,6 +446,7 @@ impl Fixture {
             deletes: inner.calls.deletes.clone(),
             ssh_posts: inner.calls.ssh_posts.clone(),
             instance_gets: inner.calls.instance_gets,
+            list_queries: inner.calls.list_queries.clone(),
         }
     }
 }
@@ -389,21 +479,22 @@ async fn vast_rents_cheapest_allowed_offer_and_separates_with_generated_script()
 
     let calls = fixture.calls();
     let query = &calls.bundles[0];
-    assert_eq!(query["verified"], true);
-    assert_eq!(query["rentable"], true);
-    assert_eq!(query["rented"], false);
-    assert_eq!(query["reliability2"], 0.99);
-    assert_eq!(query["num_gpus"], 1);
-    assert_eq!(query["gpu_ram"], 20000);
-    assert_eq!(query["cuda_max_good"], 12.4);
-    assert_eq!(query["inet_down"], 500);
-    assert_eq!(query["disk_space"], 40);
+    assert_eq!(query["verified"], json!({"eq": true}));
+    assert_eq!(query["rentable"], json!({"eq": true}));
+    assert_eq!(query["rented"], json!({"eq": false}));
+    assert_eq!(query["reliability2"], json!({"gte": 0.99}));
+    assert_eq!(query["num_gpus"], json!({"eq": 1}));
+    assert_eq!(query["gpu_ram"], json!({"gte": 20000}));
+    assert_eq!(query["cuda_max_good"], json!({"gte": 12.4}));
+    assert_eq!(query["inet_down"], json!({"gte": 500}));
+    assert_eq!(query["disk_space"], json!({"gte": 40}));
     assert_eq!(query["type"], "on-demand");
     assert_eq!(calls.rents.len(), 1);
     assert_eq!(calls.rents[0].0, "5");
     assert_eq!(calls.rents[0].1["image"], fixture.config.image);
     assert_eq!(calls.rents[0].1["disk"], 40);
-    assert_eq!(calls.rents[0].1["runtype"], "ssh");
+    assert_eq!(calls.rents[0].1["runtype"], "ssh_direc ssh_proxy");
+    assert_eq!(calls.rents[0].1["client_id"], "me");
     assert_eq!(calls.rents[0].1["label"], "shirley-show");
     assert_eq!(calls.ssh_posts.len(), 1);
     assert_eq!(
@@ -734,6 +825,152 @@ async fn dropped_separation_future_still_releases_the_rented_instance() {
         vec!["7001".to_string()],
         "cancellation must not leave a rented GPU billing forever"
     );
+}
+
+/// A real `POST /bundles/` response: `verified` is absent/null (the server
+/// already filtered on it) and `disk_space` is fractional, not an integer.
+fn live_offer(id: u64, price: f64, gpu: &str, geo: &str) -> Value {
+    json!({
+        "id": id,
+        "dph_total": price,
+        "gpu_name": gpu,
+        "geolocation": geo,
+        "verified": null,
+        "rentable": true,
+        "rented": false,
+        "reliability2": 0.9923963,
+        "num_gpus": 1,
+        "gpu_ram": 24576,
+        "cuda_max_good": 13.0,
+        "inet_down": 870.1,
+        "disk_space": 155.75
+    })
+}
+
+#[tokio::test]
+async fn live_offer_shape_with_null_verified_and_fractional_disk_is_accepted() {
+    let fixture = Fixture::new(vec![live_offer(77, 0.19, "RTX 3090", "PL")]).await;
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("the real bundles response shape must yield a rentable offer");
+    assert_eq!(fixture.calls().rents[0].0, "77");
+}
+
+#[tokio::test]
+async fn strict_fake_rejects_scalar_filters_and_deprecated_v0_list() {
+    let fixture = Fixture::new(vec![]).await;
+    let client = reqwest::Client::new();
+    let rejected = client
+        .post(format!("{}/bundles/", fixture.config.api_base))
+        .json(&json!({"verified": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+    let body: Value = rejected.json().await.unwrap();
+    assert_eq!(body["error"], "bad_request");
+    assert_eq!(
+        body["msg"],
+        "verified: Input should be a valid dictionary"
+    );
+
+    let deprecated = client
+        .get(format!("{}/instances/", fixture.config.api_base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deprecated.status(), StatusCode::GONE);
+    let body: Value = deprecated.json().await.unwrap();
+    assert_eq!(body["error"], "deprecated_endpoint");
+}
+
+#[tokio::test]
+async fn query_uses_operator_filters_gpu_whitelist_and_price_cap() {
+    let fixture = Fixture::new(vec![offer(41, 0.20, "RTX 3090", "PL")]).await;
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("separation succeeds");
+    let calls = fixture.calls();
+    let query = &calls.bundles[0];
+    assert_eq!(query["verified"], json!({"eq": true}));
+    assert_eq!(query["rentable"], json!({"eq": true}));
+    assert_eq!(query["rented"], json!({"eq": false}));
+    assert_eq!(query["reliability2"], json!({"gte": 0.99}));
+    assert_eq!(query["num_gpus"], json!({"eq": 1}));
+    assert_eq!(query["gpu_ram"], json!({"gte": 20000}));
+    assert_eq!(query["cuda_max_good"], json!({"gte": 12.4}));
+    assert_eq!(query["inet_down"], json!({"gte": 500}));
+    assert_eq!(query["disk_space"], json!({"gte": 40}));
+    assert_eq!(
+        query["gpu_name"]["in"],
+        json!([
+            "RTX 4090",
+            "RTX 3090",
+            "RTX A5000",
+            "RTX A6000",
+            "L4",
+            "A10",
+            "RTX 4080S"
+        ])
+    );
+    assert_eq!(query["dph_total"]["lte"], json!(fixture.config.max_dph));
+    assert_eq!(query["type"], "on-demand");
+    assert_eq!(query["order"], json!([["dph_total", "asc"]]));
+    assert!(
+        query["limit"].as_u64().is_some_and(|limit| limit >= 100),
+        "a full page is needed to reach non-CN offers after client-side filtering"
+    );
+    assert_eq!(calls.rents[0].1["client_id"], "me");
+    assert_eq!(calls.rents[0].1["runtype"], "ssh_direc ssh_proxy");
+}
+
+#[tokio::test]
+async fn chinese_offers_are_filtered_client_side_before_choosing() {
+    let mut offers = (0..45u64)
+        .map(|id| offer(100 + id, 0.05 + id as f64 * 0.0001, "RTX 4090", "Guangdong, CN"))
+        .collect::<Vec<_>>();
+    offers.push(offer(999, 0.30, "RTX 3090", "PL"));
+    let fixture = Fixture::new(offers).await;
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("a non-CN offer must still be rented");
+    assert_eq!(fixture.calls().rents[0].0, "999");
+}
+
+#[tokio::test]
+async fn v1_listing_shapes_are_handled_defensively() {
+    for shape in [
+        V1ListShape::Wrapped,
+        V1ListShape::ObjectMap,
+        V1ListShape::ArrayRoot,
+    ] {
+        let fixture = Fixture::new(vec![]).await;
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            inner.instances = vec![
+                json!({"id": 101, "label": "shirley-show"}),
+                json!({"id": 102, "label": "otro-proyecto"}),
+            ];
+            inner.v1_list_shape = shape;
+        }
+        let removed = fixture.separator().destroy_orphans().await;
+        assert_eq!(removed, 1, "shape {shape:?} must still reap the label");
+        assert_eq!(fixture.calls().deletes, vec!["101".to_string()]);
+        assert!(
+            fixture
+                .calls()
+                .list_queries
+                .iter()
+                .any(|query| query.contains("select_filters")),
+            "the v1 listing should narrow by label server-side"
+        );
+    }
 }
 
 /// Minimal in-file separator used only by the no-key wiring check.
