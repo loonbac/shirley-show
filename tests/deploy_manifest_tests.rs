@@ -71,6 +71,31 @@ fn test_dockerfile_multi_stage_and_healthcheck() {
 }
 
 #[test]
+fn test_dockerfile_official_google_colab_cli() {
+    let content = fs::read_to_string("Dockerfile").expect("read Dockerfile");
+    // The third-party xeodou/colab-cli curl download must be gone: the binary is
+    // now the official google-colab-cli, pinned to 0.8.0.
+    assert!(
+        !content.contains("xeodou/colab-cli"),
+        "Dockerfile must not download third-party xeodou/colab-cli"
+    );
+    assert!(
+        content.contains("google-colab-cli==0.8.0"),
+        "Dockerfile must install pinned google-colab-cli==0.8.0"
+    );
+    // The official CLI requires Python >= 3.12; bookworm ships 3.11, so the
+    // image installs uv and builds a 3.12 interpreter for the CLI.
+    assert!(
+        content.contains("--python 3.12"),
+        "Dockerfile must install google-colab-cli with Python 3.12"
+    );
+    assert!(
+        content.contains("uv tool install"),
+        "Dockerfile must install google-colab-cli via uv tool install"
+    );
+}
+
+#[test]
 fn test_dockerignore_whitelist() {
     let content = fs::read_to_string(".dockerignore").expect("read .dockerignore");
     assert!(content.contains(".git/"), "Must ignore .git/");

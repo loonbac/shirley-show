@@ -26,8 +26,10 @@ services:
       - SHIRLEY_AGENT_TIMEOUT_SECS=${SHIRLEY_AGENT_TIMEOUT_SECS:-120}
       - SHIRLEY_SEPARATION_TIMEOUT_SECS=${SHIRLEY_SEPARATION_TIMEOUT_SECS:-600}
       - SHIRLEY_REMOTE_SEPARATION_TIMEOUT_SECS=${SHIRLEY_REMOTE_SEPARATION_TIMEOUT_SECS:-1500}
-      # Vocal separation runs on Colab. The token file must be mounted below;
-      # without it every separation fails with colab_token_missing.
+      # Vocal separation runs on Colab (official google-colab-cli). The app
+      # copies the mounted token to ~/.config/colab-cli/token.json (the CLI's
+      # legacy path) before use; without the mounted token every separation
+      # fails with colab_token_missing.
       - SHIRLEY_COLAB_BIN=${SHIRLEY_COLAB_BIN:-colab}
       - SHIRLEY_COLAB_TOKEN=${SHIRLEY_COLAB_TOKEN:-/home/shirley/.config/colab/token.json}
       - SHIRLEY_COLAB_GPU=${SHIRLEY_COLAB_GPU:-g4}
@@ -36,9 +38,10 @@ services:
     volumes:
       - shirley-data:/app/data
       # Colab OAuth token (JSON with access_token, refresh_token and expiry).
-      # Mounted read-write on purpose: colab-cli rewrites this file when it
-      # refreshes an expired access_token, and a read-only mount makes every
-      # separation fail once the hour is up.
+      # The app copies it to ~/.config/colab-cli/token.json (the official CLI's
+      # legacy path) before each use. Mounted read-write on purpose: the CLI
+      # rewrites the file when it refreshes an expired access_token, and a
+      # read-only mount makes every separation fail once the hour is up.
       # The host path must exist and be a file: if it is missing, Docker creates
       # a DIRECTORY and the container starts with an unusable token.
       - ${COLAB_TOKEN_HOST_PATH:-/opt/shirley/secrets/colab-token.json}:/home/shirley/.config/colab/token.json

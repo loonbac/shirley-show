@@ -1,7 +1,13 @@
 # Despliegue en Coolify (eje-desarrollo)
 
 Shirley Show corre en Coolify **sin GPU**. La separación vocal se delega a
-Google Colab (`colab` CLI), que se coordina desde el contenedor.
+Google Colab (CLI oficial `google-colab-cli`, instalado como `colab`), que se
+coordina desde el contenedor. Usa los comandos `colab new -s NAME --gpu GPU`,
+`colab upload -s NAME LOCAL REMOTE`, `colab exec -s NAME -f SCRIPT`,
+`colab download -s NAME REMOTE LOCAL`, `colab stop -s NAME` y `colab usage`.
+El token del host se monta en `/home/shirley/.config/colab/token.json` y el
+adaptador lo copia a `~/.config/colab-cli/token.json` (la vía heredada del CLI)
+antes de cada uso; las sesiones viven en `~/.config/colab-cli/sessions.json`.
 
 ## 1. Requisitos en eje-desarrollo
 
