@@ -1,0 +1,111 @@
+name: vast-worker-image
+
+# Builds the Vast.ai GPU worker that separates without installing anything at
+# runtime. The image is consumed by the Vast adapter (odd/tasks/vast-gpu-fallback.md,
+# task T2), which starts an instance from it and only uploads, executes and
+# downloads.
+#
+# Only the workflow pushes. Local and instabox builds stay local.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docker/vast-worker/**"
+      - ".github/workflows/vast-worker-image.yml"
+  pull_request:
+    paths:
+      - "docker/vast-worker/**"
+      - ".github/workflows/vast-worker-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: vast-worker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/loonbac/shirley-vast-worker
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Pull requests from forks get no token worth using, and they must not
+        # push anyway: only the build (and the smoke import) runs for them.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/vast-worker
+          file: docker/vast-worker/Dockerfile
+          load: true
+          push: false
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Report image size
+        run: |
+          docker image inspect --format '{{.Size}}' "${IMAGE}:${GITHUB_SHA}" \
+            | awk '{ printf "image size: %.2f GiB\n", $1/1024/1024/1024 }'
+          docker image inspect --format '{{json .Config.Env}}' "${IMAGE}:${GITHUB_SHA}"
+
+      - name: Smoke the separation entrypoint
+        # Proves the build is usable on a GPU host: the pinned CUDA build, the
+        # imports, and the models on disk, with no network at all. It runs
+        # through a LOGIN shell on purpose: that is what SSH gives an operator
+        # and what `/etc/profile` resets, so a broken PATH (which sends the
+        # generated script into its `pip install` fallback) fails here instead
+        # of on a paid GPU. The full separation smoke run is part of T1
+        # verification, not of every CI run: it is minutes of CPU time for an
+        # image that changes rarely.
+        run: |
+          docker run --rm --network none --entrypoint bash "${IMAGE}:${GITHUB_SHA}" -lc '
+            set -euo pipefail
+            command -v audio-separator ffmpeg ffprobe
+            test -d /content
+            audio-separator --help >/dev/null
+            python - <<'"'"'PY'"'"'
+          import os
+          import audio_separator
+          import torch
+          from pathlib import Path
+
+          assert torch.__version__.startswith("2.5.1"), torch.__version__
+          assert torch.version.cuda == "12.4", torch.version.cuda
+
+          model_dir = Path(os.environ["AUDIO_SEPARATOR_MODEL_DIR"])
+          for name in (
+              "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
+              "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt",
+          ):
+              path = model_dir / name
+              assert path.is_file() and path.stat().st_size > 0, f"missing model {path}"
+          print("models present in", model_dir)
+          PY
+          '
+
+      - name: Push :sha and :latest
+        if: github.event_name != 'pull_request'
+        run: |
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          docker push "${IMAGE}:latest"
