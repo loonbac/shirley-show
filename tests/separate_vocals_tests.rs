@@ -2,6 +2,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tempfile::TempDir;
 
 use shirley_show::domain::audio_format::AudioFormat;
@@ -673,4 +674,42 @@ async fn test_separated_output_consumable_by_upload_track_to_canonical() {
         err,
         shirley_show::state::staged_audio_registry::StagedAudioRegistryError::AlreadyConsumed
     );
+}
+
+/// A separation with a deadline in hand must size its request from that
+/// deadline, not from the configured separation timeout.
+///
+/// Production ran with `SHIRLEY_COLAB_TIMEOUT_SECS` unset (1800s) while the turn
+/// ended at 600s, so the request believed it had three times the budget it
+/// really had and the accelerator rotation spent what the pipeline needed.
+#[tokio::test]
+async fn test_separation_request_follows_the_real_deadline_not_the_configured_timeout() {
+    let ctx = TestContext::new();
+    let (staged_audio_id, _source_path) =
+        ctx.create_staged_audio("Deadline", b"deadline audio content");
+
+    let separator = Arc::new(FakeVocalSeparator::new(120, 3_000_000));
+    let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
+    let use_case = ctx
+        .build_separate_vocals(separator.clone(), downloader)
+        .with_timeout(Duration::from_secs(1800));
+
+    let input = SeparateVocalsInput {
+        source: VocalAudioSource::StagedAudioId(staged_audio_id),
+        mode: VocalSeparationMode::Instrumental,
+    };
+
+    use_case
+        .execute_within(input, Some(Duration::from_secs(345)))
+        .await
+        .expect("separation must succeed");
+
+    let requests = separator.recorded_requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].timeout,
+        Duration::from_secs(345),
+        "the request must use the budget the turn will really allow"
+    );
+    assert_eq!(use_case.timeout(), Duration::from_secs(1800));
 }

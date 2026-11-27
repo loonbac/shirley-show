@@ -148,6 +148,20 @@ struct ResolvedAudioSource {
     lease_guard: Option<StagedAudioLeaseGuard>,
 }
 
+/// Cómo se dimensiona la petición de separación.
+///
+/// El presupuesto lo manda la fecha límite real que va a cortar la petición, no
+/// el valor configurado. En producción `SHIRLEY_COLAB_TIMEOUT_SECS` estaba sin
+/// definir (1800s por defecto) mientras el turno del agente cortaba a los 600s:
+/// el separador creía tener 1800s, reservaba media hora imaginaria para asignar
+/// GPU y el turno se cancelaba justo cuando empezaba upload/exec/download.
+fn request_timeout_for(configured: Duration, deadline: Option<Duration>) -> Duration {
+    match deadline {
+        Some(left) => configured.min(left),
+        None => configured,
+    }
+}
+
 impl<R: ShowItemReader> SeparateVocals<R> {
     pub fn new(
         separator: Arc<dyn VocalSeparator>,
@@ -183,6 +197,19 @@ impl<R: ShowItemReader> SeparateVocals<R> {
         &self,
         input: SeparateVocalsInput,
     ) -> Result<SeparateVocalsOutput, SeparateVocalsError> {
+        self.execute_within(input, None).await
+    }
+
+    /// Igual que [`Self::execute`], pero con la fecha límite real del llamador.
+    ///
+    /// Cuando el turno del agente pasa el tiempo que le queda, la petición se
+    /// dimensiona con él aunque el timeout configurado sea mayor. Sin esto la
+    /// rotación de GPUs gasta un presupuesto que la petición no tiene.
+    pub async fn execute_within(
+        &self,
+        input: SeparateVocalsInput,
+        deadline: Option<Duration>,
+    ) -> Result<SeparateVocalsOutput, SeparateVocalsError> {
         // 1. Resolve source audio into path, title, and optional single-use lease guard
         let resolved = self.resolve_source(input.source).await?;
 
@@ -199,7 +226,7 @@ impl<R: ShowItemReader> SeparateVocals<R> {
             source_path: resolved.source_path,
             output_path: stage_path.clone(),
             mode: input.mode,
-            timeout: self.timeout,
+            timeout: request_timeout_for(self.timeout, deadline),
         };
 
         let separated = self.separator.separate(request).await?;

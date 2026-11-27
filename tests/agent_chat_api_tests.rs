@@ -1789,3 +1789,125 @@ async fn test_chat_api_streams_heartbeat_before_long_agent_result() {
         serde_json::from_slice(&body).expect("leading heartbeat is valid JSON whitespace");
     assert_eq!(parsed["message"], "Trabajo prolongado completado");
 }
+
+/// Records the timeout each separation request was given.
+#[derive(Clone, Default)]
+struct RecordingVocalSeparator {
+    timeouts: Arc<std::sync::Mutex<Vec<Duration>>>,
+}
+
+impl VocalSeparator for RecordingVocalSeparator {
+    fn separate(
+        &self,
+        request: VocalSeparationRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>,
+    > {
+        self.timeouts.lock().unwrap().push(request.timeout);
+        let out_path = request.output_path;
+        Box::pin(async move {
+            std::fs::write(&out_path, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00])
+                .expect("write fake mp3 part");
+            Ok(SeparatedAudio {
+                duration_secs: 120,
+                size_bytes: 3_000_000,
+            })
+        })
+    }
+}
+
+/// The separation request must be sized by the deadline the agent turn really
+/// has, never by the larger Colab default.
+///
+/// Production was cancelled at 600s with "La solicitud tardó más del límite de
+/// tiempo (600 s)" after the accelerator rotation had spent the whole window:
+/// the request itself carried 1800s (`SHIRLEY_COLAB_TIMEOUT_SECS` default), so
+/// half of an imaginary 1800s budget was reserved for assignment and the
+/// upload/exec/download pipeline was left nothing.
+#[tokio::test]
+async fn test_chat_api_separation_request_uses_the_turn_deadline_not_the_colab_default() {
+    let (_app, state, _tmp) = setup_test_app();
+    let sep = Arc::new(RecordingVocalSeparator::default());
+    let state = state.with_vocal_separator(sep.clone());
+    let pres = state.create_presentation.execute("Show Deadline").unwrap();
+
+    let staged_src = state.storage.staging_dir().join("deadline_api.part");
+    std::fs::write(&staged_src, &[0xFF, 0xFB, 0x90, 0x64, 0x00, 0x00, 0x00, 0x00]).unwrap();
+    let reg_entry = state.staged_audio_registry.register(
+        "stage-deadline-api".to_string(),
+        staged_src,
+        "Tema Deadline".to_string(),
+        120,
+        3000000,
+    );
+
+    let provider = Arc::new(MultiStepMockProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_sep_deadline".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "instrumental",
+                    "staged_audio_id": reg_entry.staged_audio_id
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: Some("Separación lista.".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    // The turn deadline the product enforces: 600s.
+    let limits = AgentLimits {
+        max_iterations: 5,
+        request_timeout: Duration::from_secs(120),
+        separation_timeout: Duration::from_secs(600),
+    };
+    let state =
+        state.with_agent_provider(Some(provider), limits, "openai/gpt-oss-120b".to_string());
+    let app = create_router(state.clone());
+
+    let payload = json!({
+        "message": "Separa instrumental",
+        "presentation_id": pres.id,
+        "staged_audio_id": reg_entry.staged_audio_id
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let _ = res.into_body().collect().await.unwrap();
+
+    // The state's separation timeout is what every caller inherits, and a 1800s
+    // Colab default does not fit inside a 600s turn.
+    assert!(
+        state.separate_vocals.timeout() <= Duration::from_secs(600),
+        "the separation timeout must fit inside the turn, got {:?}",
+        state.separate_vocals.timeout()
+    );
+
+    let timeouts = sep.timeouts.lock().unwrap().clone();
+    assert_eq!(timeouts.len(), 1, "the separation tool must run once");
+    // The request is bounded by the seconds the turn really has left, so the
+    // half reserved for GPU assignment is half of the REAL budget (~300s), not
+    // half of the 1800s Colab default (~900s, which is how production came to
+    // spend ~502s rotating accelerators and then be cancelled).
+    assert!(
+        timeouts[0] < Duration::from_secs(600),
+        "the request must be bounded by the turn deadline, got {:?}",
+        timeouts[0]
+    );
+    assert!(
+        timeouts[0] > Duration::from_secs(60),
+        "the request must still have a usable budget, got {:?}",
+        timeouts[0]
+    );
+}

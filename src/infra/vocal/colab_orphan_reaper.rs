@@ -36,7 +36,7 @@ pub enum ReapDecision {
 ///
 /// `has_active_work` es la existencia de una separación en curso;
 /// `inside_retention` indica que la sesión cacheada sigue dentro de su ventana y
-/// se conserva por la regla de los tres minutos.
+/// se conserva por la regla de los diez minutos.
 ///
 /// Se apaga solo cuando no hay trabajo **y** nada que conserve la sesión. Ser
 /// conservador aquí es deliberado: apagar una sesión con trabajo en curso pierde

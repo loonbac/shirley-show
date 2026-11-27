@@ -607,6 +607,14 @@ impl AgentChat {
                     }
 
                     let remaining = current_deadline.saturating_duration_since(now);
+                    // El presupuesto que de verdad le queda al turno viaja con la
+                    // herramienta. Es lo único que sabe cuánto va a durar el
+                    // turno: una separación dimensionada con el timeout
+                    // configurado de Colab (1800s por defecto) cree tener tres
+                    // veces el tiempo real, gasta media reserva imaginaria
+                    // asignando GPU y el turno se cancela a los 600s justo antes
+                    // de descargar el audio.
+                    turn_context.set_remaining_budget(Some(remaining));
                     let res = match tokio::time::timeout(
                         remaining,
                         self.dispatcher.dispatch(&tc, &mut turn_context),

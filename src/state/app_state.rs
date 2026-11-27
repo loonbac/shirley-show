@@ -166,7 +166,21 @@ impl AppState {
         );
         // The Colab GPU is only alive while a separation runs, so the timeout must
         // cover session startup plus the whole ensemble, not just one model.
-        let separation_timeout = std::time::Duration::from_secs(colab_config.timeout_secs);
+        //
+        // It must also fit INSIDE the turn that will cut it. This used to be
+        // `colab_config.timeout_secs` alone (1800s by default, and the
+        // deployment never set it), while the agent turn cancels at
+        // `separation_timeout_secs` (600s): the separator believed it had three
+        // times the real budget, reserved half of an imaginary 1800s for GPU
+        // assignment (~502s of it), and the turn was cancelled exactly when the
+        // pipeline needed its time. Taking the tightest of the Colab cap and the
+        // turn budget is what keeps the reserve real; the per-request deadline
+        // passed down by the agent turn narrows it further, to the seconds that
+        // really remain.
+        let turn_separation_budget = std::time::Duration::from_secs(config.separation_timeout_secs)
+            .min(crate::use_cases::separate_vocals::DEFAULT_SEPARATION_TIMEOUT);
+        let separation_timeout =
+            std::time::Duration::from_secs(colab_config.timeout_secs).min(turn_separation_budget);
         let colab_separator = Arc::new(ColabVocalSeparator::new(colab_config));
 
         let vocal_separator: Arc<dyn VocalSeparator> = colab_separator;
@@ -289,13 +303,20 @@ impl AppState {
             self.staged_audio_registry.clone(),
         ));
         self.download_youtube_audio = download_youtube_audio.clone();
-        self.separate_vocals = Arc::new(SeparateVocals::new(
-            self.vocal_separator.clone(),
-            self.storage.clone(),
-            self.staged_audio_registry.clone(),
-            self.item_repo.clone(),
-            download_youtube_audio,
-        ));
+        // The separation timeout is a decision taken when the state is built (it
+        // has to fit inside the agent turn); rebuilding the use case must not
+        // silently reset it to the constant default.
+        let separation_timeout = self.separate_vocals.timeout();
+        self.separate_vocals = Arc::new(
+            SeparateVocals::new(
+                self.vocal_separator.clone(),
+                self.storage.clone(),
+                self.staged_audio_registry.clone(),
+                self.item_repo.clone(),
+                download_youtube_audio,
+            )
+            .with_timeout(separation_timeout),
+        );
         self
     }
 

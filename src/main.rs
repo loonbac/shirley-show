@@ -98,8 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     state.frontend_dir = config.frontend_dir;
 
-    let separation_timeout =
-        std::time::Duration::from_secs(config.separation_timeout_secs.min(600));
+    let separation_timeout = state.separate_vocals.timeout();
 
     let agent_limits = AgentLimits {
         max_iterations: 5,

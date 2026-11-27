@@ -2,7 +2,7 @@
 //! request does not pay another cold start.
 //!
 //! The product rule is explicit: after a request finishes, the machine stays up
-//! for three minutes, and anything asked inside that window reuses it. Reusing
+//! for ten minutes, and anything asked inside that window reuses it. Reusing
 //! needs two things that did not exist: a place to remember the session id, and
 //! a decision that is not "stop immediately".
 //!
@@ -49,9 +49,9 @@ impl ColabSessionCache {
 
     /// Records a session as if it had been stored at `at`.
     ///
-    /// Exists so the retention boundary can be tested without sleeping for
-    /// three minutes: aging is the whole behaviour, and a test that cannot move
-    /// the clock cannot observe it.
+    /// Exists so the retention boundary can be tested without sleeping for ten
+    /// minutes: aging is the whole behaviour, and a test that cannot move the
+    /// clock cannot observe it.
     pub fn store_at(&mut self, session_id: String, at: Instant) {
         if let Ok(mut guard) = self.inner.try_lock() {
             guard.session_id = Some(session_id);
