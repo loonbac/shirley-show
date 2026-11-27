@@ -58,6 +58,13 @@ pub struct TurnToolContext {
     pub confirmation_reply: ConfirmationReply,
     pub confirmation_requested: Option<PendingDestructiveAction>,
     pub destructive_registry: Option<Arc<PendingDestructiveRegistry>>,
+    /// Tiempo que le queda realmente al turno, si el llamador lo conoce.
+    ///
+    /// Sirve para dimensionar operaciones largas (la separación vocal) con el
+    /// presupuesto que de verdad existe. Sin él la separación se dimensiona con
+    /// su timeout configurado, que en producción era tres veces mayor que el
+    /// turno y por eso el turno se cancelaba a mitad del pipeline.
+    pub remaining_budget: Option<std::time::Duration>,
 }
 
 impl Default for TurnToolContext {
@@ -173,7 +180,13 @@ impl TurnToolContext {
             confirmation_reply: ConfirmationReply::Other,
             confirmation_requested: None,
             destructive_registry: None,
+            remaining_budget: None,
         }
+    }
+
+    /// Fija el presupuesto restante del turno.
+    pub fn set_remaining_budget(&mut self, budget: Option<std::time::Duration>) {
+        self.remaining_budget = budget;
     }
 
     pub fn record_action(&mut self, action: ToolAction) {

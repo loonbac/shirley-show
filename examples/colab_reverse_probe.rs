@@ -1,9 +1,12 @@
-//! Reproduces one transport round trip from the local side only.
+//! Generic HTTP probe for a URL the Colab runtime reports.
 //!
-//! Takes the URL the runtime reported and does exactly what the separator does
-//! with it: resolve the direct link, download, decrypt. Running this against a
-//! known-good URL separates "the runtime cannot upload" from "we cannot
-//! download", which the product error cannot distinguish.
+//! Diagnostics only. It says nothing about how a separation result travels: the
+//! official `colab download -s NAME REMOTE LOCAL` fetches the plain MP3 from the
+//! runtime, and the old catbox/litterbox + AES arc is gone. What is left here is
+//! the part that is still useful when a transfer misbehaves — fetch a URL and
+//! report exactly what came back (status, content type, size, body preview,
+//! sha256) — so a failed separation can be attributed to the upload, to the
+//! transfer, or to the audio itself instead of being one opaque product error.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -45,25 +48,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "
-=== extract_direct_link ==="
+=== descarga completa ==="
     );
-    let direct = shirley_show::infra::vocal::colab_transfer::extract_direct_link(&body);
-    println!("{direct:?}");
-
-    let Some(direct) = direct else {
-        eprintln!(
-            "
-FALLO: no se pudo extraer enlace directo"
-        );
-        std::process::exit(1);
-    };
-
-    println!(
-        "
-=== descarga del enlace directo ==="
-    );
-    let enc: PathBuf = std::env::temp_dir().join("reverse_probe.enc");
-    let resp = client.get(&direct).send().await?;
+    let fetched: PathBuf = std::env::temp_dir().join("colab_reverse_probe.bin");
+    let resp = client.get(url).send().await?;
     let st = resp.status();
     let ct = resp
         .headers()
@@ -75,17 +63,13 @@ FALLO: no se pudo extraer enlace directo"
     println!("status: {st}");
     println!("content-type: {ct}");
     println!("bytes: {}", bytes.len());
-    println!(
-        "looks_like_html: {}",
-        shirley_show::infra::vocal::colab_transfer::looks_like_html(&bytes)
-    );
-    std::fs::write(&enc, &bytes)?;
+    std::fs::write(&fetched, &bytes)?;
 
     println!(
         "
 === sha256 del archivo bajado ==="
     );
-    let out = Command::new("sha256sum").arg(&enc).output()?;
+    let out = Command::new("sha256sum").arg(&fetched).output()?;
     println!("{}", String::from_utf8_lossy(&out.stdout).trim());
 
     println!(
@@ -99,7 +83,7 @@ FALLO: no se pudo extraer enlace directo"
             "/dev/null",
             "-w",
             "http=%{http_code} size=%{size_download} type=%{content_type}\n",
-            &direct,
+            url,
         ])
         .output()?;
     println!("{}", String::from_utf8_lossy(&out.stdout).trim());

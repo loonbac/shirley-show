@@ -1354,9 +1354,16 @@ impl AgentToolDispatcher {
                     });
                 }
 
+                // El presupuesto de la separación lo manda el turno: si el
+                // agente sólo tiene 600s, la petición a Colab no puede creer que
+                // tiene 1800s (el valor por defecto de
+                // SHIRLEY_COLAB_TIMEOUT_SECS). Con el presupuesto real la
+                // rotación de GPUs reserva la mitad del turno para el pipeline y
+                // el turno no se cancela justo antes de descargar el audio.
+                let remaining_budget = context.remaining_budget;
                 match self
                     .separate_vocals
-                    .execute(SeparateVocalsInput { source, mode })
+                    .execute_within(SeparateVocalsInput { source, mode }, remaining_budget)
                     .await
                 {
                     Ok(output) => {

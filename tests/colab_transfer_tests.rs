@@ -67,11 +67,11 @@ fn test_remote_script_emits_single_line_json_with_required_fields() {
 }
 
 // T8. The retention window is a named constant, not a literal scattered in the
-// code, because it is a product decision the user stated explicitly: three
-// minutes after the last request.
+// code, because it is a product decision the user stated explicitly: the machine
+// stays alive ten minutes after the last separation, so the next one reuses it.
 #[test]
-fn test_retention_window_is_three_minutes() {
-    assert_eq!(SESSION_IDLE_RETENTION.as_secs(), 180);
+fn test_retention_window_is_ten_minutes() {
+    assert_eq!(SESSION_IDLE_RETENTION, std::time::Duration::from_secs(600));
 }
 
 // T9. `colab exec --json` does not print the script's stdout: it wraps it in
@@ -145,7 +145,7 @@ fn test_parse_handles_pretty_printed_multiline_envelope() {
 }
 
 // T14. The user's requirement, stated directly: after a request finishes, the
-// machine stays up for three minutes, and a second request inside that window
+// machine stays up for ten minutes, and a second request inside that window
 // reuses it instead of paying another cold start. The cache is the piece that
 // makes "reuse" possible; without it every request calls `colab start`.
 #[test]
@@ -160,11 +160,9 @@ fn test_session_cache_reuses_within_retention_and_expires_after() {
 
     // Still inside the window: the same session must come back.
     assert_eq!(
-        cache
-            .reusable(std::time::Duration::from_secs(150))
-            .as_deref(),
+        cache.reusable(SESSION_IDLE_RETENTION).as_deref(),
         Some("sess-1"),
-        "a session kept for 3 minutes must be reusable after 150s"
+        "a session kept for ten minutes must be reusable"
     );
 
     // Past the window is covered by test_session_cache_expires_against_real_age,
@@ -188,8 +186,12 @@ fn test_session_cache_drops_invalidated_session() {
 // T16. The retention window is a product decision, not a tuning knob that can
 // silently become 10 seconds or an hour.
 #[test]
-fn test_retention_is_three_minutes() {
-    assert_eq!(SESSION_IDLE_RETENTION.as_secs(), 180);
+fn test_retention_is_ten_minutes() {
+    assert_eq!(
+        SESSION_IDLE_RETENTION,
+        std::time::Duration::from_secs(600),
+        "ten minutes after the last separation, then the GPU is stopped"
+    );
 }
 
 // T14b. The retention boundary must be checked against the age the session
@@ -201,33 +203,33 @@ fn test_session_cache_expires_against_real_age() {
     use std::time::{Duration, Instant};
 
     let mut cache = ColabSessionCache::new();
-    // Stored four minutes ago: past the three-minute window.
+    // Stored eleven minutes ago: past the ten-minute window.
     cache.store_at(
         "sess-old".to_string(),
-        Instant::now() - Duration::from_secs(240),
+        Instant::now() - Duration::from_secs(660),
     );
     assert_eq!(
-        cache.reusable(Duration::from_secs(180)),
+        cache.reusable(Duration::from_secs(600)),
         None,
-        "a session stored 240s ago is past the 180s window"
+        "a session stored 660s ago is past the 600s window"
     );
     // The id is still known even when it is too old to reuse; knowing it is what
     // lets the caller stop it.
     assert_eq!(cache.current().as_deref(), Some("sess-old"));
 
-    // Stored two minutes ago: still inside the window.
+    // Stored nine minutes ago: still inside the window.
     cache.store_at(
         "sess-new".to_string(),
-        Instant::now() - Duration::from_secs(120),
+        Instant::now() - Duration::from_secs(540),
     );
     assert_eq!(
-        cache.reusable(Duration::from_secs(180)).as_deref(),
+        cache.reusable(Duration::from_secs(600)).as_deref(),
         Some("sess-new")
     );
 }
 
-// R1-001 / R3-002 / R4-003. Every success used to spawn an independent 180s stop
-// task for the same session id, and a reuse only refreshed the cache timestamp.
+// R1-001 / R3-002 / R4-003. Every success used to spawn an independent stop task
+// for the same session id, and a reuse only refreshed the cache timestamp.
 // The old timer was never cancelled, so a second request that reused the machine
 // could be stopped mid-pipeline by the first request's timer, discarding its GPU
 // work. The release has to be superseded, not accumulated.
@@ -237,7 +239,7 @@ fn test_release_is_superseded_not_accumulated() {
     use std::time::{Duration, Instant};
 
     let mut cache = ColabSessionCache::new();
-    let retention = Duration::from_secs(180);
+    let retention = SESSION_IDLE_RETENTION;
 
     // First request finishes: a release is armed for now + retention.
     let first_deadline = Instant::now() + retention;
@@ -281,14 +283,14 @@ fn test_cache_is_stamped_at_finish_not_at_start() {
     use std::time::{Duration, Instant};
 
     let mut cache = ColabSessionCache::new();
-    let retention = Duration::from_secs(180);
+    let retention = SESSION_IDLE_RETENTION;
 
-    // The session was chosen 200s ago and the pipeline took that long, so the
-    // work just finished but the stamp is older than the 180s window. That is the
+    // The session was chosen 700s ago and the pipeline took that long, so the
+    // work just finished but the stamp is older than the 600s window. That is the
     // real shape of the defect: a long separation expired its own entry.
     cache.store_at(
         "sess-1".to_string(),
-        Instant::now() - Duration::from_secs(200),
+        Instant::now() - Duration::from_secs(700),
     );
     assert_eq!(
         cache.reusable(retention),
@@ -296,8 +298,8 @@ fn test_cache_is_stamped_at_finish_not_at_start() {
         "stamped at start, the entry looks expired right after finishing"
     );
 
-    // Stamping at finish is the contract the product asks for: three minutes
-    // after the request completes.
+    // Stamping at finish is the contract the product asks for: ten minutes after
+    // the separation completes.
     cache.refresh_at(Instant::now());
     assert_eq!(
         cache.reusable(retention).as_deref(),
@@ -308,7 +310,7 @@ fn test_cache_is_stamped_at_finish_not_at_start() {
 
 // R3-005, el que cuesta dinero. El release se armaba con `arm_release`, que
 // devuelve 0 cuando no puede tomar el lock interno, y `should_release(0)` es
-// siempre false. Resultado: la tarea de limpieza dormía 180s, se declaraba no
+// siempre false. Resultado: la tarea de limpieza dormía el tiempo de retención, se declaraba no
 // propietaria y **no apagaba nada**. La GPU quedaba facturando hasta que alguien
 // ejecutara `colab stop` a mano.
 //
@@ -562,4 +564,48 @@ fn test_lease_of_a_live_process_is_respected() {
         "una instancia viva no debe perder su GPU a manos de otra"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// T18. Reuse inside the window must still find the session AND push its expiry
+// forward, so a sequence of separations ten minutes apart keeps one GPU alive
+// instead of stopping it between them.
+#[test]
+fn test_reuse_inside_the_window_restarts_the_ten_minutes() {
+    use shirley_show::infra::vocal::colab_session_cache::ColabSessionCache;
+    use std::time::{Duration, Instant};
+
+    let mut cache = ColabSessionCache::new();
+    cache.store("sess-warm".to_string());
+    assert_eq!(
+        cache.reusable(SESSION_IDLE_RETENTION),
+        Some("sess-warm".to_string()),
+        "a session used a moment ago must be reused"
+    );
+
+    // Nine minutes after the last separation the machine is still warm.
+    cache.refresh_at(Instant::now() - Duration::from_secs(540));
+    assert_eq!(
+        cache.reusable(SESSION_IDLE_RETENTION),
+        Some("sess-warm".to_string()),
+        "a session used 9 minutes ago is still inside the 10-minute window"
+    );
+
+    // The reuse itself moves the expiry: from that moment the ten minutes start
+    // again instead of the old deadline stopping the machine mid-request.
+    cache.refresh_at(Instant::now());
+    assert_eq!(cache.reusable(SESSION_IDLE_RETENTION), Some("sess-warm".to_string()));
+
+    // Eleven minutes of silence is more than the window, so the machine is due
+    // to be stopped and must not be handed to another request.
+    cache.refresh_at(Instant::now() - Duration::from_secs(660));
+    assert_eq!(
+        cache.reusable(SESSION_IDLE_RETENTION),
+        None,
+        "after 11 minutes without separations the session is past its window"
+    );
+    assert_eq!(
+        cache.current(),
+        Some("sess-warm".to_string()),
+        "the id is still known, which is what lets the caller stop it"
+    );
 }

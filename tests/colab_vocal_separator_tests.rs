@@ -456,6 +456,10 @@ impl MockColabFixture {
             r#"#!/bin/sh
 cmd="$1"
 if [ "$cmd" = "new" ]; then
+    # Every assignment attempt is logged before any decision, so a test can pin
+    # the ORDER in which the accelerators are asked without depending on which
+    # one eventually assigns.
+    echo "attempt $@" >> "{log_str}"
     if [ -f "{fail_start_str}" ]; then
         exit 1
     fi
@@ -905,7 +909,8 @@ exit 0
 
 /// Colab can list an accelerator as available while its assignment endpoint
 /// hangs or refuses, so the primary GPU failing must not fail the separation
-/// outright. The fallback is tried, and the run must land on it.
+/// outright. The next candidate in the performance ranking is tried, and the run
+/// must land on it.
 #[tokio::test]
 async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
     let fixture = MockColabEnv::new_fixture();
@@ -942,19 +947,19 @@ async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
         "the broken GPU must not be logged as started, log was: {log}"
     );
     assert!(
-        starts[0].contains("--gpu L4"),
-        "the run must land on the fallback GPU, log was: {log}"
+        starts[0].contains("--gpu H100"),
+        "the run must land on the next fastest GPU, log was: {log}"
     );
     assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
 }
 
-/// Negative control for the test above: with the fallback disabled the same
-/// broken primary must still surface as ColabUnavailable. Without this, the
-/// fallback test could pass for the wrong reason.
+/// Negative control for the test above: when every accelerator in the ranking
+/// refuses, the request must still surface as ColabUnavailable. Without this,
+/// the fallback test could pass for the wrong reason.
 #[tokio::test]
 async fn test_start_without_fallback_still_reports_colab_unavailable() {
     let fixture = MockColabEnv::new_fixture();
-    std::fs::write(&fixture.trigger_fail_gpu, b"g4").unwrap();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100\nl4").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -981,7 +986,7 @@ async fn test_start_without_fallback_still_reports_colab_unavailable() {
 #[tokio::test]
 async fn test_start_walks_the_whole_gpu_chain_until_one_assigns() {
     let fixture = MockColabEnv::new_fixture();
-    std::fs::write(&fixture.trigger_fail_gpu, b"g4\na100\n").unwrap();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1427,12 +1432,12 @@ fn test_reaper_enumerates_object_and_string_entries() {
 // into `412 Precondition Failed` because a session was already active.
 // ---------------------------------------------------------------------------
 
-/// The configured chain is normalized to what the CLI accepts, primary first,
-/// duplicates removed, unsupported values (`14`) skipped.
+/// The chain is normalized to what the CLI accepts, unsupported values (`14`)
+/// are skipped, and no accelerator is ever attempted twice.
 #[test]
 fn test_gpu_chain_normalizes_and_skips_unsupported_values() {
     use shirley_show::infra::vocal::colab_vocal_separator_config::{
-        SUPPORTED_COLAB_GPUS, gpu_chain, normalize_gpu,
+        DEFAULT_GPU_CHAIN, SUPPORTED_COLAB_GPUS, gpu_chain, normalize_gpu,
     };
 
     // The exact list the CLI prints for an invalid value.
@@ -1446,12 +1451,113 @@ fn test_gpu_chain_normalizes_and_skips_unsupported_values() {
     assert_eq!(normalize_gpu(""), None);
 
     let fallbacks = vec!["14".to_string(), "l4".to_string(), "G4".to_string()];
-    assert_eq!(gpu_chain("g4", &fallbacks), vec!["G4", "L4"]);
+    let chain = gpu_chain("g4", &fallbacks);
+    assert_eq!(chain, vec!["G4", "H100", "A100", "L4"]);
+    assert!(!chain.iter().any(|g| g == "14"), "the typo must never be attempted");
+    let mut sorted = chain.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), chain.len(), "no accelerator may be attempted twice");
 
     // When nothing configured is usable the documented chain is used instead of
     // failing a paid request on a configuration typo.
-    assert_eq!(gpu_chain("14", &["v100".to_string()]), vec!["G4", "A100", "L4"]);
-    assert_eq!(gpu_chain("g4", &[]), vec!["G4"]);
+    assert_eq!(gpu_chain("14", &["v100".to_string()]), vec!["G4", "H100", "A100", "L4"]);
+
+    // A configured accelerator the CLI does not accept must not disable the
+    // chain either: `14` alone still rotates through the fastest options.
+    assert_eq!(gpu_chain("14", &[]), vec!["G4", "H100", "A100", "L4"]);
+
+    // The default chain is the measured performance ranking, T4 excluded.
+    assert_eq!(
+        DEFAULT_GPU_CHAIN.to_vec(),
+        vec!["G4", "H100", "A100", "L4"],
+        "the default chain must be the fast-first ranking"
+    );
+}
+
+/// The candidate order is a PERFORMANCE ranking, never the configuration order.
+///
+/// Production carries `SHIRLEY_COLAB_GPU=a100` from an old mitigation, and
+/// honouring that order would put the slowest usable device first and make every
+/// separation wait for it while a faster machine is free.
+#[test]
+fn test_gpu_chain_is_ordered_by_performance_not_by_configuration() {
+    use shirley_show::infra::vocal::colab_vocal_separator_config::gpu_chain;
+
+    // The production configuration today.
+    assert_eq!(
+        gpu_chain("a100", &["l4".to_string()]),
+        vec!["G4", "H100", "A100", "L4"],
+        "a configured primary must not outrank a faster accelerator"
+    );
+
+    // Any other configuration order still yields the same attempt order.
+    assert_eq!(
+        gpu_chain("l4", &["a100".to_string(), "g4".to_string()]),
+        vec!["G4", "H100", "A100", "L4"]
+    );
+    // A restricted configuration cannot demote the fastest device either.
+    assert_eq!(gpu_chain("h100", &[]), vec!["G4", "H100", "A100", "L4"]);
+    // T4 is excluded by default: these models do not fit in the pipeline
+    // reserve on it. Naming it explicitly is the only way to reach it, and even
+    // then it goes last because it is the slowest device.
+    assert_eq!(
+        gpu_chain("t4", &["l4".to_string()]),
+        vec!["G4", "H100", "A100", "L4", "T4"]
+    );
+    // Unsupported configured values neither break the chain nor add an attempt.
+    assert_eq!(gpu_chain("14", &["v100".to_string()]), vec!["G4", "H100", "A100", "L4"]);
+    // Every extra supported accelerator is reached even when it is configured
+    // nowhere: a busy configured pair must not be the whole rotation.
+    assert_eq!(gpu_chain("g4", &[]), vec!["G4", "H100", "A100", "L4"]);
+}
+
+/// An end-to-end pin of the attempt order, driven by the environment exactly as
+/// production has it (`SHIRLEY_COLAB_GPU=a100`): the first `new` must ask for G4,
+/// then H100, then A100, then L4. The default fixture has every other GPU
+/// refusing, so all four are really attempted and the run lands on L4.
+#[tokio::test]
+async fn test_assignment_asks_g4_then_h100_then_a100_then_l4_with_a100_configured() {
+    let fixture = MockColabEnv::new_fixture();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let mut cfg = fixture.make_config(gpu.clone());
+    cfg.gpu_type = "a100".to_string();
+    cfg.gpu_fallbacks = vec!["l4".to_string()];
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("order_out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+
+    let res = sep.separate(req).await;
+    assert!(res.is_ok(), "the chain must reach a working GPU, got: {res:?}");
+
+    let log = fixture.read_log();
+    let attempts: Vec<String> = log
+        .lines()
+        .filter(|l| l.starts_with("attempt "))
+        .map(|l| {
+            let mut it = l.split_whitespace();
+            let gpu = it
+                .by_ref()
+                .skip_while(|tok| *tok != "--gpu")
+                .nth(1)
+                .unwrap_or("<missing>")
+                .to_string();
+            gpu
+        })
+        .collect();
+    assert_eq!(
+        attempts,
+        vec!["G4", "H100", "A100", "L4"],
+        "attempts must follow the performance ranking, log was: {log}"
+    );
+    assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
 }
 
 /// A configured fallback value the CLI does not accept must not be treated as an
@@ -1481,12 +1587,13 @@ fn test_config_treats_unusable_fallback_value_as_unset() {
         Arc::new(Semaphore::new(1)),
     );
     assert_eq!(cfg2.gpu_fallbacks, vec!["14".to_string(), "l4".to_string()]);
-    assert_eq!(
-        shirley_show::infra::vocal::colab_vocal_separator_config::gpu_chain(
+    assert!(
+        !shirley_show::infra::vocal::colab_vocal_separator_config::gpu_chain(
             &cfg2.gpu_type,
             &cfg2.gpu_fallbacks
-        ),
-        vec!["G4", "L4"],
+        )
+        .iter()
+        .any(|gpu| gpu == "14"),
         "the typo must never become an attempt"
     );
 
@@ -1537,6 +1644,76 @@ fn test_gpu_attempt_budget_leaves_a_pipeline_reserve() {
     assert_eq!(gpu_attempt_timeout(Duration::ZERO, GPU_ATTEMPT_TIMEOUT_DEFAULT), Duration::ZERO);
 }
 
+/// The per-attempt bound must be barely more than one assignment POST.
+///
+/// In production each attempt was a 30s 503, a 10s wait and a 30s 503 before the
+/// 90s cap fired, so 90s bought nothing Colab was not already retrying on its
+/// own: it just made every busy accelerator cost a minute and a half. The bound
+/// only has to cover the POST and its margin, so a busy best GPU is skipped
+/// quickly and retried in the next round.
+#[test]
+fn test_per_attempt_cap_covers_one_assign_post_plus_margin() {
+    use shirley_show::infra::vocal::colab_vocal_separator_config::GPU_ATTEMPT_TIMEOUT_DEFAULT;
+
+    let cap = GPU_ATTEMPT_TIMEOUT_DEFAULT;
+    assert!(
+        cap >= Duration::from_secs(30),
+        "a cap under the observed 30s 503 answer would cut working attempts short, got {cap:?}"
+    );
+    assert!(
+        cap <= Duration::from_secs(45),
+        "the cap must not sit inside the CLI's internal retry loop, got {cap:?}"
+    );
+}
+
+/// RED-able regression: the assignment window is derived from the request
+/// deadline the caller really holds, not from
+/// `SHIRLEY_COLAB_TIMEOUT_SECS`-derived defaults.
+///
+/// Production ran with `SHIRLEY_COLAB_TIMEOUT_SECS` unset (default 1800s) while
+/// the agent turn cut the request at 600s, so the half of the budget reserved
+/// for assignment was computed from 1800s: the window became ~502s instead of
+/// ~300s and the upload/exec/download arc was left nothing before the turn was
+/// cancelled.
+#[test]
+fn test_assignment_window_comes_from_the_real_request_deadline() {
+    use shirley_show::infra::vocal::colab_vocal_separator_config::{
+        gpu_assign_window, pipeline_reserve, request_timeout_for,
+    };
+
+    // Production shape: a 1800s configured separation timeout, an agent turn
+    // that really ends at 600s.
+    let effective = request_timeout_for(
+        Duration::from_secs(1800),
+        Some(Duration::from_secs(600)),
+    );
+    assert_eq!(
+        effective,
+        Duration::from_secs(600),
+        "the deadline the request will be cut at must win over the larger default"
+    );
+    assert_eq!(gpu_assign_window(effective), Duration::from_secs(300));
+    assert_eq!(pipeline_reserve(effective), Duration::from_secs(300));
+    assert!(
+        gpu_assign_window(effective) <= Duration::from_secs(300),
+        "assignment may never claim half of a budget the request does not have"
+    );
+
+    // A tighter deadline is honoured as-is, and with no deadline the configured
+    // timeout is the only bound there is.
+    assert_eq!(
+        request_timeout_for(
+            Duration::from_secs(1800),
+            Some(Duration::from_secs(240))
+        ),
+        Duration::from_secs(240)
+    );
+    assert_eq!(
+        request_timeout_for(Duration::from_secs(900), None),
+        Duration::from_secs(900)
+    );
+}
+
 /// RED-able regression: the primary GPU hangs past the per-attempt bound and a
 /// later candidate must carry the separation.
 ///
@@ -1548,18 +1725,19 @@ async fn test_hanging_first_gpu_rotates_to_a_later_candidate() {
 
     let fixture = MockColabEnv::new_fixture();
     std::fs::write(&fixture.trigger_hang_gpu, b"g4\n").unwrap();
+    // The two accelerators between the hanging G4 and L4 refuse outright, so the
+    // rotation really walks the ranking and lands on the last candidate.
+    std::fs::write(&fixture.trigger_fail_gpu, b"h100\na100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
     cfg.gpu_type = "g4".to_string();
     cfg.gpu_fallbacks = vec!["a100".to_string(), "l4".to_string()];
-    // 12s request: assignment gets 6s, split across three attempts. Two seconds
-    // per attempt lets the hanging G4 and the refusing A100 both be cut off
-    // inside the assignment budget, leaving the third attempt for L4.
+    // 12s request: assignment gets 6s, split across four attempts. Two seconds
+    // per attempt lets the hanging G4 be cut off inside the assignment budget
+    // and still leaves room for the three remaining candidates.
     cfg.gpu_attempt_timeout = MIN_USEFUL_GPU_ATTEMPT;
     let sep = ColabVocalSeparator::new(cfg);
-
-    std::fs::write(&fixture.trigger_fail_gpu, b"a100\n").unwrap();
 
     let req = VocalSeparationRequest {
         source_path: fixture.sample_wav.clone(),
@@ -1584,7 +1762,7 @@ async fn test_hanging_first_gpu_rotates_to_a_later_candidate() {
     let log = fixture.read_log();
     let hangs: Vec<&str> = log.lines().filter(|l| l.starts_with("hangnew ")).collect();
     assert_eq!(hangs.len(), 1, "the hanging GPU must be asked once, log was: {log}");
-    assert!(hangs[0].contains("--gpu G4"), "the primary must hang first, log was: {log}");
+    assert!(hangs[0].contains("--gpu G4"), "the fastest must be asked first, log was: {log}");
 
     let starts: Vec<&str> = log.lines().filter(|l| l.starts_with("new ")).collect();
     assert_eq!(starts.len(), 1, "only the assigning GPU counts as started, log was: {log}");
@@ -1604,6 +1782,9 @@ async fn test_timed_out_gpu_attempt_is_stopped_before_rotation() {
 
     let fixture = MockColabEnv::new_fixture();
     std::fs::write(&fixture.trigger_hang_gpu, b"g4\n").unwrap();
+    // The two accelerators between the hanging G4 and L4 refuse outright, so the
+    // rotation really reaches L4 and the assertion below names the last attempt.
+    std::fs::write(&fixture.trigger_fail_gpu, b"h100\na100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1706,6 +1887,9 @@ async fn test_all_gpus_failing_reports_colab_unavailable_within_the_request_time
 #[tokio::test]
 async fn test_unsupported_configured_gpu_is_never_attempted() {
     let fixture = MockColabEnv::new_fixture();
+    // Only L4 answers, so the run has to reach the end of the ranking, and the
+    // unsupported configured value must not be one of the attempts on the way.
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());

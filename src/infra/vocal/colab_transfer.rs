@@ -17,8 +17,10 @@ use std::time::Duration;
 ///
 /// A second request inside this window reuses the running machine instead of
 /// paying for another cold start. It is a product decision, stated explicitly:
-/// three minutes.
-pub const SESSION_IDLE_RETENTION: Duration = Duration::from_secs(180);
+/// ten minutes after the last separation, and only then is the GPU stopped. Every
+/// reuse restarts the ten minutes, so a series of separations keeps one machine
+/// warm instead of stopping and paying the cold start between them.
+pub const SESSION_IDLE_RETENTION: Duration = Duration::from_secs(600);
 
 /// What to do about a `colab upload` attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -238,7 +238,7 @@ impl ColabVocalSeparator {
     /// Schedules the release of the session after the retention window.
     ///
     /// The task is detached on purpose: the request has already finished and the
-    /// user has their audio. Holding the response open for three minutes to keep
+    /// user has their audio. Holding the response open for ten minutes to keep
     /// a machine alive would be worse than the cold start it saves.
     fn schedule_release(&self, session_id: String, colab_bin: PathBuf) {
         let sessions = self.sessions.clone();
@@ -425,11 +425,14 @@ impl ColabVocalSeparator {
     /// budget remains.
     ///
     /// The product rule is that a paid request must not fail because one
-    /// accelerator's assignment endpoint answered 503: it tries the configured
-    /// primary, then each configured fallback in order, then starts over. Every
-    /// attempt is individually bounded, because the previous arithmetic gave the
-    /// first candidate the entire request timeout — a hanging G4 or A100 spent
-    /// all 600s and the fallbacks were never reached.
+    /// accelerator's assignment endpoint answered 503, and that the fastest
+    /// device is always preferred: these models are heavy, so the GPU with the
+    /// most throughput finishes a separation soonest. The chain is therefore
+    /// always ordered by performance (G4, H100, A100, L4) regardless of the
+    /// order the configuration names; configuration only widens the set. Each
+    /// attempt is bounded by a cap barely above one assignment POST, so a busy
+    /// best GPU is abandoned, stopped and retried in the next round instead of
+    /// queueing behind it.
     ///
     /// The assignment window is computed ONCE from the budget available when
     /// assignment starts (half of it), and the other half is reserved for
@@ -830,7 +833,7 @@ impl VocalSeparator for ColabVocalSeparator {
             // 5. Reuse a recent session, or start one when there is work (S2).
             //
             // Reuse is the product rule: after a request the machine stays up
-            // for three minutes, and anything asked inside that window runs on
+            // for ten minutes, and anything asked inside that window runs on
             // the same runtime. A cached id is only trusted after proving it is
             // still alive, because Colab reclaims idle machines and preempts
             // GPUs on its own.
@@ -888,8 +891,8 @@ impl VocalSeparator for ColabVocalSeparator {
             // On success the machine is NOT stopped here: it is kept for the
             // retention window so a second request reuses it, and a detached
             // task stops it when the window expires. Holding this response open
-            // for three minutes to keep a GPU alive would be worse than the
-            // cold start it saves, so the release is a separate task.
+            // for ten minutes to keep a GPU alive would be worse than the cold
+            // start it saves, so the release is a separate task.
             //
             // On failure nothing is reused: the session is stopped now and the
             // cache is cleared, because a failed runtime is not worth keeping.

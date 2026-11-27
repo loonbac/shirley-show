@@ -43,8 +43,28 @@ pub const COROS_MODELS: [&str; 1] = ["mel_band_roformer_karaoke_aufr33_viperx_sd
 /// The list is not a preference order; it is the contract printed by the CLI
 /// itself: `unsupported value '14'. Supported: T4, L4, G4, H100, A100.`
 /// Asking for anything else burns an attempt on a request that cannot succeed,
-/// which is what a configured `14` did.
+/// which is what a configured `14` did. The attempt order is
+/// [`PERFORMANCE_GPU_ORDER`], which is a different thing.
 pub const SUPPORTED_COLAB_GPUS: [&str; 5] = ["T4", "L4", "G4", "H100", "A100"];
+
+/// Every accelerator the CLI accepts, fastest first.
+///
+/// Performance is the ordering rule, not the configuration: a separation runs
+/// powerful models, so the device with the most throughput finishes it in the
+/// least time, and asking a slower machine first would make every request wait
+/// for it while a faster one was free.
+///
+/// * `G4` (RTX PRO 6000 Blackwell, 102 GB) is the measured fastest device in
+///   this codebase.
+/// * `H100` is next.
+/// * `A100` is the device this project measured its models on; it is slower than
+///   the two above and faster than the rest.
+/// * `L4` is the reliable floor: it is the one that has answered every time it
+///   was asked, at a real cost in throughput.
+/// * `T4` is last and is not in the default chain. A separation on it does not
+///   fit the pipeline reserve, so it is only ever reached when the
+///   configuration names it explicitly and everything faster has refused.
+pub const PERFORMANCE_GPU_ORDER: [&str; 5] = ["G4", "H100", "A100", "L4", "T4"];
 
 /// Splits the request budget in two: GPU assignment may not touch the half that
 /// upload, exec and download still need.
@@ -55,27 +75,37 @@ pub const PIPELINE_BUDGET_DIVISOR: u32 = 2;
 
 /// Bound for a single `colab new` attempt.
 ///
-/// A short bound is the point: three candidates fit inside the half of a 600s
-/// request that assignment is allowed, so one 503 does not cost the separation.
-/// Colab does answer late (a 120s client timeout was once followed by a live L4
-/// session), and such an attempt is stopped and rotated instead of waited on.
-pub const GPU_ATTEMPT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(90);
+/// A short bound is the point, and 90s was not short enough. Measured in
+/// production, one attempt was: `POST` answered 503 after ~30s, a 10s wait, a
+/// second `POST` answered 503 after ~30s, a 20s wait — and only then the 90s cap
+/// fired. None of those extra seconds bought an assignment the CLI was not
+/// already retrying on its own, they only made every busy accelerator cost a
+/// minute and a half.
+///
+/// The cap therefore covers one assign POST plus margin. A busy best GPU is
+/// abandoned quickly, stopped, and retried in the next round, which is where the
+/// speed comes from: the rotation reaches a free device sooner instead of
+/// queueing behind a slow one.
+pub const GPU_ATTEMPT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(40);
 
 /// Below this much usable assignment budget an attempt is not worth starting.
 pub const MIN_USEFUL_GPU_ATTEMPT: Duration = Duration::from_secs(2);
 
 /// How many full passes over the chain are made while the budget lasts.
 ///
-/// One pass through a three-GPU chain is what a single 503 burst needs; a second
-/// and later pass covers the case where every accelerator refuses for a moment.
-/// The count is capped so an instant refusal cannot spin the CLI in a hot loop.
+/// One pass through a four-GPU chain is what a single 503 burst needs; a second
+/// and later pass covers the case where every accelerator refuses for a moment
+/// and the best one frees up a minute later. Each pass starts again at the best
+/// device, so a GPU that was busy is never permanently demoted. The count is
+/// capped so an instant refusal cannot spin the CLI in a hot loop.
 pub const GPU_MAX_ROUNDS_DEFAULT: u32 = 4;
 
 /// The chain used when the configuration names no usable accelerator.
 ///
-/// Same order as the documented defaults: the fastest option that answers, then
-/// the ones that have answered under load, then the measured floor.
-pub const DEFAULT_GPU_CHAIN: [&str; 3] = ["G4", "A100", "L4"];
+/// Same order as the documented defaults: the fastest measured option first,
+/// then the other fast ones, then the measured floor. `T4` is deliberately
+/// absent.
+pub const DEFAULT_GPU_CHAIN: [&str; 4] = ["G4", "H100", "A100", "L4"];
 
 /// Canonical, uppercase name of a configured accelerator, or `None` when the
 /// CLI does not accept it.
@@ -94,35 +124,55 @@ pub fn normalize_gpu(value: &str) -> Option<String> {
         .map(|gpu| gpu.to_string())
 }
 
-/// The ordered chain of accelerators to attempt: primary first, then the
-/// fallbacks, unsupported values skipped and duplicates removed.
+/// The accelerators to attempt, ALWAYS ordered by performance.
 ///
-/// Order matters because the first device that assigns wins: the fast option is
-/// tried before the reliable one, and the configuration states that order.
+/// The configuration decides WHICH devices are eligible; it never decides the
+/// order. Production still carries `SHIRLEY_COLAB_GPU=a100` from an old
+/// mitigation, and honouring that order put the third-fastest device first: a
+/// separation then waited for A100 capacity while G4 and H100 sat free, which is
+/// the slowness the user reported.
+///
+/// The eligible set is the normalized configured values plus the fast defaults,
+/// so a busy configured pair is never the whole rotation: once the configured
+/// accelerators refuse, the remaining supported ones are tried too. Values the
+/// CLI does not accept (`14` was one) are dropped instead of attempted, and T4
+/// stays at the end of [`PERFORMANCE_GPU_ORDER`], reachable only when the
+/// configuration names it.
 pub fn gpu_candidates(primary: &str, fallbacks: &[String]) -> Vec<String> {
-    let mut candidates: Vec<String> = Vec::new();
+    let mut configured: Vec<String> = Vec::new();
     for raw in std::iter::once(primary).chain(fallbacks.iter().map(String::as_str)) {
         if let Some(gpu) = normalize_gpu(raw) {
-            if !candidates.contains(&gpu) {
-                candidates.push(gpu);
+            if !configured.contains(&gpu) {
+                configured.push(gpu);
             }
         }
     }
-    candidates
-}
 
-/// The chain the separator actually rotates through.
-///
-/// Normalized configuration first. When nothing configured is usable the
-/// documented chain is used instead of failing: a misspelled or outdated value
-/// (`14` is the one seen in production) must not be the reason a paid request
-/// never gets a GPU.
-pub fn gpu_chain(primary: &str, fallbacks: &[String]) -> Vec<String> {
-    let candidates = gpu_candidates(primary, fallbacks);
-    if candidates.is_empty() {
+    // Nothing configured is usable: the documented chain is used instead of
+    // failing a paid request on a configuration typo.
+    if configured.is_empty() {
         return DEFAULT_GPU_CHAIN.iter().map(|g| g.to_string()).collect();
     }
-    candidates
+
+    let mut eligible: Vec<String> = configured;
+    for gpu in DEFAULT_GPU_CHAIN {
+        if !eligible.iter().any(|e| e == gpu) {
+            eligible.push(gpu.to_string());
+        }
+    }
+
+    // Rank by throughput. `eligible` only ever holds names from
+    // `PERFORMANCE_GPU_ORDER`, so nothing is lost here.
+    PERFORMANCE_GPU_ORDER
+        .iter()
+        .filter(|gpu| eligible.iter().any(|e| e == *gpu))
+        .map(|gpu| gpu.to_string())
+        .collect()
+}
+
+/// The chain the separator actually rotates through, fastest first.
+pub fn gpu_chain(primary: &str, fallbacks: &[String]) -> Vec<String> {
+    gpu_candidates(primary, fallbacks)
 }
 
 /// Part of the remaining request budget reserved for the separation pipeline.
@@ -166,6 +216,26 @@ pub fn gpu_attempt_timeout(remaining_window: Duration, attempt_cap: Duration) ->
     attempt_cap.min(remaining_window)
 }
 
+/// The timeout a separation request may use: the configured value, or the
+/// caller's real remaining deadline when it is tighter.
+///
+/// This is the root cause of the 502s-vs-300s mismatch in production. The agent
+/// turn cuts every request at `separation_timeout` (600s), but the Colab
+/// separator configured itself from `SHIRLEY_COLAB_TIMEOUT_SECS`, whose default
+/// is 1800s and which the deployment never set. The assignment window is half of
+/// the request budget, so it was computed from 1800s and became ~502s: the
+/// accelerator rotation was still running when the turn cancelled the request at
+/// ~600s, and upload/exec/download never got a single second.
+///
+/// Deriving the request budget from the deadline that will really cut it — and
+/// keeping the fixed pipeline reserve — is what stops that.
+pub fn request_timeout_for(configured: Duration, deadline: Option<Duration>) -> Duration {
+    match deadline {
+        Some(left) => configured.min(left),
+        None => configured,
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ColabVocalSeparatorConfig {
     pub colab_bin: PathBuf,
@@ -206,9 +276,12 @@ impl ColabVocalSeparatorConfig {
         let gpu_type = std::env::var("SHIRLEY_COLAB_GPU").unwrap_or_else(|_| "g4".to_string());
 
         // A100 is the faster machine when it answers; L4 is the floor that has
-        // answered every time it was asked. Order matters: the first one that
-        // assigns wins, so the expensive-but-fast option is tried before the
-        // slow-but-reliable one.
+        // answered every time it was asked. These values decide WHICH
+        // accelerators are eligible; the attempt order is always
+        // `PERFORMANCE_GPU_ORDER`, fastest first, so a deployment that still
+        // carries `SHIRLEY_COLAB_GPU=a100` from an old mitigation can never push
+        // A100 ahead of G4 or H100.
+        //
         // The variable keeps its singular name even though it now holds a list.
         // Renaming it to `_FALLBACKS` would silently restore the default chain
         // in every deployment that sets the old name, and nothing in the image

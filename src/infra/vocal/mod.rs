@@ -11,5 +11,6 @@ pub use colab_session_cache::ColabSessionCache;
 pub use colab_transfer::SESSION_IDLE_RETENTION;
 pub use colab_vocal_separator::{ColabExecutionResult, ColabSessionGuard, ColabVocalSeparator};
 pub use colab_vocal_separator_config::{
-    COROS_MODELS, ColabVocalSeparatorConfig, INSTRUMENTAL_MODELS, SUPPORTED_COLAB_GPUS,
+    COROS_MODELS, ColabVocalSeparatorConfig, INSTRUMENTAL_MODELS, PERFORMANCE_GPU_ORDER,
+    SUPPORTED_COLAB_GPUS,
 };
