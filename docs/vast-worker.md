@@ -111,6 +111,18 @@ the public key with `POST /ssh/`, and then uses plain `ssh`/`scp`:
 3. `scp` `/content/colab_sep_work/output.mp3` back and verify SHA-256 and
    ffprobe duration exactly as the Colab adapter does.
 
+`scp` does **not** reuse ssh's argument list. ssh uses `-p PORT` and a bare
+`root@HOST` destination; scp uses capital `-P PORT` (`-p` means
+"preserve times" for scp) and a `root@HOST:/path` operand. Both transfers are
+single files, so no `-r` is passed. The exact argv seen by the fake binaries in
+the tests is:
+
+```text
+upload:  -i KEY -P PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=N LOCAL_SOURCE root@HOST:/content/input_audio
+download: -i KEY -P PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=N root@HOST:/content/colab_sep_work/output.mp3 LOCAL_OUTPUT
+script:  -i KEY -p PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=N root@HOST "bash -lc 'cd /content && python -'"
+```
+
 Every HTTP and SSH call has its own timeout. The instance is labelled
 `shirley-show`, kept warm for ten minutes after the last separation (including
 a failed attempt while the machine proves healthy), and destroyed at once when
@@ -164,8 +176,13 @@ Observability follows the repository convention (`eprintln!`, no new crate):
 geolocation, rent result, state transitions, ssh readiness, upload/script/
 download timings, verification, retention/destroy and reaper actions. HTTP
 errors include the endpoint path, status and a response body truncated to 300
-characters with the API key scrubbed. The key and the `Authorization` header
-are never printed.
+characters with the API key scrubbed. scp and ssh keep stderr piped instead of
+discarding it: a non-zero exit logs
+`[vast] WARN <step> failed: exit=<code> stderr=<last 300 chars, sanitized>`,
+a spawn failure logs the error, and an expired timeout logs `<step> timed out`.
+Every error leaving the transfer/script pipeline carries its step name
+(`upload`, `script`, `json parse`, `download`, `verification`). The key and the
+`Authorization` header are never printed.
 
 ## How it is built
 

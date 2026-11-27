@@ -334,12 +334,17 @@ fn sha256_file(path: &Path) -> String {
 
 /// Writes fake `ssh`/`scp` binaries. Every child invocation is logged; `scp`
 /// copies through a local directory that stands in for the worker filesystem.
+/// The fake `scp` is deliberately strict, like the real one: `-p` is
+/// preserve-times (never a port), `-P` is mandatory, and exactly one operand
+/// must be a `user@host:path` remote. An adapter that reuses ssh argv fails.
 fn write_fake_binaries(
     dir: &Path,
     log: &Path,
+    scp_argv_log: &Path,
     result_json: &Path,
     output_mp3: &Path,
     fail_python: bool,
+    fail_scp: bool,
 ) -> (PathBuf, PathBuf, PathBuf) {
     let remote = dir.join("remote");
     std::fs::create_dir_all(&remote).unwrap();
@@ -348,6 +353,7 @@ fn write_fake_binaries(
     let scp = dir.join("scp");
     let ffprobe = dir.join("ffprobe");
     let exit_line = if fail_python { "exit 1" } else { "exit 0" };
+    let fail_scp_flag = if fail_scp { "1" } else { "0" };
     std::fs::write(
         &ssh,
         format!(
@@ -362,10 +368,68 @@ fn write_fake_binaries(
     std::fs::write(
         &scp,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\neval \"src=\\${{$(( $# - 1 ))}}\"\neval \"dst=\\${{$#}}\"\ncase \"$src\" in\n  root@*) cp '{}' \"$dst\" ;;\n  *) cp \"$src\" '{}' ;;\nesac\n",
-            log.display(),
-            remote.join("output.mp3").display(),
-            remote.join("input_audio").display()
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> '{log}'
+printf '\n-- call --\n' >> '{argv_log}'
+for arg in "$@"; do printf '%s\n' "$arg" >> '{argv_log}'; done
+port=0
+n=0
+src=''
+dst=''
+src_remote=0
+dst_remote=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -p) echo 'scp: -p means preserve-times; use -P for the port' >&2; exit 2 ;;
+    -P)
+      if [ "$#" -lt 2 ]; then echo 'scp: -P needs a value' >&2; exit 2; fi
+      case "$2" in
+        ''|*[!0-9]*) echo 'scp: -P needs a numeric port' >&2; exit 2 ;;
+      esac
+      port="$2"
+      shift 2
+      ;;
+    -i|-o)
+      if [ "$#" -lt 2 ]; then echo "scp: $1 needs a value" >&2; exit 2; fi
+      shift 2
+      ;;
+    -r|-q|-v) shift ;;
+    -*) echo "scp: unsupported option: $1" >&2; exit 2 ;;
+    *)
+      n=$((n + 1))
+      if [ "$n" -eq 1 ]; then src="$1"; else dst="$1"; fi
+      shift
+      ;;
+  esac
+done
+if [ "$port" -eq 0 ]; then echo 'scp: missing -P port' >&2; exit 2; fi
+if [ "$n" -ne 2 ]; then echo 'scp: exactly two operands are required' >&2; exit 2; fi
+case "$src" in
+  *@*:*) src_remote=1 ;;
+  *@*) echo 'scp: remote operand must be user@host:path' >&2; exit 2 ;;
+esac
+case "$dst" in
+  *@*:*) dst_remote=1 ;;
+  *@*) echo 'scp: remote operand must be user@host:path' >&2; exit 2 ;;
+esac
+if [ "$src_remote" = "$dst_remote" ]; then
+  echo 'scp: exactly one user@host:path operand is required' >&2; exit 2
+fi
+if [ '{fail_scp}' = "1" ]; then
+  echo 'scp: Permission denied (SCP-FAIL-MARKER-42)' >&2
+  exit 1
+fi
+if [ "$src_remote" -eq 1 ]; then
+  cp '{remote_output}' "$dst"
+else
+  cp "$src" '{remote_input}'
+fi
+"#,
+            log = log.display(),
+            argv_log = scp_argv_log.display(),
+            fail_scp = fail_scp_flag,
+            remote_output = remote.join("output.mp3").display(),
+            remote_input = remote.join("input_audio").display(),
         ),
     )
     .unwrap();
@@ -390,12 +454,32 @@ struct Fixture {
     state: FakeState,
     _server: tokio::task::JoinHandle<()>,
     ssh_log: PathBuf,
+    scp_argv_log: PathBuf,
     key_path: PathBuf,
     output_bytes: PathBuf,
 }
 
+/// Splits the fake scp's one-argument-per-line log into individual calls.
+fn scp_calls(log: &Path) -> Vec<Vec<String>> {
+    let text = std::fs::read_to_string(log).unwrap();
+    text.split("-- call --")
+        .map(|group| {
+            group
+                .lines()
+                .map(str::to_string)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|call| !call.is_empty())
+        .collect()
+}
+
 impl Fixture {
     async fn new(offers: Vec<Value>) -> Self {
+        Self::new_with_scp(offers, false).await
+    }
+
+    async fn new_with_scp(offers: Vec<Value>, fail_scp: bool) -> Self {
         let tmp = TempDir::new().unwrap();
         let data = tmp.path().join("data");
         let key_dir = data.join("vast/ssh");
@@ -418,14 +502,17 @@ impl Fixture {
         )
         .unwrap();
         let ssh_log = tmp.path().join("ssh.log");
+        let scp_argv_log = tmp.path().join("scp-argv.log");
         let binaries_dir = tmp.path().join("bin");
         std::fs::create_dir_all(&binaries_dir).unwrap();
         let (ssh, scp, ffprobe) = write_fake_binaries(
             &binaries_dir,
             &ssh_log,
+            &scp_argv_log,
             &result_json,
             &output_bytes,
             false,
+            fail_scp,
         );
 
         let state = FakeState::new(offers);
@@ -449,6 +536,7 @@ impl Fixture {
             state,
             _server: server,
             ssh_log,
+            scp_argv_log,
             key_path,
             output_bytes,
         }
@@ -538,6 +626,48 @@ async fn vast_rents_cheapest_allowed_offer_and_separates_with_generated_script()
     let log = std::fs::read_to_string(&fixture.ssh_log).unwrap();
     assert!(log.contains("python"), "script must run through ssh: {log}");
     assert!(log.contains("-p 2222"), "ssh must use the instance port: {log}");
+    let key = fixture.key_path.to_str().unwrap();
+    let expected_options = vec![
+        "-i",
+        key,
+        "-P",
+        "2222",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
+    let scp_invocations = scp_calls(&fixture.scp_argv_log);
+    assert_eq!(scp_invocations.len(), 2, "upload and download must both use scp");
+    let mut upload = expected_options.clone();
+    upload.push(
+        fixture.request(Duration::from_secs(1)).source_path.to_str().unwrap().to_string(),
+    );
+    upload.push("root@127.0.0.1:/content/input_audio".to_string());
+    assert_eq!(
+        scp_invocations[0], upload,
+        "scp must not reuse ssh's -p or a bare host operand"
+    );
+    let mut download = expected_options;
+    download.push("root@127.0.0.1:/content/colab_sep_work/output.mp3".to_string());
+    download.push(fixture._tmp.path().join("output.mp3").to_str().unwrap().to_string());
+    assert_eq!(
+        scp_invocations[1], download,
+        "download must use a user@host:path operand"
+    );
+    assert!(
+        log.lines().any(|line| line == format!(
+            "-i {key} -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=5 root@127.0.0.1 bash -lc 'cd /content && python -'"
+        )),
+        "exact ssh argv must stay stable: {log}"
+    );
     let script = std::fs::read_to_string(fixture._tmp.path().join("bin/remote/script.py")).unwrap();
     assert!(script.contains("audio_separator"));
 
@@ -601,7 +731,15 @@ async fn proven_dead_instance_is_destroyed_immediately_and_rented_again() {
         std::fs::write(&result_json, json!({"url":"","sha256":"x","duration":1.0,"size":1}).to_string()).unwrap();
         let output = dir.join("output.mp3");
         std::fs::write(&output, b"x").unwrap();
-        let (ssh, scp, ffprobe) = write_fake_binaries(&dir, &fixture.ssh_log, &result_json, &output, true);
+        let (ssh, scp, ffprobe) = write_fake_binaries(
+            &dir,
+            &fixture.ssh_log,
+            &fixture.scp_argv_log,
+            &result_json,
+            &output,
+            true,
+            false,
+        );
         fixture.config.ssh_bin = ssh;
         fixture.config.scp_bin = scp;
         fixture.config.ffprobe_bin = ffprobe;
@@ -626,8 +764,10 @@ async fn proven_dead_instance_is_destroyed_immediately_and_rented_again() {
     let (ssh, scp, ffprobe) = write_fake_binaries(
         &dir,
         &fixture.ssh_log,
+        &fixture.scp_argv_log,
         &fixture._tmp.path().join("result.json"),
         &fixture.output_bytes,
+        false,
         false,
     );
     fixture.config.ssh_bin = ssh;
@@ -785,6 +925,18 @@ async fn real_wrapped_instance_shape_uses_direct_ip_and_port() {
         log.contains("-p 2222"),
         "the string HostPort must be used: {log}"
     );
+    let scp_invocations = scp_calls(&fixture.scp_argv_log);
+    assert!(
+        scp_invocations.iter().flatten().any(|arg| arg == "-P"),
+        "scp must use -P for the port: {scp_invocations:?}"
+    );
+    assert!(
+        scp_invocations
+            .iter()
+            .flatten()
+            .any(|arg| arg == "root@127.0.0.1:/content/input_audio"),
+        "scp must use user@host:path: {scp_invocations:?}"
+    );
 }
 
 #[tokio::test]
@@ -799,6 +951,16 @@ async fn proxy_ssh_fields_are_used_when_direct_port_is_missing() {
     let log = std::fs::read_to_string(&fixture.ssh_log).unwrap();
     assert!(log.contains("root@ssh7.vast.ai"), "{log}");
     assert!(log.contains("-p 3333"), "{log}");
+    let scp_invocations = scp_calls(&fixture.scp_argv_log);
+    assert!(
+        scp_invocations
+            .iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair[0] == "-P" && pair[1] == "3333"),
+        "proxy port must be passed to scp as -P 3333: {scp_invocations:?}"
+    );
 }
 
 #[tokio::test]
@@ -1009,6 +1171,49 @@ async fn v1_listing_shapes_are_handled_defensively() {
             "the v1 listing should narrow by label server-side"
         );
     }
+}
+
+/// Runs a separation whose scp fails. `eprintln!` from the library cannot be
+/// captured in-process, so this ignored test is invoked as a child by the
+/// assertion below; the parent inspects the child's stderr.
+#[tokio::test]
+#[ignore = "invoked by vast_failing_scp_logs_stderr_warning"]
+async fn vast_failing_scp_warn_helper() {
+    let fixture = Fixture::new_with_scp(vec![offer(88, 0.20, "RTX 3090", "PL")], true).await;
+    let result = fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await;
+    assert!(result.is_err(), "a failed upload must fail the separation");
+}
+
+#[test]
+fn vast_failing_scp_logs_stderr_warning() {
+    let exe = std::env::current_exe().unwrap();
+    let output = Command::new(exe)
+        .args([
+            "--exact",
+            "vast_failing_scp_warn_helper",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "helper failed: {stderr}");
+    assert!(
+        stderr.contains("[vast] WARN upload failed: exit=1 stderr="),
+        "the failing step and exit code must be logged: {stderr}"
+    );
+    assert!(
+        stderr.contains("SCP-FAIL-MARKER-42"),
+        "scp's stderr must reach the log: {stderr}"
+    );
+    assert!(
+        !stderr.contains("TEST PRIVATE KEY"),
+        "no key material may be logged: {stderr}"
+    );
 }
 
 /// Minimal in-file separator used only by the no-key wiring check.
