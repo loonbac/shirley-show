@@ -111,6 +111,38 @@ pub fn audio_turn_tool_names(kind: AudioTurnKind) -> Vec<&'static str> {
     }
 }
 
+/// Tools offered on an audio turn, taking the destination into account.
+///
+/// `audio_turn_tool_names` describes each source kind on its own and is kept
+/// unchanged for callers that only know the kind. A turn that starts from the
+/// main screen has no `presentation_id`: it needs the catalogue readers to find
+/// both the song (in *any* repertoire) and the destination the user names, and
+/// it needs the separation tool even when the source is a YouTube link. Once a
+/// destination exists, the established sets are returned untouched.
+pub fn audio_turn_tool_names_for_turn(
+    kind: AudioTurnKind,
+    has_destination: bool,
+) -> Vec<&'static str> {
+    let mut names = audio_turn_tool_names(kind);
+    if has_destination {
+        return names;
+    }
+    for tool in [
+        "list_presentations",
+        "get_presentation",
+        "add_track_from_staged",
+        "separate_vocals",
+    ] {
+        if !names.contains(&tool) {
+            names.push(tool);
+        }
+    }
+    if matches!(kind, AudioTurnKind::Youtube) && !names.contains(&"download_youtube_track") {
+        names.insert(0, "download_youtube_track");
+    }
+    names
+}
+
 /// Whether the dispatcher must create a registry entry before separating.
 ///
 /// `separate_vocals` resolves its input as `staged_audio_id -> track_id ->
@@ -128,7 +160,7 @@ pub fn needs_registry_entry(kind: AudioTurnKind) -> bool {
 /// with a tool available the model had no way to know a track already existed and
 /// answered that it could not find one.
 pub fn audio_turn_instruction(kind: AudioTurnKind, has_destination: bool) -> String {
-    match kind {
+    let instruction = match kind {
         AudioTurnKind::AttachedFile | AudioTurnKind::PreparedAudio => {
             let source = if matches!(kind, AudioTurnKind::AttachedFile) {
                 "El audio esta adjunto en esta solicitud y ya fue guardado: no lo descargues ni lo pidas."
@@ -169,5 +201,36 @@ pub fn audio_turn_instruction(kind: AudioTurnKind, has_destination: bool) -> Str
              quede en la presentacion en este mismo turno: no pidas una segunda confirmacion. \
              No inventes IDs ni afirmes acciones sin herramientas."
         ),
+    };
+
+    if has_destination {
+        instruction
+    } else {
+        let instruction = if matches!(kind, AudioTurnKind::Youtube) {
+            format!("{YOUTUBE_DESTINATION_FIRST_INSTRUCTION} {instruction}")
+        } else {
+            instruction
+        };
+        format!("{instruction} {}", NO_DESTINATION_AUDIO_INSTRUCTION)
     }
 }
+
+/// Con un enlace y sin repertorio abierto, fijar el destino ANTES de descargar
+/// evita que el turno se detenga a preguntar justo después de la descarga.
+const YOUTUBE_DESTINATION_FIRST_INSTRUCTION: &str = "Si la usuaria nombra el destino, \
+     resuelvelo primero con list_presentations y get_presentation, antes de descargar; \
+     despues descarga y agrega la pista en el mismo turno.";
+
+/// Regla adicional para el modo catálogo (sin repertorio abierto). Se agrega
+/// al prompt de cada caso; no sustituye las instrucciones de la fuente, porque
+/// un archivo adjunto no tiene `track_id` y un enlace todavía no tiene audio.
+const NO_DESTINATION_AUDIO_INSTRUCTION: &str = "Trabajas desde la pantalla principal, sin \
+     presentacion activa. No elijas un destino al azar: usa list_presentations y resuelve por \
+     el nombre escrito por la usuaria. Si coincide con una sola presentacion, usa \
+     get_presentation con su ID para fijarla; si no aparece o hay varias, pregunta y muestra \
+     las presentaciones existentes antes de separar. La fuente puede estar en CUALQUIER \
+     repertorio: si la usuaria nombra una cancion y no hay archivo adjunto ni audio \
+     preparado, busca esa cancion con list_presentations y get_presentation en las \
+     presentaciones y usa el track_id devuelto; no hace falta abrir primero ese repertorio en \
+     la interfaz. El destino puede ser distinto del repertorio de origen. Guarda siempre el \
+     resultado en la presentacion de destino con add_track_from_staged.";

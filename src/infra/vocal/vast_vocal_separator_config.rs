@@ -39,6 +39,10 @@ pub const DEFAULT_SSH_PROBE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// A refused/closed/reset connection during scp or script ssh is often just
 /// the sshd coming up; retry the operation once after this pause.
 pub const DEFAULT_TRANSIENT_RETRY_DELAY: Duration = Duration::from_secs(3);
+/// A pipeline step can fail while the turn still has time for another full
+/// separation. A retry is only started with at least this much of the caller's
+/// deadline left; a cold replacement normally needs about this long.
+pub const DEFAULT_MIN_RETRY_REMAINING: Duration = Duration::from_secs(150);
 
 /// How long a Vast instance stays warm after the last separation.
 pub const VAST_SESSION_IDLE_RETENTION: Duration = Duration::from_secs(600);
@@ -69,6 +73,8 @@ pub struct VastVocalSeparatorConfig {
     pub ssh_probe_interval: Duration,
     pub ssh_probe_connect_timeout: Duration,
     pub transient_retry_delay: Duration,
+    /// Minimum time left in the turn before retrying a failed pipeline.
+    pub min_retry_remaining: Duration,
     /// GPU assignment window granted to Colab before Vast takes over.
     pub fallback_after: Duration,
     pub gpu: Arc<Semaphore>,
@@ -84,6 +90,7 @@ impl fmt::Debug for VastVocalSeparatorConfig {
             .field("data_dir", &self.data_dir)
             .field("label", &self.label)
             .field("fallback_after", &self.fallback_after)
+            .field("min_retry_remaining", &self.min_retry_remaining)
             .finish_non_exhaustive()
     }
 }
@@ -122,6 +129,7 @@ impl VastVocalSeparatorConfig {
             ssh_probe_interval: DEFAULT_SSH_PROBE_INTERVAL,
             ssh_probe_connect_timeout: DEFAULT_SSH_PROBE_CONNECT_TIMEOUT,
             transient_retry_delay: DEFAULT_TRANSIENT_RETRY_DELAY,
+            min_retry_remaining: DEFAULT_MIN_RETRY_REMAINING,
             fallback_after: Duration::from_secs(DEFAULT_VAST_FALLBACK_AFTER_SECS),
             gpu,
         }
@@ -154,6 +162,10 @@ impl VastVocalSeparatorConfig {
         config.launch_timeout = env_secs(
             "SHIRLEY_VAST_LAUNCH_TIMEOUT_SECS",
             DEFAULT_LAUNCH_TIMEOUT.as_secs(),
+        );
+        config.min_retry_remaining = env_secs(
+            "SHIRLEY_VAST_MIN_RETRY_REMAINING_SECS",
+            DEFAULT_MIN_RETRY_REMAINING.as_secs(),
         );
         Some(config)
     }

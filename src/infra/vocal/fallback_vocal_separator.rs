@@ -129,6 +129,18 @@ impl VocalSeparator for FallbackVocalSeparator {
             if remaining.is_zero() {
                 return Err(colab_error);
             }
+            // S1: a failure after Google actually assigned a GPU is not the
+            // answer while the same turn can still fit another attempt. The
+            // Colab adapter releases its permit before returning the error,
+            // so Vast cannot rent a second GPU concurrently. Keep the original
+            // deadline minus what Colab already spent.
+            eprintln!(
+                "[fallback] INFO colab failed after {}ms (assignment budget {}ms, reason={}); trying Vast with {}ms remaining",
+                elapsed.as_millis(),
+                budget.as_millis(),
+                colab_error.code(),
+                remaining.as_millis()
+            );
             let mut vast_request = request;
             vast_request.timeout = remaining;
             vast.separate(vast_request).await

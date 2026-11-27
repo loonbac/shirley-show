@@ -434,6 +434,23 @@ fn unauthorized_presentation_err() -> Value {
     })
 }
 
+/// El repertorio donde se guarda la pista es el destino de la conversación.
+///
+/// Desde la pantalla principal no hay `presentation_id`: la usuaria lo nombra
+/// en el chat y `resolve_presentation_id` lo convierte en ID aquí. Fijarlo al
+/// guardar (y no al leer una presentación de origen) evita que una búsqueda de
+/// la canción en otro repertorio cambie el destino. Con `presentation_id`
+/// explícito el valor ya está fijado y no se toca.
+fn remember_destination_on_add(context: &mut TurnToolContext, presentation_id: &str) {
+    let has_active = context
+        .active_presentation_id
+        .as_deref()
+        .is_some_and(|id| !id.trim().is_empty());
+    if !has_active {
+        context.set_active_presentation_id(Some(presentation_id.to_string()));
+    }
+}
+
 fn unauthorized_event_err() -> Value {
     json!({
         "error": "unauthorized_event_id",
@@ -1095,6 +1112,7 @@ impl AgentToolDispatcher {
                                         .staged_audio_registry
                                         .commit_consumed(&lease.staged_audio_id, &lease.lease_id);
                                     context.set_staged_audio_id(None);
+                                    remember_destination_on_add(context, &pres_id);
 
                                     let res = json!({
                                         "item_id": item.id,
@@ -1189,6 +1207,7 @@ impl AgentToolDispatcher {
                                 Ok(item) => {
                                     guard.defuse();
                                     context.staged_audio = Some(StagedAudioHandle::Consumed);
+                                    remember_destination_on_add(context, &pres_id);
 
                                     let res = json!({
                                         "item_id": item.id,

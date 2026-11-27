@@ -740,3 +740,42 @@ async fn test_no_gpu_available_message_is_honest_and_code_is_unchanged() {
     );
     assert!(!err.message().to_lowercase().contains("cuota"));
 }
+
+#[tokio::test]
+async fn test_separated_title_does_not_duplicate_an_existing_mode_suffix() {
+    let ctx = TestContext::new();
+    let separator = Arc::new(FakeVocalSeparator::new(210, 8_400_000));
+    let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
+    let use_case = ctx.build_separate_vocals(separator, downloader);
+
+    // A title already carrying the chorus suffix (a previously separated
+    // track) must not become "Gitana (Coros) (Coros)".
+    let (staged_id, _) = ctx.create_staged_audio("Gitana (Coros)", b"already separated");
+    let output = use_case
+        .execute(SeparateVocalsInput {
+            source: VocalAudioSource::StagedAudioId(staged_id),
+            mode: VocalSeparationMode::Coros,
+        })
+        .await
+        .expect("separation succeeds");
+    assert_eq!(output.title, "Gitana (Coros)");
+    assert_eq!(
+        ctx.registry
+            .get_descriptor(&output.staged_audio_id)
+            .unwrap()
+            .title,
+        "Gitana (Coros)"
+    );
+
+    // A different mode still gets its own suffix, and it is not doubled when
+    // applied to a title that already has it.
+    let (second_id, _) = ctx.create_staged_audio("Gitana (Instrumental)", b"instrumental repeat");
+    let second = use_case
+        .execute(SeparateVocalsInput {
+            source: VocalAudioSource::StagedAudioId(second_id),
+            mode: VocalSeparationMode::Instrumental,
+        })
+        .await
+        .expect("second separation succeeds");
+    assert_eq!(second.title, "Gitana (Instrumental)");
+}

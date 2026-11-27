@@ -159,8 +159,10 @@ export function createAgentChatController(deps) {
       .map((m) => ({ role: m.role, content: m.content }));
 
     const isEventContext = priorState.activeContext && priorState.activeContext.type === 'event';
-    const presentationId = priorState.activeContext && !isEventContext ? priorState.activeContext.id : null;
-    const eventId = isEventContext ? priorState.activeContext.id : null;
+    const presentationId =
+      priorState.conversationPresentationId ||
+      (priorState.activeContext && !isEventContext ? priorState.activeContext.id : null);
+    const eventId = isEventContext && !priorState.conversationPresentationId ? priorState.activeContext.id : null;
 
     try {
       const response = await sendAgentChatMessageFn({
@@ -184,6 +186,7 @@ export function createAgentChatController(deps) {
       const actions = (response && response.actions_taken) || [];
       let refreshedCatalog = false;
       let refreshedEvents = false;
+      const refreshedPresentationIds = new Set();
 
       for (const act of actions) {
         if (act.status !== 'success') continue;
@@ -197,6 +200,7 @@ export function createAgentChatController(deps) {
           const targetId = act.presentation_id || response.active_presentation_id;
           if (targetId) {
             emitAgentRefresh({ scope: 'presentation', presentationId: targetId, removed: true });
+            refreshedPresentationIds.add(targetId);
           }
           if (!refreshedCatalog) {
             emitAgentRefresh({ scope: 'catalog' });
@@ -223,6 +227,7 @@ export function createAgentChatController(deps) {
           const targetId = act.presentation_id || response.active_presentation_id;
           if (targetId) {
             emitAgentRefresh({ scope: 'presentation', presentationId: targetId });
+            refreshedPresentationIds.add(targetId);
           }
         } else if (
           act.tool === 'crear_evento' ||
@@ -258,7 +263,15 @@ export function createAgentChatController(deps) {
           }
         }
       }
-        } catch (err) {
+
+      // A result addressed to a repertoire refreshes its open view even when the
+      // user navigated away and the turn produced no explicit item action.
+      const destinationPresentationId =
+        (response && response.active_presentation_id) || chatState.get().conversationPresentationId;
+      if (destinationPresentationId && !refreshedPresentationIds.has(destinationPresentationId)) {
+        emitAgentRefresh({ scope: 'presentation', presentationId: destinationPresentationId });
+      }
+    } catch (err) {
       chatState.failTurn({
         generationId: turn.generationId,
         error: err,

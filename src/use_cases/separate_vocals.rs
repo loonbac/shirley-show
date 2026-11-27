@@ -162,6 +162,19 @@ fn request_timeout_for(configured: Duration, deadline: Option<Duration>) -> Dura
     }
 }
 
+/// A separated track can be used as the source of another separation. Appending
+/// the canonical suffix again produced titles such as
+/// "Gitana (Coros) (Coros)" in the chat confirmation and in the registry.
+fn title_with_mode_suffix(source_title: &str, suffix: &str) -> String {
+    let trimmed = source_title.trim_end();
+    let expected = suffix.trim();
+    if expected.is_empty() || trimmed.to_lowercase().ends_with(&expected.to_lowercase()) {
+        trimmed.to_string()
+    } else {
+        format!("{source_title}{suffix}")
+    }
+}
+
 impl<R: ShowItemReader> SeparateVocals<R> {
     pub fn new(
         separator: Arc<dyn VocalSeparator>,
@@ -232,7 +245,8 @@ impl<R: ShowItemReader> SeparateVocals<R> {
         let separated = self.separator.separate(request).await?;
 
         // 4. On successful separation, defuse the output guard and register in StagedAudioRegistry with 15-min TTL
-        let final_title = format!("{}{}", resolved.source_title, input.mode.title_suffix());
+        let final_title =
+            title_with_mode_suffix(&resolved.source_title, input.mode.title_suffix());
         staging_guard.defuse();
 
         let descriptor = self.registry.register(

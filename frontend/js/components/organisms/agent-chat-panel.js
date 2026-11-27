@@ -539,5 +539,8 @@ function formatContextText(context) {
   if (context && context.title) {
     return `Contexto: ${context.title}`;
   }
+  if (context && context.id) {
+    return `Contexto: ${context.id}`;
+  }
   return 'Modo catálogo (creará un nuevo show)';
 }
