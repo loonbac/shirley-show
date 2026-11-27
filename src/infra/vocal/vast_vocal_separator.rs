@@ -26,7 +26,10 @@ use uuid::Uuid;
 use super::colab_remote_script::generate_remote_script;
 use super::colab_vocal_separator::{REMOTE_OUTPUT_PATH, parse_execution_result};
 use super::colab_vocal_separator_config::{COROS_MODELS, INSTRUMENTAL_MODELS};
-use super::vast_vocal_separator_config::VastVocalSeparatorConfig;
+use super::vast_vocal_separator_config::{
+    FAST_INET_DOWN_MBPS, FAST_OFFER_MIN_COUNT, MIN_INET_DOWN_MBPS,
+    VastVocalSeparatorConfig,
+};
 use crate::domain::vocal_separation_mode::VocalSeparationMode;
 use crate::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
@@ -118,7 +121,7 @@ impl Offer {
         }
     }
 
-    fn acceptable(&self, max_dph: f64) -> bool {
+    fn acceptable(&self, max_dph: f64, min_inet_down: f64) -> bool {
         let gpu = normalized_gpu(self.gpu_name.as_deref().unwrap_or(""));
         if !ECONOMIC_GPUS
             .iter()
@@ -147,7 +150,7 @@ impl Offer {
             && self.num_gpus == Some(1)
             && self.gpu_ram.is_some_and(|v| v >= 20_000.0)
             && self.cuda_max_good.is_some_and(|v| v >= 12.4)
-            && self.inet_down.is_some_and(|v| v >= 500.0)
+            && self.inet_down.is_some_and(|v| v >= min_inet_down)
             && self.disk_space.is_some_and(|v| v >= 40.0)
             && self.dph_total.is_some_and(|v| v.is_finite() && v >= 0.0 && v <= max_dph)
             && self.id().is_some()
@@ -520,7 +523,7 @@ impl VastVocalSeparator {
     /// Vast validates every filter as an operator object; scalars return 400.
     /// The GPU whitelist is sent server-side, while CN/HK stays a client-side
     /// check on `geolocation`, so a full page can reach non-CN offers.
-    fn bundle_query(&self) -> Value {
+    fn bundle_query(&self, min_inet_down: f64) -> Value {
         json!({
             "verified": {"eq": true},
             "rentable": {"eq": true},
@@ -529,7 +532,7 @@ impl VastVocalSeparator {
             "num_gpus": {"eq": 1},
             "gpu_ram": {"gte": 20_000},
             "cuda_max_good": {"gte": 12.4},
-            "inet_down": {"gte": 500},
+            "inet_down": {"gte": min_inet_down},
             "disk_space": {"gte": 40},
             "gpu_name": {"in": ECONOMIC_GPUS},
             "dph_total": {"lte": self.config.max_dph},
@@ -539,9 +542,9 @@ impl VastVocalSeparator {
         })
     }
 
-    async fn offers(&self) -> Result<Vec<Offer>, VocalSeparationError> {
+    async fn offers_below(&self, min_inet_down: f64) -> Result<Vec<Offer>, VocalSeparationError> {
         let response = self
-            .api(Method::POST, "bundles/", Some(self.bundle_query()))
+            .api(Method::POST, "bundles/", Some(self.bundle_query(min_inet_down)))
             .await?;
         let values = response
             .get("offers")
@@ -553,10 +556,10 @@ impl VastVocalSeparator {
         let mut offers: Vec<Offer> = values
             .into_iter()
             .filter_map(|value| serde_json::from_value(value).ok())
-            .filter(|offer: &Offer| offer.acceptable(self.config.max_dph))
+            .filter(|offer: &Offer| offer.acceptable(self.config.max_dph, min_inet_down))
             .collect();
         vast_info!(
-            "offers found: received={received} acceptable={} (CN/HK excluded client-side)",
+            "offers found: min_down={min_inet_down} received={received} acceptable={} (CN/HK excluded client-side)",
             offers.len()
         );
         offers.sort_by(|a, b| {
@@ -565,6 +568,28 @@ impl VastVocalSeparator {
                 .total_cmp(&b.dph_total.unwrap_or(f64::MAX))
         });
         Ok(offers)
+    }
+
+    /// Fast hosts first: their cached base layers are what makes a rental
+    /// usable in ~1-3 minutes. Only when there are fewer than five of them do
+    /// we widen the query to the original 500 Mbps floor.
+    async fn offers(&self) -> Result<Vec<Offer>, VocalSeparationError> {
+        let fast = self.offers_below(FAST_INET_DOWN_MBPS).await?;
+        if fast.len() >= FAST_OFFER_MIN_COUNT {
+            vast_info!(
+                "using {} fast offers (>= {} Mbps), no fallback query",
+                fast.len(),
+                FAST_INET_DOWN_MBPS
+            );
+            return Ok(fast);
+        }
+        vast_warn!(
+            "only {} offers >= {} Mbps; retrying bundles with >= {} Mbps",
+            fast.len(),
+            FAST_INET_DOWN_MBPS,
+            MIN_INET_DOWN_MBPS
+        );
+        self.offers_below(MIN_INET_DOWN_MBPS).await
     }
 
     async fn instance_status(&self, instance_id: &str) -> Option<Value> {
@@ -664,9 +689,10 @@ impl VastVocalSeparator {
     async fn acquire_instance(
         &self,
         deadline: Instant,
+        cancelled: &AtomicBool,
     ) -> Result<Lease, VocalSeparationError> {
         for offer in self.offers().await? {
-            if Instant::now() >= deadline {
+            if Instant::now() >= deadline || cancelled.load(Ordering::SeqCst) {
                 break;
             }
             let rent_deadline = Instant::now()
@@ -678,6 +704,9 @@ impl VastVocalSeparator {
                 Ok(lease) => return Ok(lease),
                 Err(_) => {
                     vast_warn!("offer {} could not be rented; trying next", offer.id().unwrap_or_default());
+                    if cancelled.load(Ordering::SeqCst) {
+                        break; // nobody is waiting; do not spend on more hosts
+                    }
                     continue; // try the next offer
                 }
             }
@@ -1127,10 +1156,10 @@ impl VastVocalSeparator {
                     vast_info!("using already rented instance {}", lease.instance_id);
                     lease
                 }
-                None => self.acquire_instance(deadline).await?,
+                None => self.acquire_instance(deadline, &cancelled).await?,
             }
         } else {
-            self.acquire_instance(deadline).await?
+            self.acquire_instance(deadline, &cancelled).await?
         };
 
         // A rental that lands after the deadline or after the caller went away

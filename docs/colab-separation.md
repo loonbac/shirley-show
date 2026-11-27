@@ -99,16 +99,27 @@ Así el siguiente fallo en producción se diagnostica con `docker logs`.
 
 ## Fallback a Vast.ai (T2/T3)
 
-Colab sigue siendo el proveedor principal. Si hay `VAST_API_KEY`, el adaptador
-compuesto (`FallbackVocalSeparator`) aplica estas reglas:
+Colab sigue siendo el proveedor principal y **se prueba primero**: por decisión
+del propietario, Vast no se alquila en paralelo, sino sólo cuando Colab no ha
+entregado GPU en su ventana. Evidencia del despliegue `4155c11`: dos alquileres
+RTX 3090 (Noruega y Argentina) de la imagen anterior siguieron en `loading` más
+de 4,5 min y el turno de chat expiró a los 600 s sin separación; en cambio las
+sondas con `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime` estuvieron `running`
+en 36 s (CN) y 175 s (PL). Colab sigue respondiendo 503 y renuncia en ~60 s. La
+imagen y los filtros de Vast se mejoraron para que, cuando llega su turno,
+alquile rápido y no gaste el deadline del turno descargando.
+
+Si hay `VAST_API_KEY`, el adaptador compuesto (`FallbackVocalSeparator`)
+aplica estas reglas:
 
 1. Si ya existe una instancia Vast caliente (rentada en los últimos 10 minutos y
    todavía `running`), se usa directamente: ni se intenta Colab ni se vuelve a
    alquilar.
 2. Si no, se limita **sólo la fase de asignación** de Colab a
-   `SHIRLEY_VAST_FALLBACK_AFTER_SECS` (60 s por defecto). Si Colab entrega GPU,
-   conserva el deadline completo para subida/ejecución/descarga (S4). Si no
-   entrega GPU en esa ventana, Vast continúa **dentro del deadline original**.
+   `SHIRLEY_VAST_FALLBACK_AFTER_SECS` (60 s, S4). Si Colab entrega GPU, conserva
+   el deadline completo para subida/ejecución/descarga y Vast no se alquila. Si
+   Colab no entrega GPU en esa ventana, Vast empieza a rentar **entonces** y
+   termina la separación con el tiempo que quede del deadline original.
 3. Sin `VAST_API_KEY` el comportamiento es el de siempre: sólo Colab, con el
    timeout completo y sin pedir nada a Vast.
 
@@ -118,12 +129,15 @@ compuesto (`FallbackVocalSeparator`) aplica estas reglas:
 | SHIRLEY_VAST_IMAGE | ghcr.io/loonbac/shirley-vast-worker:latest | Imagen a rentar; **fijar un tag `:sha` en producción**. |
 | SHIRLEY_VAST_MAX_DPH | 0.6 | Precio máximo por hora de la oferta. |
 | SHIRLEY_VAST_FALLBACK_AFTER_SECS | 60 | Ventana de asignación de GPU concedida a Colab. |
+| SHIRLEY_VAST_LAUNCH_TIMEOUT_SECS | 150 | Tiempo máximo que se espera a que **una oferta** llegue a `running`; al vencer se destruye y se prueba la siguiente. |
 
-El adapter alquila la GPU económica más barata que cumpla los filtros de Vast
-(verificada, rentable, no rentada, fiabilidad ≥ 0.99, 1 GPU, ≥ 20 GB de VRAM,
-CUDA ≥ 12.4, ≥ 500 Mbps de bajada, ≥ 40 GB de disco, on-demand), excluye hosts
-CN/China/HK y sólo considera RTX 3090/4090/A5000/A6000, L4 y A10. Prueba la
-siguiente oferta si el alquiler falla. Genera una clave ed25519 bajo
+El adapter pide primero ofertas con **≥ 1000 Mbps de bajada** y las ordena por
+precio; si hay menos de 5 aceptables repite la consulta con el piso anterior de
+**≥ 500 Mbps**. El resto de filtros no cambia (verificada, rentable, no rentada,
+fiabilidad ≥ 0.99, 1 GPU, ≥ 20 GB de VRAM, CUDA ≥ 12.4, ≥ 40 GB de disco,
+on-demand), excluye hosts CN/China/HK y sólo considera RTX 3090/4090/A5000/
+A6000, L4, A10 y RTX 4080S. Prueba la siguiente oferta si el alquiler falla o
+se queda en `loading` más de 150 s. Genera una clave ed25519 bajo
 `<data>/vast/ssh` (modo 600), la registra con `POST /ssh/` si falta, y usa
 `ssh`/`scp` con timeouts estrictos. El script remoto es el mismo de Colab; la
 verificación SHA-256 y de duración es idéntica. La instancia se conserva 10

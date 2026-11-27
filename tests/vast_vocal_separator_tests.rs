@@ -22,8 +22,8 @@ use shirley_show::domain::vocal_separation_mode::VocalSeparationMode;
 use shirley_show::infra::vocal::fallback_vocal_separator::FallbackVocalSeparator;
 use shirley_show::infra::vocal::vast_vocal_separator::VastVocalSeparator;
 use shirley_show::infra::vocal::vast_vocal_separator_config::{
-    DEFAULT_VAST_FALLBACK_AFTER_SECS, DEFAULT_VAST_IMAGE, DEFAULT_VAST_MAX_DPH,
-    VastVocalSeparatorConfig,
+    DEFAULT_LAUNCH_TIMEOUT, DEFAULT_VAST_FALLBACK_AFTER_SECS, DEFAULT_VAST_IMAGE,
+    DEFAULT_VAST_MAX_DPH, VastVocalSeparatorConfig,
 };
 use shirley_show::ports::vocal_separator::{VocalSeparationRequest, VocalSeparator};
 
@@ -72,6 +72,10 @@ struct Inner {
     unwrapped: bool,
     /// Vast v1 may wrap the list differently; exercise all documented shapes.
     v1_list_shape: V1ListShape,
+    /// Simulates a host that never leaves `loading` before the launch deadline.
+    stall_first_instance: bool,
+    /// Each successful rent gets its own contract id, as on the real API.
+    next_instance_id: u64,
     calls: Calls,
 }
 
@@ -87,6 +91,8 @@ impl FakeState {
                 proxy_only: false,
                 unwrapped: false,
                 v1_list_shape: V1ListShape::Wrapped,
+                stall_first_instance: false,
+                next_instance_id: 7001,
                 calls: Calls::default(),
             })),
         }
@@ -132,7 +138,23 @@ async fn bundles(
         )
             .into_response();
     }
-    let offers = state.inner.lock().unwrap().offers.clone();
+    let offers = {
+        let inner = state.inner.lock().unwrap();
+        let min_down = body
+            .get("inet_down")
+            .and_then(|filter| filter.get("gte"))
+            .and_then(Value::as_f64);
+        inner
+            .offers
+            .clone()
+            .into_iter()
+            .filter(|offer| {
+                min_down.is_none_or(|min| {
+                    offer["inet_down"].as_f64().is_some_and(|down| down >= min)
+                })
+            })
+            .collect::<Vec<_>>()
+    };
     Json(json!({ "offers": offers })).into_response()
 }
 
@@ -148,17 +170,26 @@ async fn rent(
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "busy"}))).into_response();
     }
     // The live probe reads `.new_contract`; keep legacy keys for compatibility.
-    Json(json!({ "new_contract": 7001 })).into_response()
+    let instance_id = inner.next_instance_id;
+    inner.next_instance_id += 1;
+    Json(json!({ "new_contract": instance_id })).into_response()
 }
 
-async fn get_instance(AxumPath(_id): AxumPath<String>, State(state): State<FakeState>) -> Json<Value> {
+async fn get_instance(AxumPath(id): AxumPath<String>, State(state): State<FakeState>) -> Json<Value> {
     let mut inner = state.inner.lock().unwrap();
     inner.calls.instance_gets += 1;
     let dead = inner.die_on_next_health && inner.calls.instance_gets >= 2;
     if dead {
         inner.die_on_next_health = false;
     }
-    let state = if dead { "exited" } else { "running" };
+    let stalled = inner.stall_first_instance && id == "7001";
+    let state = if dead {
+        "exited"
+    } else if stalled {
+        "loading"
+    } else {
+        "running"
+    };
     if inner.unwrapped {
         return Json(json!({
             "id": 7001,
@@ -281,7 +312,7 @@ fn offer(id: u64, price: f64, gpu: &str, geo: &str) -> Value {
         "num_gpus": 1,
         "gpu_ram": 24564,
         "cuda_max_good": 12.4,
-        "inet_down": 900,
+        "inet_down": 1200,
         "disk_space": 80,
         "rent_type": "on-demand"
     })
@@ -406,7 +437,9 @@ impl Fixture {
         config.ssh_bin = ssh;
         config.scp_bin = scp;
         config.ffprobe_bin = ffprobe;
-        config.retention = Duration::from_millis(250);
+        // Long enough that a second separation cannot outlive the lease on a
+        // busy host; the retention tests still see it expire promptly.
+        config.retention = Duration::from_millis(1500);
         config.poll_interval = Duration::from_millis(5);
         config.http_timeout = Duration::from_secs(5);
         config.launch_timeout = Duration::from_secs(5);
@@ -486,7 +519,7 @@ async fn vast_rents_cheapest_allowed_offer_and_separates_with_generated_script()
     assert_eq!(query["num_gpus"], json!({"eq": 1}));
     assert_eq!(query["gpu_ram"], json!({"gte": 20000}));
     assert_eq!(query["cuda_max_good"], json!({"gte": 12.4}));
-    assert_eq!(query["inet_down"], json!({"gte": 500}));
+    assert_eq!(query["inet_down"], json!({"gte": 1000.0}));
     assert_eq!(query["disk_space"], json!({"gte": 40}));
     assert_eq!(query["type"], "on-demand");
     assert_eq!(calls.rents.len(), 1);
@@ -543,7 +576,7 @@ async fn warm_instance_is_reused_and_destroyed_after_idle_window() {
     );
     assert!(fixture.calls().deletes.is_empty());
 
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(6);
     while fixture.calls().deletes.is_empty() && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -660,21 +693,26 @@ fn vast_config_env_defaults_and_key_is_never_in_debug_output() {
     assert_eq!(cfg.max_dph, DEFAULT_VAST_MAX_DPH);
     assert_eq!(cfg.label, "shirley-show");
     assert_eq!(cfg.fallback_after, Duration::from_secs(DEFAULT_VAST_FALLBACK_AFTER_SECS));
+    assert_eq!(cfg.launch_timeout, DEFAULT_LAUNCH_TIMEOUT);
+    assert_eq!(DEFAULT_LAUNCH_TIMEOUT, Duration::from_secs(150));
     assert!(!format!("{cfg:?}").contains("super-secret-key"));
 
     set_env("VAST_API_KEY", "unit-test-dummy");
     set_env("SHIRLEY_VAST_IMAGE", "ghcr.io/loonbac/shirley-vast-worker:sha-123");
     set_env("SHIRLEY_VAST_MAX_DPH", "0.35");
     set_env("SHIRLEY_VAST_FALLBACK_AFTER_SECS", "45");
+    set_env("SHIRLEY_VAST_LAUNCH_TIMEOUT_SECS", "120");
     let from_env = VastVocalSeparatorConfig::from_env(PathBuf::from("/tmp/data"), gpu).unwrap();
     assert_eq!(from_env.image, "ghcr.io/loonbac/shirley-vast-worker:sha-123");
     assert_eq!(from_env.max_dph, 0.35);
     assert_eq!(from_env.fallback_after, Duration::from_secs(45));
+    assert_eq!(from_env.launch_timeout, Duration::from_secs(120));
     for key in [
         "VAST_API_KEY",
         "SHIRLEY_VAST_IMAGE",
         "SHIRLEY_VAST_MAX_DPH",
         "SHIRLEY_VAST_FALLBACK_AFTER_SECS",
+        "SHIRLEY_VAST_LAUNCH_TIMEOUT_SECS",
     ] {
         remove_env(key);
     }
@@ -903,7 +941,7 @@ async fn query_uses_operator_filters_gpu_whitelist_and_price_cap() {
     assert_eq!(query["num_gpus"], json!({"eq": 1}));
     assert_eq!(query["gpu_ram"], json!({"gte": 20000}));
     assert_eq!(query["cuda_max_good"], json!({"gte": 12.4}));
-    assert_eq!(query["inet_down"], json!({"gte": 500}));
+    assert_eq!(query["inet_down"], json!({"gte": 1000.0}));
     assert_eq!(query["disk_space"], json!({"gte": 40}));
     assert_eq!(
         query["gpu_name"]["in"],
@@ -1010,4 +1048,101 @@ impl VocalSeparator for TestSeparator {
             })
         })
     }
+}
+
+/// The fake enforces `inet_down.gte` exactly like Vast, so an offer below the
+/// fast threshold is invisible until the adapter retries with the floor.
+#[tokio::test]
+async fn fast_inet_down_query_falls_back_to_500_when_fewer_than_five_offers() {
+    let fixture = Fixture::new(vec![offer(51, 0.20, "RTX 3090", "US")]).await;
+    fixture.state.inner.lock().unwrap().offers[0]["inet_down"] = json!(900);
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("the slower but acceptable host must be rented");
+    let calls = fixture.calls();
+    assert!(calls.bundles.len() >= 2);
+    assert_eq!(calls.bundles[0]["inet_down"], json!({"gte": 1000.0}));
+    assert_eq!(calls.bundles[1]["inet_down"], json!({"gte": 500.0}));
+    assert_eq!(calls.rents[0].0, "51");
+}
+
+#[tokio::test]
+async fn five_fast_offers_avoid_the_slower_inet_down_query() {
+    let offers = (0..5u64)
+        .map(|i| offer(60 + i, 0.20 + i as f64 * 0.01, "RTX 3090", "PL"))
+        .collect::<Vec<_>>();
+    let fixture = Fixture::new(offers).await;
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("fast host separates");
+    let calls = fixture.calls();
+    assert_eq!(
+        calls.bundles.len(),
+        1,
+        "no fallback query is needed with five fast offers"
+    );
+    assert_eq!(calls.bundles[0]["inet_down"], json!({"gte": 1000.0}));
+    assert_eq!(calls.rents[0].0, "60");
+}
+
+#[tokio::test]
+async fn stalled_instance_hits_the_launch_deadline_and_the_next_offer_is_rented() {
+    let mut fixture = Fixture::new(vec![
+        offer(71, 0.20, "RTX 3090", "PL"),
+        offer(72, 0.22, "L4", "US"),
+    ])
+    .await;
+    fixture.state.inner.lock().unwrap().stall_first_instance = true;
+    fixture.config.launch_timeout = Duration::from_millis(150);
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(10)))
+        .await
+        .expect("the second offer reaches running");
+    let calls = fixture.calls();
+    assert_eq!(
+        calls.rents.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        vec!["71", "72"]
+    );
+    assert_eq!(
+        calls.deletes,
+        vec!["7001".to_string()],
+        "a host still loading after the launch deadline must be destroyed"
+    );
+}
+
+#[tokio::test]
+async fn cancelled_rental_of_a_stalled_instance_is_destroyed() {
+    let mut fixture = Fixture::new(vec![
+        offer(83, 0.20, "RTX 3090", "PL"),
+        offer(84, 0.22, "L4", "US"),
+    ])
+    .await;
+    fixture.state.inner.lock().unwrap().stall_first_instance = true;
+    fixture.config.launch_timeout = Duration::from_millis(150);
+    let separator = fixture.separator();
+    let request = fixture.request(Duration::from_secs(10));
+    // Drive the future in a task: until it is polled no rental is attempted.
+    let pending = tokio::spawn(async move { separator.separate(request).await });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while fixture.calls().rents.is_empty() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(fixture.calls().rents.len(), 1);
+    pending.abort();
+    tokio::task::yield_now().await;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while fixture.calls().deletes.is_empty() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(fixture.calls().deletes, vec!["7001".to_string()]);
+    assert_eq!(
+        fixture.calls().rents.len(),
+        1,
+        "cancellation must not try the next offer"
+    );
 }
