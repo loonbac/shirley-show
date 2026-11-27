@@ -403,6 +403,14 @@ struct MockColabFixture {
     /// chain-wide capacity outage rather than a per-GPU one.
     trigger_all_gpus_busy: PathBuf,
     trigger_fail_exec: PathBuf,
+    /// Holds the exact stderr the failing `exec` must print, so a test can pin
+    /// what the one-line diagnostic keeps (last line, single line, truncated).
+    trigger_fail_exec_stderr: PathBuf,
+    /// When present, `exec` fails exactly like the real CLI does on a silent
+    /// kernel: exit 1 and `TimeoutError: ... no message from the kernel for
+    /// 30s` on stderr, unless a silence budget above the CLI default was passed
+    /// with `--timeout N`. This is the production failure, reproduced.
+    trigger_require_cli_timeout: PathBuf,
     trigger_bad_sha: PathBuf,
     trigger_bad_duration: PathBuf,
     /// When present, `stop` exits 1 with "Session not found" on stderr, which
@@ -422,6 +430,8 @@ impl MockColabFixture {
         let trigger_hang_gpu = temp_dir.path().join("hang_gpu");
         let trigger_all_gpus_busy = temp_dir.path().join("all_gpus_busy");
         let trigger_fail_exec = temp_dir.path().join("fail_exec");
+        let trigger_fail_exec_stderr = temp_dir.path().join("fail_exec_stderr");
+        let trigger_require_cli_timeout = temp_dir.path().join("require_cli_timeout");
         let trigger_bad_sha = temp_dir.path().join("bad_sha");
         let trigger_bad_duration = temp_dir.path().join("bad_duration");
         let trigger_stop_not_found = temp_dir.path().join("stop_not_found");
@@ -447,6 +457,8 @@ impl MockColabFixture {
         let hang_gpu_str = trigger_hang_gpu.display().to_string();
         let all_gpus_busy_str = trigger_all_gpus_busy.display().to_string();
         let fail_exec_str = trigger_fail_exec.display().to_string();
+        let fail_exec_stderr_str = trigger_fail_exec_stderr.display().to_string();
+        let require_timeout_str = trigger_require_cli_timeout.display().to_string();
         let bad_sha_str = trigger_bad_sha.display().to_string();
         let bad_dur_str = trigger_bad_duration.display().to_string();
         let stop_not_found_str = trigger_stop_not_found.display().to_string();
@@ -522,11 +534,6 @@ elif [ "$cmd" = "upload" ]; then
     # leaving a byte-perfect file. The pipeline must accept that.
     exit 1
 elif [ "$cmd" = "exec" ]; then
-    if [ -f "{fail_exec_str}" ]; then
-        exit 1
-    fi
-    echo "exec $@" >> "{log_str}"
-
     # Extract the script file (last argument)
     for last; do true; done
     script_file="$last"
@@ -534,7 +541,45 @@ elif [ "$cmd" = "exec" ]; then
     # The upload is judged by what the runtime holds, so the fake answers the
     # size probe when it sees one. The probe is itself a script executed with
     # `-f`, so it is detected by content, not by flag shape.
-    if grep -q "SIZE=" "$script_file" 2>/dev/null; then
+    is_probe=0
+    if grep -q "SIZE=" "$script_file" 2>/dev/null; then is_probe=1; fi
+
+    # The real CLI aborts a call whose kernel prints nothing for `--timeout`
+    # seconds (default 30) and reports it on stderr. The production run died
+    # exactly that way while the script was installing packages and loading the
+    # models, so the mock refuses the same calls unless a larger budget was
+    # requested.
+    silence=""
+    prev=""
+    for a in "$@"; do
+        if [ "$prev" = "--timeout" ]; then silence="$a"; fi
+        prev="$a"
+    done
+    too_short=1
+    case "$silence" in
+        ""|*[!0-9]*) too_short=1 ;;
+        *) if [ "$silence" -gt 30 ]; then too_short=0; fi ;;
+    esac
+    if [ -f "{require_timeout_str}" ] && [ "$too_short" = "1" ]; then
+        echo "execfail $@" >> "{log_str}"
+        echo "Traceback (most recent call last):" >&2
+        echo "TimeoutError: Timeout waiting for output: no message from the kernel for 30s. Use --timeout to allow longer silences." >&2
+        exit 1
+    fi
+    if [ "$is_probe" = "0" ] && [ -f "{fail_exec_str}" ]; then
+        # A real exec failure carries a traceback on stderr; the adapter must
+        # leave a diagnosable trace of it without leaking the token.
+        if [ -f "{fail_exec_stderr_str}" ]; then
+            cat "{fail_exec_stderr_str}" >&2
+        else
+            echo "Traceback (most recent call last):" >&2
+            echo "TimeoutError: Timeout waiting for output: no message from the kernel for 30s. Use --timeout to allow longer silences." >&2
+        fi
+        exit 1
+    fi
+    echo "exec $@" >> "{log_str}"
+
+    if [ "$is_probe" = "1" ]; then
         if [ -f "{temp_dir_str}/uploaded" ]; then
             echo "SIZE=$(wc -c < "{temp_dir_str}/uploaded" | tr -d ' ')"
         else
@@ -608,6 +653,8 @@ fi
             trigger_hang_gpu,
             trigger_all_gpus_busy,
             trigger_fail_exec,
+            trigger_fail_exec_stderr,
+            trigger_require_cli_timeout,
             trigger_bad_sha,
             trigger_bad_duration,
             trigger_stop_not_found,
@@ -1299,7 +1346,14 @@ async fn test_official_cli_arguments_exact_shape_and_session_reuse() {
         .collect();
     assert_eq!(exec_lines.len(), 2, "two separation execs (one per run), log: {log}");
     for el in &exec_lines {
-        assert_eq!(el[1..], ["exec", "-s", session_name, "-f", el[5]]);
+        // PRESERVE: the official contract is still `exec -s NAME -f SCRIPT`, with
+        // the CLI silence budget added and nothing else. `--timeout` must come
+        // before `-f` (a value the CLI's float parser accepts).
+        assert_eq!(
+            el[1..],
+            ["exec", "-s", session_name, "--timeout", el[5], "-f", el[7]],
+            "exec argument shape changed: {el:?}"
+        );
     }
 
     let download_lines: Vec<Vec<&str>> = log
@@ -1985,5 +2039,215 @@ async fn test_gpu_assignment_window_stays_fixed_while_every_candidate_hangs() {
     assert!(
         stops.len() >= hangs.len(),
         "every timed-out attempt must be stopped, log was: {log}"
+    );
+}
+
+/// Production failure, reproduced: the official CLI aborts a `colab exec` whose
+/// kernel prints nothing for 30s and reports
+/// `TimeoutError: Timeout waiting for output: no message from the kernel for
+/// 30s. Use --timeout to allow longer silences.` A real separation is silent for
+/// longer than that while it installs packages and loads the separation models,
+/// so the CLI's own watchdog killed every request at ~36s with an empty stdout.
+///
+/// The adapter must hand the step's remaining budget to `--timeout` instead of
+/// leaving the CLI on its default. Both exec calls are covered: the separation
+/// script and the upload size probe.
+#[tokio::test]
+async fn test_exec_passes_remaining_budget_as_cli_silence_timeout() {
+    let fixture = MockColabEnv::new_fixture();
+    // From here on the mock behaves like the real CLI: a silent kernel with the
+    // default 30s budget is a failure.
+    std::fs::write(&fixture.trigger_require_cli_timeout, b"strict").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let cfg = fixture.make_config(gpu.clone());
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let output_mp3 = fixture.temp_dir.path().join("silence_out.mp3");
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: output_mp3.clone(),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+
+    let res = sep.separate(req).await;
+    assert!(
+        res.is_ok(),
+        "a silent kernel must not abort the separation, got: {res:?}"
+    );
+    assert!(output_mp3.is_file(), "the separated audio must be written");
+
+    let log = fixture.read_log();
+    assert!(
+        !log.contains("execfail"),
+        "no exec may reach the CLI without a silence budget above its default, log: {log}"
+    );
+
+    let exec_lines: Vec<&str> = log
+        .lines()
+        .filter(|l| l.starts_with("exec "))
+        .collect();
+    assert!(
+        exec_lines.len() >= 2,
+        "the size probe and the separation script are both execs, log: {log}"
+    );
+    for line in &exec_lines {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        let idx = tokens
+            .iter()
+            .position(|t| *t == "--timeout")
+            .unwrap_or_else(|| panic!("exec must pass --timeout, got: {line}"));
+        let value: u64 = tokens[idx + 1]
+            .parse()
+            .unwrap_or_else(|_| panic!("--timeout must be whole seconds, got: {line}"));
+        assert!(
+            value > 30,
+            "the CLI default of 30s aborts a silent kernel, got --timeout {value} in: {line}"
+        );
+        assert!(
+            value <= 60,
+            "--timeout must stay inside the request budget (60s), got {value} in: {line}"
+        );
+        assert!(
+            tokens.contains(&"-f"),
+            "the script must still be passed with -f, got: {line}"
+        );
+    }
+}
+
+/// The CLI's silence budget is derived from the budget the step really has, in
+/// whole seconds rounded up, and never `0` — the CLI reads `--timeout 0` as "no
+/// limit", which would remove the bound instead of raising it.
+#[test]
+fn test_cli_silence_timeout_rounds_up_and_never_disables_the_bound() {
+    use shirley_show::infra::vocal::colab_vocal_separator_config::cli_silence_timeout_secs;
+
+    assert_eq!(cli_silence_timeout_secs(Duration::from_secs(600)), 600);
+    // Rounded up: 599.2s of budget must not become 599s, which would cut the
+    // call before our own deadline does.
+    assert_eq!(
+        cli_silence_timeout_secs(Duration::from_millis(599_200)),
+        600
+    );
+    assert_eq!(cli_silence_timeout_secs(Duration::from_secs(31)), 31);
+    // Never zero: `0` means "no limit" to the CLI.
+    assert_eq!(cli_silence_timeout_secs(Duration::from_millis(1)), 1);
+    assert_eq!(cli_silence_timeout_secs(Duration::ZERO), 1);
+}
+
+/// A failed `colab exec` must always leave one diagnosable line behind.
+///
+/// The product error is a fixed message that hides stderr on purpose, so the
+/// only channel is the process log. Before this, a production failure was
+/// completely silent: empty stdout, no trace of the CLI's own
+/// `TimeoutError: ... no message from the kernel for 30s`, and nothing to read
+/// from `docker logs`.
+#[tokio::test]
+async fn test_exec_failure_always_emits_a_sanitized_diagnostic() {
+    let fixture = MockColabEnv::new_fixture();
+    std::fs::write(&fixture.trigger_fail_exec, b"fail").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let mut cfg = fixture.make_config(gpu.clone());
+    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    cfg.diagnostic_sink = Some(captured.clone());
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("diag_out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+
+    // The user-facing error is unchanged: still SeparationFailed, still no
+    // stderr leaked into the product message.
+    let res = sep.separate(req).await;
+    assert_eq!(res.unwrap_err(), VocalSeparationError::SeparationFailed);
+
+    let lines = captured.lock().unwrap().clone();
+    assert_eq!(
+        lines.len(),
+        1,
+        "exactly one diagnostic line per failed exec, got: {lines:?}"
+    );
+    let line = &lines[0];
+
+    // Exit code, so a timeout (1) can be told from a signal kill.
+    assert!(
+        line.contains("exit=1"),
+        "the diagnostic must carry the exit code, got: {line}"
+    );
+    // The last stderr line is the one that names the cause.
+    assert!(
+        line.contains("TimeoutError: Timeout waiting for output"),
+        "the diagnostic must carry the CLI's own error, got: {line}"
+    );
+    // One line only: a traceback would otherwise flood the log.
+    assert!(
+        !line.contains('\n'),
+        "the diagnostic must be a single line, got: {line:?}"
+    );
+    // No credential may reach the log.
+    let token_file = std::fs::read_to_string(&fixture.token_file).unwrap();
+    let refresh = token_file
+        .split("\"refresh_token\":\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("fixture token");
+    assert!(
+        !line.contains(refresh),
+        "the diagnostic must never carry the OAuth token, got: {line}"
+    );
+}
+
+/// The sanitizer keeps one bounded line: the last non-empty stderr line, with
+/// whitespace collapsed, truncated to ~300 characters. Checked through the
+/// process-level diagnostic rather than by exposing the helper: `colab exec`
+/// printing a traceback must leave exactly one line naming the real cause.
+#[tokio::test]
+async fn test_diagnostic_keeps_only_the_last_stderr_line_bounded() {
+    let fixture = MockColabEnv::new_fixture();
+    // A long last line, so the truncation is observable in the emitted line.
+    let long_tail = format!("RuntimeError: {}", "y".repeat(400));
+    let stderr = format!(
+        "Traceback (most recent call last):\n  File \"<stdin>\", line 4, in <module>\n{long_tail}\n"
+    );
+    std::fs::write(&fixture.trigger_fail_exec, b"fail").unwrap();
+    std::fs::write(&fixture.trigger_fail_exec_stderr, stderr).unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let mut cfg = fixture.make_config(gpu);
+    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    cfg.diagnostic_sink = Some(captured.clone());
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("bounded_out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+    assert_eq!(
+        sep.separate(req).await.unwrap_err(),
+        VocalSeparationError::SeparationFailed
+    );
+
+    let lines = captured.lock().unwrap().clone();
+    assert_eq!(lines.len(), 1, "one line per failed exec, got: {lines:?}");
+    let line = &lines[0];
+    assert!(
+        line.contains("RuntimeError:"),
+        "the last stderr line names the cause, got: {line}"
+    );
+    assert!(
+        !line.contains("Traceback (most recent call last)"),
+        "the traceback header must not be the reported cause, got: {line}"
+    );
+    assert!(
+        line.chars().count() <= 380,
+        "the diagnostic must be truncated to ~300 chars of stderr, got {} chars: {line}",
+        line.chars().count()
     );
 }

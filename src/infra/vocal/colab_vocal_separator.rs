@@ -11,8 +11,8 @@ use uuid::Uuid;
 use super::colab_orphan_reaper::stop_ok;
 use super::colab_remote_script::generate_remote_script;
 use super::colab_vocal_separator_config::{
-    ColabVocalSeparatorConfig, gpu_assign_window, gpu_attempt_timeout, gpu_chain,
-    pipeline_reserve,
+    ColabVocalSeparatorConfig, cli_silence_timeout_secs, gpu_assign_window, gpu_attempt_timeout,
+    gpu_chain, pipeline_reserve,
 };
 use crate::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
@@ -97,6 +97,70 @@ fn find_payload(text: &str) -> Option<ColabExecutionResult> {
         }
     }
     None
+}
+
+/// Longest slice of the CLI's stderr kept in a diagnostic line.
+///
+/// The line goes to `docker logs` and has to stay one line: a Python traceback
+/// is many, and the interesting part (`TimeoutError: ...`) is its last one.
+const DIAGNOSTIC_MAX_CHARS: usize = 300;
+
+/// Trims and flattens a fragment of CLI stderr into a single bounded line.
+///
+/// The last non-empty line is the one that names the failure, so that is what is
+/// kept; whitespace is collapsed because a wrapped traceback would otherwise
+/// break the "one line" contract of the log entry.
+fn sanitize_diagnostic(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let last = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .next_back()
+        .unwrap_or("");
+    let flattened = last.split_whitespace().collect::<Vec<_>>().join(" ");
+    flattened.chars().take(DIAGNOSTIC_MAX_CHARS).collect()
+}
+
+/// Exit code of a finished process, or the name of the signal that killed it.
+fn describe_exit(status: &std::process::ExitStatus) -> String {
+    match status.code() {
+        Some(code) => code.to_string(),
+        None => format!("signal {}", status),
+    }
+}
+
+/// One-line failure diagnostic for `colab exec`, always written to stderr.
+///
+/// This is the only channel that survives production. The user-facing error is a
+/// fixed product message ("Falló el proceso de separación vocal"), so a failure
+/// inside `colab exec` used to leave nothing behind: stdout was empty and the
+/// stderr that named the cause was dropped with the child process. The exit code
+/// and the CLI's own last stderr line are enough to tell a silence timeout
+/// (`TimeoutError: ... no message from the kernel for 30s`) from a missing
+/// package or a dead runtime, and neither carries the OAuth token.
+fn report_exec_failure(
+    sink: Option<&Arc<std::sync::Mutex<Vec<String>>>>,
+    session_id: &str,
+    status: Option<&std::process::ExitStatus>,
+    stderr: &[u8],
+) {
+    let exit = status
+        .map(describe_exit)
+        .unwrap_or_else(|| "none (timed out)".to_string());
+    let detail = sanitize_diagnostic(stderr);
+    let detail = if detail.is_empty() {
+        "<no stderr>".to_string()
+    } else {
+        detail
+    };
+    let line = format!("[colab exec] fallo session={session_id} exit={exit} stderr={detail}");
+    eprintln!("{line}");
+    if let Some(sink) = sink {
+        if let Ok(mut lines) = sink.lock() {
+            lines.push(line);
+        }
+    }
 }
 
 /// Drop guard ensuring that "colab stop" is executed even in the event of panics,
@@ -203,7 +267,21 @@ impl ColabVocalSeparator {
         tokio::fs::write(&probe_path, &probe).await.ok()?;
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
-        cmd.args(["exec", "-s", session_id, "-f", probe_path.to_str()?]);
+        // A probe answers in milliseconds, but the CLI's own silence watchdog is
+        // 30s and does not know that: a cold kernel that is still starting would
+        // be reported as a timeout while the file may well be there. The bound
+        // that matters is ours, so the CLI is given the whole step budget.
+        let silence_secs = cli_silence_timeout_secs(timeout);
+        let silence_arg = silence_secs.to_string();
+        cmd.args([
+            "exec",
+            "-s",
+            session_id,
+            "--timeout",
+            silence_arg.as_str(),
+            "-f",
+            probe_path.to_str()?,
+        ]);
         cmd.stdin(Stdio::null());
         cmd.stderr(Stdio::null());
         let output = match tokio::time::timeout(timeout, cmd.output()).await {
@@ -634,12 +712,23 @@ impl ColabVocalSeparator {
             .checked_sub(start.elapsed())
             .ok_or(VocalSeparationError::SeparationTimeout)?;
 
+        // The CLI aborts a call whose kernel stays silent for `--timeout`
+        // seconds, defaulting to 30. The remote script installs packages and
+        // loads the separation models before printing anything, so that default
+        // killed real separations after 36s with an empty stdout. The budget left
+        // for this step is handed over instead, in whole seconds rounded up, so
+        // the only bound that can cut a healthy run is our own tokio timeout.
+        let silence_secs = cli_silence_timeout_secs(exec_timeout);
+        let silence_arg = silence_secs.to_string();
+
         let mut exec_cmd = Command::new(&self.config.colab_bin);
         exec_cmd.kill_on_drop(true);
         exec_cmd.args([
             "exec",
             "-s",
             session_id,
+            "--timeout",
+            silence_arg.as_str(),
             "-f",
             script_path
                 .to_str()
@@ -651,16 +740,40 @@ impl ColabVocalSeparator {
 
         let exec_output = match tokio::time::timeout(exec_timeout, exec_cmd.output()).await {
             Ok(Ok(o)) if o.status.success() => o,
-            Ok(Ok(_)) => {
+            Ok(Ok(o)) => {
                 let _ = tokio::fs::remove_file(&script_path).await;
+                report_exec_failure(
+                    self.config.diagnostic_sink.as_ref(),
+                    session_id,
+                    Some(&o.status),
+                    &o.stderr,
+                );
                 return Err(VocalSeparationError::SeparationFailed);
             }
-            Ok(Err(_)) => {
+            Ok(Err(err)) => {
                 let _ = tokio::fs::remove_file(&script_path).await;
+                // The CLI could not even be spawned (missing binary, no execute
+                // permission). Nothing was run, but the cause must still be
+                // visible from the log.
+                report_exec_failure(
+                    self.config.diagnostic_sink.as_ref(),
+                    session_id,
+                    None,
+                    format!("no se pudo ejecutar el binario colab: {err}").as_bytes(),
+                );
                 return Err(VocalSeparationError::SeparationFailed);
             }
             Err(_) => {
                 let _ = tokio::fs::remove_file(&script_path).await;
+                // Killed by our own outer bound: the child never got to report
+                // anything, so the line records the bound instead of a stderr
+                // that does not exist.
+                report_exec_failure(
+                    self.config.diagnostic_sink.as_ref(),
+                    session_id,
+                    None,
+                    format!("agotado el limite externo de {exec_timeout:?}").as_bytes(),
+                );
                 return Err(VocalSeparationError::SeparationTimeout);
             }
         };
