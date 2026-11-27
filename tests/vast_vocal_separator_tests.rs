@@ -22,7 +22,8 @@ use shirley_show::domain::vocal_separation_mode::VocalSeparationMode;
 use shirley_show::infra::vocal::fallback_vocal_separator::FallbackVocalSeparator;
 use shirley_show::infra::vocal::vast_vocal_separator::VastVocalSeparator;
 use shirley_show::infra::vocal::vast_vocal_separator_config::{
-    DEFAULT_LAUNCH_TIMEOUT, DEFAULT_VAST_FALLBACK_AFTER_SECS, DEFAULT_VAST_IMAGE,
+    DEFAULT_LAUNCH_TIMEOUT, DEFAULT_SSH_PROBE_CONNECT_TIMEOUT, DEFAULT_SSH_PROBE_INTERVAL,
+    DEFAULT_TRANSIENT_RETRY_DELAY, DEFAULT_VAST_FALLBACK_AFTER_SECS, DEFAULT_VAST_IMAGE,
     DEFAULT_VAST_MAX_DPH, VastVocalSeparatorConfig,
 };
 use shirley_show::ports::vocal_separator::{VocalSeparationRequest, VocalSeparator};
@@ -345,7 +346,13 @@ fn write_fake_binaries(
     output_mp3: &Path,
     fail_python: bool,
     fail_scp: bool,
+    ssh_refusals: usize,
+    scp_transient_failures: usize,
 ) -> (PathBuf, PathBuf, PathBuf) {
+    let ssh_refusal_file = dir.join("ssh_refusals_left");
+    let scp_transient_file = dir.join("scp_transient_left");
+    std::fs::write(&ssh_refusal_file, ssh_refusals.to_string()).unwrap();
+    std::fs::write(&scp_transient_file, scp_transient_failures.to_string()).unwrap();
     let remote = dir.join("remote");
     std::fs::create_dir_all(&remote).unwrap();
     std::fs::copy(output_mp3, remote.join("output.mp3")).unwrap();
@@ -357,11 +364,12 @@ fn write_fake_binaries(
     std::fs::write(
         &ssh,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n  *python*) cat > '{}'; cat '{}'; {} ;;\n  *rm*) exit 0 ;;\n  *) exit 0 ;;\nesac\n",
-            log.display(),
-            remote.join("script.py").display(),
-            result_json.display(),
-            exit_line
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nrefuse='{refusal_file}'\nif [ -f \"$refuse\" ]; then n=$(cat \"$refuse\"); else n=0; fi\nif [ \"$n\" -gt 0 ]; then\n  n=$((n - 1)); echo \"$n\" > \"$refuse\"\n  echo 'ssh: connect to host 91.245.78.79 port 16552: Connection refused' >&2\n  exit 255\nfi\ncase \"$*\" in\n  *python*) cat > '{script_file}'; cat '{result_json}'; {exit_line} ;;\n  *rm*) exit 0 ;;\n  *) exit 0 ;;\nesac\n",
+            log = log.display(),
+            refusal_file = ssh_refusal_file.display(),
+            script_file = remote.join("script.py").display(),
+            result_json = result_json.display(),
+            exit_line = exit_line
         ),
     )
     .unwrap();
@@ -415,6 +423,13 @@ esac
 if [ "$src_remote" = "$dst_remote" ]; then
   echo 'scp: exactly one user@host:path operand is required' >&2; exit 2
 fi
+transient='{transient}'
+if [ -f "$transient" ]; then n=$(cat "$transient"); else n=0; fi
+if [ "$n" -gt 0 ]; then
+  n=$((n - 1)); echo "$n" > "$transient"
+  echo 'scp: Connection closed by 91.245.78.79' >&2
+  exit 255
+fi
 if [ '{fail_scp}' = "1" ]; then
   echo 'scp: Permission denied (SCP-FAIL-MARKER-42)' >&2
   exit 1
@@ -428,6 +443,7 @@ fi
             log = log.display(),
             argv_log = scp_argv_log.display(),
             fail_scp = fail_scp_flag,
+            transient = scp_transient_file.display(),
             remote_output = remote.join("output.mp3").display(),
             remote_input = remote.join("input_audio").display(),
         ),
@@ -457,6 +473,8 @@ struct Fixture {
     scp_argv_log: PathBuf,
     key_path: PathBuf,
     output_bytes: PathBuf,
+    ssh_refusal_file: PathBuf,
+    scp_transient_file: PathBuf,
 }
 
 /// Splits the fake scp's one-argument-per-line log into individual calls.
@@ -513,6 +531,8 @@ impl Fixture {
             &output_bytes,
             false,
             fail_scp,
+            0,
+            0,
         );
 
         let state = FakeState::new(offers);
@@ -530,6 +550,15 @@ impl Fixture {
         config.poll_interval = Duration::from_millis(5);
         config.http_timeout = Duration::from_secs(5);
         config.launch_timeout = Duration::from_secs(5);
+        // The fakes are local, but the suite runs many detached ssh/scp
+        // processes in parallel. Keep their budgets generous while the
+        // launch-deadline tests set `launch_timeout` explicitly.
+        config.preflight_timeout = Duration::from_secs(15);
+        config.ssh_probe_interval = Duration::from_millis(20);
+        config.ssh_probe_connect_timeout = Duration::from_secs(1);
+        config.transient_retry_delay = Duration::from_millis(20);
+        let ssh_refusal_file = binaries_dir.join("ssh_refusals_left");
+        let scp_transient_file = binaries_dir.join("scp_transient_left");
         Self {
             _tmp: tmp,
             config,
@@ -539,7 +568,17 @@ impl Fixture {
             scp_argv_log,
             key_path,
             output_bytes,
+            ssh_refusal_file,
+            scp_transient_file,
         }
+    }
+
+    fn set_ssh_refusals(&self, refusals: usize) {
+        std::fs::write(&self.ssh_refusal_file, refusals.to_string()).unwrap();
+    }
+
+    fn set_scp_transient_failures(&self, failures: usize) {
+        std::fs::write(&self.scp_transient_file, failures.to_string()).unwrap();
     }
 
     fn separator(&self) -> VastVocalSeparator {
@@ -681,7 +720,10 @@ async fn vast_rents_cheapest_allowed_offer_and_separates_with_generated_script()
 
 #[tokio::test]
 async fn warm_instance_is_reused_and_destroyed_after_idle_window() {
-    let fixture = Fixture::new(vec![offer(9, 0.21, "RTX 3090", "PL")]).await;
+    let mut fixture = Fixture::new(vec![offer(9, 0.21, "RTX 3090", "PL")]).await;
+    // A slow host must not let the retention timer destroy the GPU in the
+    // middle of the second request; the expiry is still asserted below.
+    fixture.config.retention = Duration::from_secs(5);
     let separator = fixture.separator();
     separator
         .separate(fixture.request(Duration::from_secs(30)))
@@ -706,7 +748,7 @@ async fn warm_instance_is_reused_and_destroyed_after_idle_window() {
     );
     assert!(fixture.calls().deletes.is_empty());
 
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + Duration::from_secs(8);
     while fixture.calls().deletes.is_empty() && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -739,6 +781,8 @@ async fn proven_dead_instance_is_destroyed_immediately_and_rented_again() {
             &output,
             true,
             false,
+            0,
+            0,
         );
         fixture.config.ssh_bin = ssh;
         fixture.config.scp_bin = scp;
@@ -755,7 +799,8 @@ async fn proven_dead_instance_is_destroyed_immediately_and_rented_again() {
     assert_eq!(
         fixture.calls().deletes,
         vec!["7001".to_string()],
-        "a proven dead instance must not keep billing"
+        "a proven dead instance must not keep billing (instance_gets={})",
+        fixture.calls().instance_gets
     );
     assert!(!separator.warm_instance_available().await);
 
@@ -769,6 +814,8 @@ async fn proven_dead_instance_is_destroyed_immediately_and_rented_again() {
         &fixture.output_bytes,
         false,
         false,
+        0,
+        0,
     );
     fixture.config.ssh_bin = ssh;
     fixture.config.scp_bin = scp;
@@ -834,7 +881,14 @@ fn vast_config_env_defaults_and_key_is_never_in_debug_output() {
     assert_eq!(cfg.label, "shirley-show");
     assert_eq!(cfg.fallback_after, Duration::from_secs(DEFAULT_VAST_FALLBACK_AFTER_SECS));
     assert_eq!(cfg.launch_timeout, DEFAULT_LAUNCH_TIMEOUT);
+    assert_eq!(cfg.preflight_timeout, Duration::from_secs(5));
+    assert_eq!(cfg.ssh_probe_interval, DEFAULT_SSH_PROBE_INTERVAL);
+    assert_eq!(cfg.ssh_probe_connect_timeout, DEFAULT_SSH_PROBE_CONNECT_TIMEOUT);
+    assert_eq!(cfg.transient_retry_delay, DEFAULT_TRANSIENT_RETRY_DELAY);
     assert_eq!(DEFAULT_LAUNCH_TIMEOUT, Duration::from_secs(150));
+    assert_eq!(DEFAULT_SSH_PROBE_INTERVAL, Duration::from_secs(3));
+    assert_eq!(DEFAULT_SSH_PROBE_CONNECT_TIMEOUT, Duration::from_secs(5));
+    assert_eq!(DEFAULT_TRANSIENT_RETRY_DELAY, Duration::from_secs(3));
     assert!(!format!("{cfg:?}").contains("super-secret-key"));
 
     set_env("VAST_API_KEY", "unit-test-dummy");
@@ -1349,5 +1403,156 @@ async fn cancelled_rental_of_a_stalled_instance_is_destroyed() {
         fixture.calls().rents.len(),
         1,
         "cancellation must not try the next offer"
+    );
+}
+
+/// Vast can report `running` before its sshd accepts connections. The first
+/// ssh connections here are refused with the exact live error; the adapter
+/// must probe through them before it claims readiness and uploads anything.
+#[tokio::test]
+async fn ssh_probe_waits_until_the_worker_accepts_before_upload() {
+    let fixture = Fixture::new(vec![offer(91, 0.20, "RTX 3090", "PL")]).await;
+    fixture.set_ssh_refusals(2);
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("separation succeeds once ssh accepts");
+    let log = std::fs::read_to_string(&fixture.ssh_log).unwrap();
+    let probes = log.lines().filter(|line| line.trim_end().ends_with(" true")).count();
+    assert!(
+        probes >= 3,
+        "two refusals then one acceptance must all be probed: {log}"
+    );
+    assert_eq!(scp_calls(&fixture.scp_argv_log).len(), 2, "upload and download only");
+    assert_eq!(fixture.calls().rents.len(), 1);
+    assert!(fixture.calls().deletes.is_empty());
+}
+
+/// A host that stays `running` while ssh refuses connections must be billed
+/// only until this offer's launch deadline, then destroyed in favour of the
+/// next offer -- exactly like a host stuck in `loading`.
+#[tokio::test]
+async fn ssh_that_never_accepts_destroys_and_tries_the_next_offer() {
+    let mut fixture = Fixture::new(vec![
+        offer(92, 0.20, "RTX 3090", "PL"),
+        offer(93, 0.22, "L4", "US"),
+    ])
+    .await;
+    fixture.set_ssh_refusals(1000);
+    fixture.config.launch_timeout = Duration::from_millis(200);
+    assert!(
+        fixture
+            .separator()
+            .separate(fixture.request(Duration::from_secs(10)))
+            .await
+            .is_err(),
+        "neither host accepts ssh before its deadline"
+    );
+    let calls = fixture.calls();
+    assert_eq!(
+        calls.rents.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        vec!["92", "93"],
+        "the next offer must be tried"
+    );
+    assert_eq!(
+        calls.deletes,
+        vec!["7001".to_string(), "7002".to_string()],
+        "both unreachable instances must be destroyed"
+    );
+}
+
+#[tokio::test]
+async fn warm_instance_with_dead_ssh_is_destroyed_and_rented_fresh() {
+    let mut fixture = Fixture::new(vec![offer(94, 0.21, "RTX 3090", "PL")]).await;
+    fixture.config.retention = Duration::from_secs(10);
+    let separator = fixture.separator();
+    separator
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("first separation");
+    assert!(separator.warm_instance_available().await);
+
+    fixture.set_ssh_refusals(2);
+    assert!(
+        !separator.warm_instance_available().await,
+        "a warm lease whose ssh is dead must not be reused"
+    );
+    assert_eq!(fixture.calls().deletes, vec!["7001".to_string()]);
+    assert_eq!(fixture.calls().rents.len(), 1);
+
+    fixture.set_ssh_refusals(0);
+    separator
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("a fresh instance separates");
+    assert_eq!(fixture.calls().rents.len(), 2);
+}
+
+#[tokio::test]
+async fn transient_scp_255_is_retried_once() {
+    let fixture = Fixture::new(vec![offer(95, 0.20, "RTX 3090", "PL")]).await;
+    fixture.set_scp_transient_failures(1);
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("one transient Connection closed must not fail the transfer");
+    let calls = scp_calls(&fixture.scp_argv_log);
+    assert_eq!(calls.len(), 3, "one retry plus download");
+    assert_eq!(calls[0], calls[1], "the upload is retried with the same argv");
+    assert!(
+        calls[2].iter().any(|arg| arg.contains("/content/colab_sep_work/output.mp3")),
+        "the download follows the retried upload"
+    );
+}
+
+/// `eprintln!` from the library cannot be captured in-process; this ignored
+/// helper is invoked as a child by the assertion below.
+#[tokio::test]
+#[ignore = "invoked by transient_connection_logs_are_reported"]
+async fn transient_connection_log_helper() {
+    let fixture = Fixture::new(vec![offer(96, 0.20, "RTX 3090", "PL")]).await;
+    fixture.set_ssh_refusals(2);
+    fixture.set_scp_transient_failures(1);
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .expect("both transient failures recover");
+}
+
+#[test]
+fn transient_connection_logs_are_reported() {
+    let exe = std::env::current_exe().unwrap();
+    let output = Command::new(exe)
+        .args([
+            "--exact",
+            "transient_connection_log_helper",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "helper failed: {stderr}");
+    assert!(
+        stderr.contains("[vast] INFO ssh probe attempt 1 failed:"),
+        "probe failures must be logged: {stderr}"
+    );
+    assert!(stderr.contains("Connection refused"), "stderr tail: {stderr}");
+    assert!(
+        stderr.contains("[vast] INFO ssh accepted after "),
+        "readiness must be logged only after acceptance: {stderr}"
+    );
+    assert!(
+        stderr.contains("[vast] INFO upload transient connection failure, retrying"),
+        "the scp retry must be logged: {stderr}"
+    );
+    assert!(stderr.contains("Connection closed"), "scp stderr tail: {stderr}");
+    assert!(
+        !stderr.contains("TEST PRIVATE KEY"),
+        "no key material may be logged: {stderr}"
     );
 }

@@ -123,6 +123,21 @@ download: -i KEY -P PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/
 script:  -i KEY -p PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=N root@HOST "bash -lc 'cd /content && python -'"
 ```
 
+Vast reports `actual_status=running` before the container's sshd is reachable,
+so `running` is **not** treated as readiness. Until this offer's launch
+deadline (also clipped to the caller's deadline), the adapter runs
+`ssh ... true` with `BatchMode=yes`, `StrictHostKeyChecking=no` and a 5 s
+`ConnectTimeout` every 3 s. `ssh ready at HOST:PORT` is logged only after one
+of those probes exits 0; failed probes are logged at a bounded rate
+(`ssh probe attempt N failed: <sanitized stderr tail>`), and a host that never
+accepts is destroyed exactly like a launch timeout before trying the next
+offer. A warm lease is also probed once or twice before reuse: if its ssh is
+dead, it is destroyed and a fresh instance is rented. scp transfers and the
+script ssh retry **once** after ~3 s when exit 255 comes with `Connection
+refused`, `Connection closed` or `Connection reset`; other failures are not
+retried. The launch timeout bounds renting only -- once a GPU is ready, the
+transfers own the caller's full deadline.
+
 Every HTTP and SSH call has its own timeout. The instance is labelled
 `shirley-show`, kept warm for ten minutes after the last separation (including
 a failed attempt while the machine proves healthy), and destroyed at once when
@@ -173,8 +188,10 @@ legacy `status`, and proxy `ssh_host`/`ssh_port` when the direct port is absent.
 
 Observability follows the repository convention (`eprintln!`, no new crate):
 `[vast] INFO` / `[vast] WARN` lines cover offers found and chosen GPU, dph and
-geolocation, rent result, state transitions, ssh readiness, upload/script/
-download timings, verification, retention/destroy and reaper actions. HTTP
+geolocation, rent result, state transitions, ssh probe attempts and the
+`ssh accepted after Xms` readiness line, upload/script/download timings,
+transient retry notices, verification, retention/destroy and reaper actions.
+HTTP
 errors include the endpoint path, status and a response body truncated to 300
 characters with the API key scrubbed. scp and ssh keep stderr piped instead of
 discarding it: a non-zero exit logs
