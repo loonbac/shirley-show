@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Semaphore;
 
 use crate::domain::vocal_separation_mode::VocalSeparationMode;
@@ -37,6 +38,134 @@ pub const INSTRUMENTAL_MODELS: [&str; 1] = ["model_bs_roformer_ep_317_sdr_12.975
 // vocal (frazer, 0.0674) or bleed heavily.
 pub const COROS_MODELS: [&str; 1] = ["mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt"];
 
+/// The accelerators `colab new --gpu` accepts, exactly as the CLI spells them.
+///
+/// The list is not a preference order; it is the contract printed by the CLI
+/// itself: `unsupported value '14'. Supported: T4, L4, G4, H100, A100.`
+/// Asking for anything else burns an attempt on a request that cannot succeed,
+/// which is what a configured `14` did.
+pub const SUPPORTED_COLAB_GPUS: [&str; 5] = ["T4", "L4", "G4", "H100", "A100"];
+
+/// Splits the request budget in two: GPU assignment may not touch the half that
+/// upload, exec and download still need.
+///
+/// The old arithmetic handed the first accelerator `request.timeout - elapsed`,
+/// so one hanging device spent the whole budget and the fallbacks never ran.
+pub const PIPELINE_BUDGET_DIVISOR: u32 = 2;
+
+/// Bound for a single `colab new` attempt.
+///
+/// A short bound is the point: three candidates fit inside the half of a 600s
+/// request that assignment is allowed, so one 503 does not cost the separation.
+/// Colab does answer late (a 120s client timeout was once followed by a live L4
+/// session), and such an attempt is stopped and rotated instead of waited on.
+pub const GPU_ATTEMPT_TIMEOUT_DEFAULT: Duration = Duration::from_secs(90);
+
+/// Below this much usable assignment budget an attempt is not worth starting.
+pub const MIN_USEFUL_GPU_ATTEMPT: Duration = Duration::from_secs(2);
+
+/// How many full passes over the chain are made while the budget lasts.
+///
+/// One pass through a three-GPU chain is what a single 503 burst needs; a second
+/// and later pass covers the case where every accelerator refuses for a moment.
+/// The count is capped so an instant refusal cannot spin the CLI in a hot loop.
+pub const GPU_MAX_ROUNDS_DEFAULT: u32 = 4;
+
+/// The chain used when the configuration names no usable accelerator.
+///
+/// Same order as the documented defaults: the fastest option that answers, then
+/// the ones that have answered under load, then the measured floor.
+pub const DEFAULT_GPU_CHAIN: [&str; 3] = ["G4", "A100", "L4"];
+
+/// Canonical, uppercase name of a configured accelerator, or `None` when the
+/// CLI does not accept it.
+///
+/// Configured values are lowercase by convention (`g4`); the CLI only accepts
+/// uppercase. Normalizing here is what keeps the command boundary free of
+/// string juggling and skips unusable values instead of attempting them.
+pub fn normalize_gpu(value: &str) -> Option<String> {
+    let upper = value.trim().to_ascii_uppercase();
+    if upper.is_empty() {
+        return None;
+    }
+    SUPPORTED_COLAB_GPUS
+        .iter()
+        .find(|gpu| **gpu == upper)
+        .map(|gpu| gpu.to_string())
+}
+
+/// The ordered chain of accelerators to attempt: primary first, then the
+/// fallbacks, unsupported values skipped and duplicates removed.
+///
+/// Order matters because the first device that assigns wins: the fast option is
+/// tried before the reliable one, and the configuration states that order.
+pub fn gpu_candidates(primary: &str, fallbacks: &[String]) -> Vec<String> {
+    let mut candidates: Vec<String> = Vec::new();
+    for raw in std::iter::once(primary).chain(fallbacks.iter().map(String::as_str)) {
+        if let Some(gpu) = normalize_gpu(raw) {
+            if !candidates.contains(&gpu) {
+                candidates.push(gpu);
+            }
+        }
+    }
+    candidates
+}
+
+/// The chain the separator actually rotates through.
+///
+/// Normalized configuration first. When nothing configured is usable the
+/// documented chain is used instead of failing: a misspelled or outdated value
+/// (`14` is the one seen in production) must not be the reason a paid request
+/// never gets a GPU.
+pub fn gpu_chain(primary: &str, fallbacks: &[String]) -> Vec<String> {
+    let candidates = gpu_candidates(primary, fallbacks);
+    if candidates.is_empty() {
+        return DEFAULT_GPU_CHAIN.iter().map(|g| g.to_string()).collect();
+    }
+    candidates
+}
+
+/// Part of the remaining request budget reserved for the separation pipeline.
+///
+/// `pipeline_reserve` plus [`gpu_assign_window`] is the whole budget, so the
+/// upload/exec/download arc can never be starved by accelerator retries. The
+/// reserve is taken from the budget available when assignment STARTS and is not
+/// recomputed per attempt: `remaining - remaining/2` re-halved whatever was left,
+/// so with a 4 x 3 x 90s cap the rotation could spend nearly the whole budget
+/// and leave the pipeline seconds.
+pub fn pipeline_reserve(budget: Duration) -> Duration {
+    budget / PIPELINE_BUDGET_DIVISOR
+}
+
+/// The fixed window that GPU assignment may spend, computed once per request
+/// from the budget available when assignment begins.
+///
+/// Every attempt is bounded by what is left of THIS window, so the reserve for
+/// upload/exec/download never shrinks with each retry.
+pub fn gpu_assign_window(budget: Duration) -> Duration {
+    budget.saturating_sub(pipeline_reserve(budget))
+}
+
+/// Part of a budget that GPU assignment may spend.
+///
+/// Kept as the name most call sites want; it is [`gpu_assign_window`] and is
+/// likewise meant to be called once, not per attempt.
+pub fn gpu_start_budget(budget: Duration) -> Duration {
+    gpu_assign_window(budget)
+}
+
+/// Bound for the next `colab new` given the window still left, or zero when the
+/// window cannot pay for a meaningful attempt.
+///
+/// Zero is deliberate instead of a tiny timeout: firing a request that is
+/// guaranteed to be cut off only wastes the last seconds the pipeline needs.
+pub fn gpu_attempt_timeout(remaining_window: Duration, attempt_cap: Duration) -> Duration {
+    if remaining_window < MIN_USEFUL_GPU_ATTEMPT {
+        return Duration::ZERO;
+    }
+    attempt_cap.min(remaining_window)
+}
+
 #[derive(Clone, Debug)]
 pub struct ColabVocalSeparatorConfig {
     pub colab_bin: PathBuf,
@@ -49,6 +178,10 @@ pub struct ColabVocalSeparatorConfig {
     /// A single fallback only moves the failure one step, so this is a chain.
     /// Empty disables it entirely.
     pub gpu_fallbacks: Vec<String>,
+    /// How long one `colab new` may take before the chain rotates.
+    pub gpu_attempt_timeout: Duration,
+    /// How many full passes over the chain are allowed while budget remains.
+    pub gpu_max_rounds: u32,
     pub overlap: u32,
     /// Inference batch size. Measured on the production GPU: 25s at batch 1,
     /// 8.5s at batch 8, and flat above that (8.5s at 32 and 64), so 8 is the
@@ -81,15 +214,31 @@ impl ColabVocalSeparatorConfig {
         // in every deployment that sets the old name, and nothing in the image
         // would complain: the chain is read from the environment, not compiled
         // in. Keep the name.
+        //
+        // A value that names no accelerator the CLI accepts is treated as unset
+        // rather than as an empty chain: production carries `14`, which the CLI
+        // rejects with `unsupported value '14'. Supported: T4, L4, G4, H100,
+        // A100.` Keeping it would leave the primary as the only option and turn
+        // one 503 into a failed, already-paid request.
         let gpu_fallbacks: Vec<String> = match std::env::var("SHIRLEY_COLAB_GPU_FALLBACK") {
-            Ok(raw) => raw
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect(),
-            Err(_) => vec!["a100".to_string(), "l4".to_string()],
+            Ok(raw) => {
+                let parsed: Vec<String> = raw
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if !parsed.is_empty() && parsed.iter().all(|v| normalize_gpu(v).is_none()) {
+                    default_gpu_fallbacks()
+                } else {
+                    parsed
+                }
+            }
+            Err(_) => default_gpu_fallbacks(),
         };
+
+        let gpu_attempt_timeout = GPU_ATTEMPT_TIMEOUT_DEFAULT;
+        let gpu_max_rounds = GPU_MAX_ROUNDS_DEFAULT;
 
         let overlap = std::env::var("SHIRLEY_COLAB_OVERLAP")
             .ok()
@@ -124,6 +273,8 @@ impl ColabVocalSeparatorConfig {
             token_path,
             gpu_type,
             gpu_fallbacks,
+            gpu_attempt_timeout,
+            gpu_max_rounds,
             overlap,
             batch_size,
             timeout_secs,
@@ -237,6 +388,11 @@ pub fn sync_token_to_legacy(source: &Path, dest: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The fallbacks used when the variable is unset or names nothing usable.
+fn default_gpu_fallbacks() -> Vec<String> {
+    vec!["a100".to_string(), "l4".to_string()]
 }
 
 fn expand_tilde(path_str: String) -> PathBuf {
