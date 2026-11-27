@@ -4,6 +4,9 @@ pub mod colab_session_cache;
 pub mod colab_transfer;
 pub mod colab_vocal_separator;
 pub mod colab_vocal_separator_config;
+pub mod fallback_vocal_separator;
+pub mod vast_vocal_separator;
+pub mod vast_vocal_separator_config;
 
 pub use colab_orphan_reaper::{ReapDecision, boot_reap_decision, reap_decision, stop_all_runtimes};
 pub use colab_remote_script::generate_remote_script;
@@ -13,4 +16,10 @@ pub use colab_vocal_separator::{ColabExecutionResult, ColabSessionGuard, ColabVo
 pub use colab_vocal_separator_config::{
     COROS_MODELS, ColabVocalSeparatorConfig, INSTRUMENTAL_MODELS, PERFORMANCE_GPU_ORDER,
     SUPPORTED_COLAB_GPUS,
+};
+pub use fallback_vocal_separator::FallbackVocalSeparator;
+pub use vast_vocal_separator::VastVocalSeparator;
+pub use vast_vocal_separator_config::{
+    DEFAULT_VAST_FALLBACK_AFTER_SECS, DEFAULT_VAST_IMAGE, DEFAULT_VAST_MAX_DPH,
+    VAST_SESSION_IDLE_RETENTION, VastVocalSeparatorConfig,
 };

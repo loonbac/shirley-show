@@ -309,6 +309,12 @@ pub struct ColabVocalSeparatorConfig {
     pub gpu_attempt_timeout: Duration,
     /// How many full passes over the chain are allowed while budget remains.
     pub gpu_max_rounds: u32,
+    /// Optional cap on the GPU ASSIGNMENT window only.
+    ///
+    /// The fallback composition uses it to give Colab a short chance to hand
+    /// over a GPU without shortening the pipeline of a GPU that did assign.
+    /// `None` is the historical behaviour.
+    pub assignment_budget_cap: Option<Duration>,
     pub overlap: u32,
     /// Inference batch size. Measured on the production GPU: 25s at batch 1,
     /// 8.5s at batch 8, and flat above that (8.5s at 32 and 64), so 8 is the
@@ -416,6 +422,7 @@ impl ColabVocalSeparatorConfig {
             gpu_fallbacks,
             gpu_attempt_timeout,
             gpu_max_rounds,
+            assignment_budget_cap: None,
             overlap,
             batch_size,
             timeout_secs,

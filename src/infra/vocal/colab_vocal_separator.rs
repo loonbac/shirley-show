@@ -614,11 +614,15 @@ impl ColabVocalSeparator {
 
         // Fixed once: the pipeline reserve never shrinks because we retried.
         let initial_budget = deadline.saturating_duration_since(Instant::now());
-        let assign_deadline = Instant::now() + gpu_assign_window(initial_budget);
+        let mut assign_window = gpu_assign_window(initial_budget);
+        if let Some(cap) = self.config.assignment_budget_cap {
+            assign_window = assign_window.min(cap);
+        }
+        let assign_deadline = Instant::now() + assign_window;
         if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
             eprintln!(
                 "[separate] ventana de asignacion {:?} (reserva {:?}), cadena {candidates:?}",
-                gpu_assign_window(initial_budget),
+                assign_window,
                 pipeline_reserve(initial_budget)
             );
         }
@@ -992,6 +996,18 @@ impl VocalSeparator for ColabVocalSeparator {
     fn probe(&self, _timeout: Duration) -> Pin<Box<dyn Future<Output = bool> + Send>> {
         let this = self.clone();
         Box::pin(async move { this.config.validate_token().is_ok() })
+    }
+
+    /// Limits only the assignment phase. Once a GPU is assigned, the whole
+    /// original request deadline remains for upload/exec/download (S4).
+    fn separate_with_assignment_budget(
+        &self,
+        request: VocalSeparationRequest,
+        budget: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>> {
+        let mut this = self.clone();
+        this.config.assignment_budget_cap = Some(budget);
+        this.separate(request)
     }
 
     fn separate(

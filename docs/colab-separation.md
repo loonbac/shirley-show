@@ -97,6 +97,49 @@ Así el siguiente fallo en producción se diagnostica con `docker logs`.
 - El puerto 8080 del runtime lo ocupa el proxy del CLI.
 - Un SIGKILL, un OOM del contenedor o un abort del proceso saltan los destructores, así que el guard de Drop no llega a ejecutarse y el runtime puede seguir vivo hasta que Colab lo expire por inactividad. No hay forma de evitarlo desde el cliente. Tras un reinicio duro del contenedor, conviene ejecutar colab stop -s <nombre> (o revisar colab usage) para no dejar la GPU consumiendo.
 
+## Fallback a Vast.ai (T2/T3)
+
+Colab sigue siendo el proveedor principal. Si hay `VAST_API_KEY`, el adaptador
+compuesto (`FallbackVocalSeparator`) aplica estas reglas:
+
+1. Si ya existe una instancia Vast caliente (rentada en los últimos 10 minutos y
+   todavía `running`), se usa directamente: ni se intenta Colab ni se vuelve a
+   alquilar.
+2. Si no, se limita **sólo la fase de asignación** de Colab a
+   `SHIRLEY_VAST_FALLBACK_AFTER_SECS` (60 s por defecto). Si Colab entrega GPU,
+   conserva el deadline completo para subida/ejecución/descarga (S4). Si no
+   entrega GPU en esa ventana, Vast continúa **dentro del deadline original**.
+3. Sin `VAST_API_KEY` el comportamiento es el de siempre: sólo Colab, con el
+   timeout completo y sin pedir nada a Vast.
+
+| Variable | Default | Para qué |
+|---|---|---|
+| VAST_API_KEY | — | Habilita el fallback. Nunca se escribe en logs. |
+| SHIRLEY_VAST_IMAGE | ghcr.io/loonbac/shirley-vast-worker:latest | Imagen a rentar; **fijar un tag `:sha` en producción**. |
+| SHIRLEY_VAST_MAX_DPH | 0.6 | Precio máximo por hora de la oferta. |
+| SHIRLEY_VAST_FALLBACK_AFTER_SECS | 60 | Ventana de asignación de GPU concedida a Colab. |
+
+El adapter alquila la GPU económica más barata que cumpla los filtros de Vast
+(verificada, rentable, no rentada, fiabilidad ≥ 0.99, 1 GPU, ≥ 20 GB de VRAM,
+CUDA ≥ 12.4, ≥ 500 Mbps de bajada, ≥ 40 GB de disco, on-demand), excluye hosts
+CN/China/HK y sólo considera RTX 3090/4090/A5000/A6000, L4 y A10. Prueba la
+siguiente oferta si el alquiler falla. Genera una clave ed25519 bajo
+`<data>/vast/ssh` (modo 600), la registra con `POST /ssh/` si falta, y usa
+`ssh`/`scp` con timeouts estrictos. El script remoto es el mismo de Colab; la
+verificación SHA-256 y de duración es idéntica. La instancia se conserva 10
+minutos tras la última separación (éxito o fallo con máquina sana) y se destruye
+antes si está muerta; al arrancar la app se destruyen las instancias etiquetadas
+`shirley-show` que hubiera dejado un reinicio anterior, y un reaper de seguridad
+hace lo mismo cada 5 minutos. El alquiler y el pipeline viven en una tarea
+independiente: si se cancela la petición (deadline del agente o desconexión), el
+apagado o el temporizador de retención se ejecutan igual, y una instancia que
+se alquila después de la cancelación se destruye de inmediato.
+
+Cuando ningún proveedor da GPU, el error mantiene el código `colab_unavailable`
+pero el mensaje es honesto: «No hay GPU disponible ahora mismo en los
+proveedores; inténtalo de nuevo en unos minutos.» No se menciona una cuota
+agotada porque los créditos están disponibles.
+
 ## Renovar el token
 
     colab auth

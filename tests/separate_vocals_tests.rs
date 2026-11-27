@@ -713,3 +713,30 @@ async fn test_separation_request_follows_the_real_deadline_not_the_configured_ti
     );
     assert_eq!(use_case.timeout(), Duration::from_secs(1800));
 }
+
+/// T3: the user-facing text for "no GPU" must not blame a quota that is not
+/// exhausted, and the public error code must stay exactly as before.
+#[tokio::test]
+async fn test_no_gpu_available_message_is_honest_and_code_is_unchanged() {
+    let ctx = TestContext::new();
+    let (staged_audio_id, _) = ctx.create_staged_audio("Sin GPU", b"audio sin gpu");
+    let separator = Arc::new(FakeVocalSeparator::failing(
+        VocalSeparationError::ColabUnavailable,
+    ));
+    let downloader = Arc::new(FakeDownloader::new("unused", 0, 0));
+    let use_case = ctx.build_separate_vocals(separator, downloader);
+    let err = use_case
+        .execute(SeparateVocalsInput {
+            source: VocalAudioSource::StagedAudioId(staged_audio_id),
+            mode: VocalSeparationMode::Coros,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code(), "colab_unavailable");
+    assert_eq!(
+        err.message(),
+        "No hay GPU disponible ahora mismo en los proveedores; inténtalo de nuevo en unos minutos."
+    );
+    assert!(!err.message().to_lowercase().contains("cuota"));
+}
