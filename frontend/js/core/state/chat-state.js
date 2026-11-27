@@ -27,6 +27,7 @@ export function createChatState(initialState = {}, options = {}) {
     messages: [],
     activeContext: null,
     conversationId: null,
+    conversationPresentationId: null,
     sessionId: initialState.sessionId || null,
     notice: null,
     ...initialState,
@@ -108,6 +109,11 @@ export function createChatState(initialState = {}, options = {}) {
   }
 
   function setRouteContext(context) {
+    // A destination named in the conversation outlives every route change:
+    // route context only seeds the destination while none was chosen yet.
+    if (state.conversationPresentationId) {
+      return;
+    }
     state = {
       ...state,
       activeContext: context
@@ -232,28 +238,55 @@ export function createChatState(initialState = {}, options = {}) {
     };
 
     let updatedContext = state.activeContext;
+    let conversationPresentationId = state.conversationPresentationId;
+    const activePresentationId = response && response.active_presentation_id ? response.active_presentation_id : null;
+    const activeEventId = response && response.active_event_id ? response.active_event_id : null;
     const isPresentationDeleted = actions.some(
-      (act) => act.tool === 'eliminar_presentacion' && act.status === 'success' && act.presentation_id === state.activeContext?.id
+      (act) =>
+        act.tool === 'eliminar_presentacion' &&
+        act.status === 'success' &&
+        (act.presentation_id === activePresentationId ||
+          act.presentation_id === (conversationPresentationId || state.activeContext?.id))
     );
     const isEventDeleted = actions.some(
       (act) => act.tool === 'eliminar_evento' && act.status === 'success' && act.event_id === state.activeContext?.id
     );
     if (isPresentationDeleted || isEventDeleted) {
       updatedContext = null;
-    } else if (response && response.active_presentation_id) {
-      if (!updatedContext || updatedContext.id !== response.active_presentation_id) {
-        // Look for title in creation actions if available
-        const createAction = actions.find(
-          (act) => act.tool === 'create_presentation' && act.presentation_id === response.active_presentation_id
+      if (isPresentationDeleted) {
+        conversationPresentationId = null;
+      }
+    } else if (activePresentationId) {
+      conversationPresentationId = activePresentationId;
+      if (!updatedContext || updatedContext.id !== activePresentationId || updatedContext.type === 'event') {
+        // Prefer an explicit title, then a title carried by the matching action.
+        const titleAction = actions.find(
+          (act) =>
+            act.presentation_id === activePresentationId &&
+            act.details &&
+            (act.details.title || act.details.titulo || act.details.nombre)
         );
-        const title = (createAction && createAction.details && createAction.details.title) || 'Nueva presentación';
+        const responseTitle =
+          response.active_presentation_title ||
+          (response.active_presentation && response.active_presentation.title);
+        const isCreation = actions.some(
+          (act) =>
+            act.tool === 'create_presentation' &&
+            act.status === 'success' &&
+            act.presentation_id === activePresentationId
+        );
+        const title =
+          responseTitle ||
+          (titleAction && (titleAction.details.title || titleAction.details.titulo || titleAction.details.nombre)) ||
+          (isCreation ? 'Nueva presentación' : activePresentationId);
         updatedContext = {
-          id: response.active_presentation_id,
+          id: activePresentationId,
           title,
         };
       }
-    } else if (response && response.active_event_id) {
-      if (!updatedContext || updatedContext.id !== response.active_event_id || updatedContext.type !== 'event') {
+    } else if (activeEventId) {
+      conversationPresentationId = null;
+      if (!updatedContext || updatedContext.id !== activeEventId || updatedContext.type !== 'event') {
         const eventAction = actions.find(
           (act) =>
             (act.tool === 'crear_evento' || act.event_id === response.active_event_id) &&
@@ -291,6 +324,7 @@ export function createChatState(initialState = {}, options = {}) {
       attachment: hasConsumedAttachment ? null : state.attachment,
       activeContext: updatedContext,
       conversationId: nextConversationId,
+      conversationPresentationId,
       notice,
       messages: [...state.messages, assistantMessage],
     };
