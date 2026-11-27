@@ -13,10 +13,15 @@ use shirley_show::config::Config;
 
 use shirley_show::domain::agent_message::CompletionResponse;
 use shirley_show::domain::agent_tool::ToolCall;
+use shirley_show::domain::audio_format::AudioFormat;
 use shirley_show::infra::filesystem::LocalAudioStorage;
 use shirley_show::infra::sqlite::{init_pool, migrate_pool};
+use shirley_show::domain::youtube_url::YouTubeUrl;
 use shirley_show::ports::chat_completion_provider::{ChatCompletionProvider, CompletionRequest};
 use shirley_show::ports::show_item_reader::ShowItemReader;
+use shirley_show::ports::youtube_downloader::{
+    DownloadedYoutubeAudio, YoutubeDownloadTarget, YoutubeDownloader,
+};
 use shirley_show::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
 };
@@ -1910,4 +1915,428 @@ async fn test_chat_api_separation_request_uses_the_turn_deadline_not_the_colab_d
         "the request must still have a usable budget, got {:?}",
         timeouts[0]
     );
+}
+
+/// Fake LLM that also records what the server offered it, so the global-chat
+/// tool contract can be asserted through the public chat endpoint.
+#[derive(Clone)]
+struct RecordingProvider {
+    responses: Arc<
+        std::sync::Mutex<std::collections::VecDeque<CompletionResponse>>,
+    >,
+    snapshots: Arc<
+        std::sync::Mutex<Vec<(Vec<String>, String)>>,
+    >,
+}
+
+impl RecordingProvider {
+    fn new(responses: Vec<CompletionResponse>) -> Self {
+        Self {
+            responses: Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::from(responses),
+            )),
+            snapshots: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    fn snapshots(&self) -> Vec<(Vec<String>, String)> {
+        self.snapshots.lock().unwrap().clone()
+    }
+}
+
+impl ChatCompletionProvider for RecordingProvider {
+    fn complete(
+        &self,
+        request: CompletionRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        CompletionResponse,
+                        shirley_show::infra::groq::error::ProviderError,
+                    >,
+                > + Send,
+        >,
+    > {
+        self.snapshots.lock().unwrap().push((
+            request.tools.iter().map(|t| t.name.clone()).collect(),
+            request.system_prompt,
+        ));
+        let next = self
+            .responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(CompletionResponse {
+                content: Some("Final por defecto".to_string()),
+                tool_calls: vec![],
+            });
+        Box::pin(async move { Ok(next) })
+    }
+}
+
+async fn post_agent_chat(app: &axum::Router, payload: Value) -> Value {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/agent/chat")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn test_chat_api_global_agent_separates_from_any_repertoire_into_named_destination() {
+    let (_app, state, _tmp) = setup_test_app();
+    let fake_sep = Arc::new(FakeVocalSeparator::new());
+    let state = state.with_vocal_separator(fake_sep.clone());
+    let source = state.create_presentation.execute("Show Origen").unwrap();
+    let destination = state.create_presentation.execute("Show Destino").unwrap();
+
+    // The song lives in a repertoire that is NOT the destination, and the chat
+    // request has no presentation_id at all (main screen).
+    let (stage_id, stage_path) = state.storage.create_staging_file().unwrap();
+    std::fs::write(&stage_path, b"fake mp3 source").unwrap();
+    let source_track = state
+        .upload_track
+        .execute(
+            &source.id,
+            "Gitana",
+            &stage_id,
+            AudioFormat::Mp3,
+            15,
+        )
+        .unwrap();
+
+    let provider = Arc::new(RecordingProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_global_list".to_string(),
+                name: "list_presentations".to_string(),
+                arguments: json!({}).to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_global_source".to_string(),
+                name: "get_presentation".to_string(),
+                arguments: json!({ "presentation_id": "Show Origen" }).to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_global_sep".to_string(),
+                name: "separate_vocals".to_string(),
+                arguments: json!({
+                    "mode": "chorus",
+                    "track_id": source_track.id
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_global_add".to_string(),
+                name: "add_track_from_staged".to_string(),
+                arguments: json!({
+                    "presentation_id": "Show Destino",
+                    "title": "Gitana (Coros)"
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: Some("Listo: Gitana (Coros) está en Show Destino.".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+    let state = state.with_agent_provider(
+        Some(provider.clone()),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state.clone());
+
+    let payload = json!({
+        "message": "Separa los coros de Gitana y guárdalo en Show Destino",
+    });
+    let result = post_agent_chat(&app, payload).await;
+
+    assert_eq!(result["active_presentation_id"], destination.id);
+    assert!(result["staged_audio_id"].is_null());
+    let actions = result["actions_taken"].as_array().unwrap();
+    assert_eq!(
+        actions.iter().map(|a| a["tool"].as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["separate_vocals", "add_track_from_staged"],
+    );
+
+    let destination_items = state.item_repo.list_by_presentation(&destination.id).unwrap();
+    assert_eq!(destination_items.len(), 1, "the result must land in the named repertoire");
+    match &destination_items[0].payload {
+        shirley_show::domain::show_item::ShowItemPayload::Track(track) => {
+            assert_eq!(track.title, "Gitana (Coros)");
+        }
+        _ => panic!("expected a track"),
+    }
+    assert_eq!(state.item_repo.list_by_presentation(&source.id).unwrap().len(), 1);
+    assert_eq!(
+        fake_sep.execution_count.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+
+    let snapshots = provider.snapshots();
+    let first_tools = &snapshots[0].0;
+    for tool in [
+        "list_presentations",
+        "get_presentation",
+        "add_track_from_staged",
+        "separate_vocals",
+    ] {
+        assert!(first_tools.iter().any(|t| t == tool), "main-screen turn must offer {tool}: {first_tools:?}");
+    }
+    let prompt = &snapshots[0].1;
+    assert!(prompt.contains("list_presentations"), "prompt must explain how to find the source and destination: {prompt}");
+    assert!(prompt.contains("nombre"), "prompt must resolve the destination by name: {prompt}");
+}
+
+#[tokio::test]
+async fn test_chat_api_global_agent_asks_for_destination_when_it_is_not_named() {
+    let (_app, state, _tmp) = setup_test_app();
+    let fake_sep = Arc::new(FakeVocalSeparator::new());
+    let state = state.with_vocal_separator(fake_sep.clone());
+    state.create_presentation.execute("Show Uno").unwrap();
+    state.create_presentation.execute("Show Dos").unwrap();
+
+    let provider = Arc::new(RecordingProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_ask_list".to_string(),
+                name: "list_presentations".to_string(),
+                arguments: json!({}).to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: Some(
+                "¿En qué presentación guardo la pista? Tengo Show Uno y Show Dos.".to_string(),
+            ),
+            tool_calls: vec![],
+        },
+    ]));
+    let state = state.with_agent_provider(
+        Some(provider.clone()),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state.clone());
+
+    let result = post_agent_chat(
+        &app,
+        json!({ "message": "Separa los coros de Gitana" }),
+    )
+    .await;
+
+    let message = result["message"].as_str().unwrap();
+    assert!(message.contains("Show Uno") && message.contains("Show Dos"));
+    assert_eq!(result["actions_taken"].as_array().unwrap().len(), 0);
+    assert!(result["active_presentation_id"].is_null());
+    assert_eq!(
+        fake_sep.execution_count.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "an unconfirmed destination must not start the GPU"
+    );
+    let tools = &provider.snapshots()[0].0;
+    for tool in [
+        "list_presentations",
+        "get_presentation",
+        "add_track_from_staged",
+        "separate_vocals",
+    ] {
+        assert!(tools.iter().any(|t| t == tool), "missing {tool}: {tools:?}");
+    }
+}
+
+#[tokio::test]
+async fn test_chat_api_main_screen_youtube_turn_keeps_downloader_and_adds_separation() {
+    let (_app, state, _tmp) = setup_test_app();
+    let provider = Arc::new(RecordingProvider::new(vec![CompletionResponse {
+        content: Some("Dime en qué show lo guardo.".to_string()),
+        tool_calls: vec![],
+    }]));
+    let state = state.with_agent_provider(
+        Some(provider.clone()),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state);
+
+    let result = post_agent_chat(
+        &app,
+        json!({
+            "message": "Descarga https://youtu.be/dQw4w9WgXcQ y separa las voces",
+        }),
+    )
+    .await;
+
+    assert_eq!(result["message"], "Dime en qué show lo guardo.");
+    let tools = &provider.snapshots()[0].0;
+    for tool in [
+        "download_youtube_track",
+        "list_presentations",
+        "get_presentation",
+        "add_track_from_staged",
+        "separate_vocals",
+    ] {
+        assert!(tools.iter().any(|t| t == tool), "missing {tool}: {tools:?}");
+    }
+}
+
+#[tokio::test]
+async fn test_chat_api_presentation_id_keeps_the_existing_audio_tool_routing() {
+    let (_app, state, _tmp) = setup_test_app();
+    let pres = state.create_presentation.execute("Show Fijo").unwrap();
+    let provider = Arc::new(RecordingProvider::new(vec![CompletionResponse {
+        content: Some("Listo.".to_string()),
+        tool_calls: vec![],
+    }]));
+    let state = state.with_agent_provider(
+        Some(provider.clone()),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state);
+
+    let result = post_agent_chat(
+        &app,
+        json!({
+            "message": "Descarga https://youtu.be/dQw4w9WgXcQ",
+            "presentation_id": pres.id,
+        }),
+    )
+    .await;
+
+    assert_eq!(result["active_presentation_id"], pres.id);
+    assert_eq!(result["message"], "Listo.");
+    let mut tools = provider.snapshots()[0].0.clone();
+    tools.sort();
+    assert_eq!(
+        tools,
+        vec![
+            "add_track_from_staged".to_string(),
+            "download_youtube_track".to_string(),
+            "get_presentation".to_string(),
+        ],
+        "an explicit presentation_id must keep today's narrow YouTube routing"
+    );
+    assert!(provider.snapshots()[0].1.contains(&pres.id));
+}
+
+struct FakeYouTubeDownloader;
+
+impl YoutubeDownloader for FakeYouTubeDownloader {
+    fn download(
+        &self,
+        _url: YouTubeUrl,
+        target: YoutubeDownloadTarget,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<DownloadedYoutubeAudio, shirley_show::ports::youtube_downloader::YoutubeDownloadError>,
+                > + Send,
+        >,
+    > {
+        Box::pin(async move {
+            let part = target.staging_dir.join(format!("{}.part", target.stage_id));
+            std::fs::write(part, b"fake downloaded mp3").unwrap();
+            Ok(DownloadedYoutubeAudio {
+                title: "Video de la usuaria".to_string(),
+                duration_secs: 120,
+                size_bytes: 19,
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_chat_api_global_agent_saves_youtube_audio_into_named_destination() {
+    let (_app, state, _tmp) = setup_test_app();
+    let state = state.with_youtube_downloader(Arc::new(FakeYouTubeDownloader));
+    let destination = state
+        .create_presentation
+        .execute("Show YouTube")
+        .unwrap();
+
+    let provider = Arc::new(RecordingProvider::new(vec![
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_yt_list".to_string(),
+                name: "list_presentations".to_string(),
+                arguments: json!({}).to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_yt_dest".to_string(),
+                name: "get_presentation".to_string(),
+                arguments: json!({ "presentation_id": "Show YouTube" }).to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_yt_download".to_string(),
+                name: "download_youtube_track".to_string(),
+                arguments: json!({ "url": "https://youtu.be/dQw4w9WgXcQ" }).to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "call_yt_add".to_string(),
+                name: "add_track_from_staged".to_string(),
+                arguments: json!({
+                    "presentation_id": "Show YouTube",
+                    "title": "Video de la usuaria"
+                })
+                .to_string(),
+            }],
+        },
+        CompletionResponse {
+            content: Some("Listo.".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+    let state = state.with_agent_provider(
+        Some(provider),
+        AgentLimits::default(),
+        "openai/gpt-oss-120b".to_string(),
+    );
+    let app = create_router(state.clone());
+
+    let result = post_agent_chat(
+        &app,
+        json!({
+            "message": "Descarga https://youtu.be/dQw4w9WgXcQ y ponlo en Show YouTube",
+        }),
+    )
+    .await;
+
+    assert_eq!(result["active_presentation_id"], destination.id);
+    let actions = result["actions_taken"].as_array().unwrap();
+    assert_eq!(
+        actions.iter().map(|a| a["tool"].as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["download_youtube_track", "add_track_from_staged"],
+        "a named destination must not interrupt the turn after the download"
+    );
+    let items = state.item_repo.list_by_presentation(&destination.id).unwrap();
+    assert_eq!(items.len(), 1);
 }

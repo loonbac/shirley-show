@@ -459,7 +459,15 @@ impl AgentChat {
 
             let is_audio_operation = mentions_audio;
             let tools = if mentions_audio {
-                let allowed = crate::agent::tool_routing::audio_turn_tool_names(audio_kind);
+                // From the main screen there is no `presentation_id`: the model
+                // needs the catalogue readers to locate both the song (in any
+                // repertoire) and the destination named by the user, plus the
+                // separation tool. With a destination the established set is
+                // returned untouched.
+                let allowed = crate::agent::tool_routing::audio_turn_tool_names_for_turn(
+                    audio_kind,
+                    has_active_destination,
+                );
                 get_tool_definitions()
                     .into_iter()
                     .filter(|tool| allowed.contains(&tool.name.as_str()))
@@ -655,7 +663,13 @@ impl AgentChat {
                             action.status == "success"
                                 && (action.tool == "add_track_from_staged"
                                     || (action.tool == "download_youtube_track"
-                                        && !has_confirmed_destination))
+                                        && !has_confirmed_destination
+                                        // Without an open repertoire the user may
+                                        // still name the destination in the chat.
+                                        // Once get_presentation resolved it, the
+                                        // turn must continue to add the track
+                                        // instead of asking again for a show.
+                                        && turn_context.confirmed_destination_id.is_none()))
                         })
                     {
                         return AgentChatOutput {
