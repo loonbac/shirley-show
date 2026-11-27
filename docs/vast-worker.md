@@ -89,6 +89,38 @@ the CUDA 12.4 hosts this image targets. A constraint file pins `torch` for the
 rest of the build, and a build-time assertion fails the image if
 `torch.__version__` or `torch.version.cuda` ever drift from `2.5.1` / `12.4`.
 
+## How the adapter drives the image (T2)
+
+`src/infra/vocal/vast_vocal_separator.rs` rents an instance through the Vast
+REST API, generates an ed25519 key under `<data>/vast/ssh` (mode `600`), registers
+the public key with `POST /ssh/`, and then uses plain `ssh`/`scp`:
+
+1. `scp` the audio to `/content/input_audio`.
+2. `ssh ... "bash -lc 'cd /content && python -'"` with the **unchanged**
+   `generate_remote_script` on stdin. The login shell is deliberate: it is what
+   loads `/etc/profile.d/venv.sh` in this image (see L11 of the task log).
+3. `scp` `/content/colab_sep_work/output.mp3` back and verify SHA-256 and
+   ffprobe duration exactly as the Colab adapter does.
+
+Every HTTP and SSH call has its own timeout. The instance is labelled
+`shirley-show`, kept warm for ten minutes after the last separation (including
+a failed attempt while the machine proves healthy), and destroyed at once when
+a health probe proves it dead. On application boot, `reap_orphans_on_boot()`
+deletes every instance with that label so a hard restart cannot leave an orphan
+billing; a periodic safety reaper does the same every five minutes for
+instances that are not the current warm lease. The rent/pipeline work runs in
+a detached task, so dropping the request future (agent deadline or client
+disconnect) cannot skip the destroy or the retention timer; a rental that lands
+after cancellation or its deadline is destroyed immediately. No key, token or
+API credential is ever written to a log line.
+
+The live Vast response shape is authoritative: `PUT /asks/{id}/` returns the
+new instance id in `new_contract`; `GET /instances/{id}/` wraps the instance in
+`{"instances": {...}}`, reports `actual_status` (`loading`, `running`,
+`exited`, ...) and exposes direct SSH as trimmed `public_ipaddr` plus the string
+`ports["22/tcp"][0].HostPort`. The adapter also accepts unwrapped responses,
+legacy `status`, and proxy `ssh_host`/`ssh_port` when the direct port is absent.
+
 ## How it is built
 
 Locally, without pushing:

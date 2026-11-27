@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip \
         openssh-client \
         sqlite3 \
+        openssl \
         curl ca-certificates \
     && pip install --no-cache-dir --break-system-packages yt-dlp \
     && rm -rf /var/lib/apt/lists/*

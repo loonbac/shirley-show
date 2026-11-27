@@ -41,7 +41,9 @@ pub enum VocalSeparationError {
     SeparationTimeout,
     #[error("El archivo de credenciales de Google Colab no existe o no contiene un token válido")]
     ColabTokenMissing,
-    #[error("Google Colab no está disponible o la cuota de GPU está agotada")]
+    #[error(
+        "No hay GPU disponible ahora mismo en los proveedores; inténtalo de nuevo en unos minutos."
+    )]
     ColabUnavailable,
     #[error("Falló el proceso de separación vocal")]
     SeparationFailed,
@@ -91,7 +93,7 @@ impl VocalSeparationError {
                 "El archivo de credenciales de Google Colab no existe o no contiene un token válido"
             }
             Self::ColabUnavailable => {
-                "Google Colab no está disponible o la cuota de GPU está agotada"
+                "No hay GPU disponible ahora mismo en los proveedores; inténtalo de nuevo en unos minutos."
             }
             Self::SeparationFailed => "Falló el proceso de separación vocal",
             Self::TransferFailed => {
@@ -108,6 +110,27 @@ pub trait VocalSeparator: Send + Sync {
 
     fn probe(&self, _timeout: Duration) -> Pin<Box<dyn Future<Output = bool> + Send>> {
         Box::pin(async { true })
+    }
+
+    /// Whether a healthy, still-rented instance is available for immediate reuse.
+    ///
+    /// Backends without warm capacity answer `false`; the fallback composition
+    /// uses this to skip a Colab assignment attempt when a GPU is already paid
+    /// for. The default keeps every existing implementation unchanged.
+    fn warm_instance_available(&self) -> Pin<Box<dyn Future<Output = bool> + Send>> {
+        Box::pin(async { false })
+    }
+
+    /// Same as [`Self::separate`], but tells a backend how long it may spend
+    /// acquiring a GPU. Backends that cannot distinguish assignment from the
+    /// pipeline keep their existing behaviour; this default is what every
+    /// current implementation except Colab uses.
+    fn separate_with_assignment_budget(
+        &self,
+        request: VocalSeparationRequest,
+        _budget: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<SeparatedAudio, VocalSeparationError>> + Send>> {
+        self.separate(request)
     }
 
     fn separate(

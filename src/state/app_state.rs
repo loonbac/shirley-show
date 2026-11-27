@@ -12,7 +12,9 @@ use crate::infra::sqlite::presentation_repository::SqlitePresentationRepository;
 use crate::infra::sqlite::presentation_summary_repository::PresentationSummaryRepository;
 use crate::infra::sqlite::show_item_repository::SqliteShowItemRepository;
 use crate::infra::sqlite::ticketing_repository::SqliteTicketingRepository;
-use crate::infra::vocal::{ColabVocalSeparator, ColabVocalSeparatorConfig};
+use crate::infra::vocal::{
+    ColabVocalSeparator, ColabVocalSeparatorConfig, FallbackVocalSeparator,
+};
 use crate::infra::youtube::{ProcessYoutubeDownloader, ProcessYoutubeDownloaderConfig};
 use crate::ports::chat_completion_provider::ChatCompletionProvider;
 use crate::ports::ticketing::EventRepository;
@@ -158,8 +160,9 @@ impl AppState {
         ));
 
         let gpu_semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        // Separation always runs on Colab (S1). No other backend participates
-        // in the production path.
+        // Colab remains the primary backend; Vast only joins the path when a
+        // VAST_API_KEY is configured (S1/S2). Without the key the composed
+        // separator is a transparent pass-through to the previous behaviour.
         let colab_config = ColabVocalSeparatorConfig::from_env(
             storage.vocal_work_dir().to_path_buf(),
             gpu_semaphore.clone(),
@@ -181,9 +184,15 @@ impl AppState {
             .min(crate::use_cases::separate_vocals::DEFAULT_SEPARATION_TIMEOUT);
         let separation_timeout =
             std::time::Duration::from_secs(colab_config.timeout_secs).min(turn_separation_budget);
-        let colab_separator = Arc::new(ColabVocalSeparator::new(colab_config));
-
-        let vocal_separator: Arc<dyn VocalSeparator> = colab_separator;
+        let colab_separator: Arc<dyn VocalSeparator> =
+            Arc::new(ColabVocalSeparator::new(colab_config));
+        let vocal_separator: Arc<dyn VocalSeparator> = Arc::new(
+            FallbackVocalSeparator::from_env(
+                colab_separator,
+                config.data_dir.clone(),
+                gpu_semaphore.clone(),
+            ),
+        );
         // Vigilante de runtimes huérfanos: si el release falla en silencio, nadie
         // reintenta el apagado y la GPU sigue facturando hasta que Colab la
         // expire. Se le pasa el semáforo de GPU como señal de trabajo en curso.
