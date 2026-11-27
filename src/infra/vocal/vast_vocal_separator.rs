@@ -81,6 +81,51 @@ fn sanitized_stderr(stderr: &[u8], secret: &str) -> String {
     out
 }
 
+/// One ssh/scp invocation failed. Keeping the exit code and the sanitized
+/// stderr tail together lets the caller decide whether this is the transient
+/// sshd-not-ready window or a real transfer failure.
+#[derive(Debug)]
+enum CommandFailure {
+    Exit { code: i32, stderr: String },
+    Spawn(String),
+    Timeout,
+}
+
+impl CommandFailure {
+    fn detail(&self) -> String {
+        match self {
+            Self::Exit { code, stderr } => format!("exit={code} stderr={stderr}"),
+            Self::Spawn(error) => format!("spawn error={error}"),
+            Self::Timeout => "timed out".to_string(),
+        }
+    }
+
+    fn tail(&self) -> String {
+        match self {
+            Self::Exit { stderr, .. } => stderr.clone(),
+            Self::Spawn(error) => format!("spawn error={error}"),
+            Self::Timeout => "timed out".to_string(),
+        }
+    }
+
+    /// The sshd on a freshly started Vast host briefly refuses, closes or
+    /// resets connections while it comes up. Exit 255 alone is not enough:
+    /// authentication failures must not be retried forever.
+    fn is_transient_connection(&self) -> bool {
+        let Self::Exit { code, stderr } = self else {
+            return false;
+        };
+        *code == 255
+            && [
+                "connection refused",
+                "connection closed",
+                "connection reset",
+            ]
+            .iter()
+            .any(|marker| stderr.to_ascii_lowercase().contains(marker))
+    }
+}
+
 /// 24 GB-class cards that run these RoFormers economically. No Blackwell:
 /// the product decision is cheapest adequate GPU, not the fastest one. The
 /// canonical spellings are also sent to Vast's `gpu_name.in` filter.
@@ -629,6 +674,7 @@ impl VastVocalSeparator {
         &self,
         offer: &Offer,
         deadline: Instant,
+        private_key: &Path,
     ) -> Result<Lease, VocalSeparationError> {
         let id = offer
             .id()
@@ -681,13 +727,23 @@ impl VastVocalSeparator {
                 }
                 if state == "running" {
                     if let Some((host, port)) = connection_details(&status) {
-                        vast_info!("instance {instance_id} ssh ready at {host}:{port}");
-                        return Ok(Lease {
-                            instance_id,
-                            host,
+                        let candidate = Lease {
+                            instance_id: instance_id.clone(),
+                            host: host.clone(),
                             port,
                             last_used: Instant::now(),
-                        });
+                        };
+                        // Vast flips to `running` before sshd is reachable.
+                        // Readiness only means a real ssh command succeeded.
+                        if self
+                            .wait_for_ssh(&instance_id, &candidate, private_key, deadline)
+                            .await
+                            .is_err()
+                        {
+                            break; // destroy below and try the next offer
+                        }
+                        vast_info!("instance {instance_id} ssh ready at {host}:{port}");
+                        return Ok(candidate);
                     }
                     vast_warn!("instance {instance_id} running without ssh details");
                 }
@@ -706,6 +762,7 @@ impl VastVocalSeparator {
         &self,
         deadline: Instant,
         cancelled: &AtomicBool,
+        private_key: &Path,
     ) -> Result<Lease, VocalSeparationError> {
         for offer in self.offers().await? {
             if Instant::now() >= deadline || cancelled.load(Ordering::SeqCst) {
@@ -716,7 +773,7 @@ impl VastVocalSeparator {
                     .config
                     .launch_timeout
                     .min(deadline.saturating_duration_since(Instant::now()));
-            match self.rent_offer(&offer, rent_deadline).await {
+            match self.rent_offer(&offer, rent_deadline, private_key).await {
                 Ok(lease) => return Ok(lease),
                 Err(_) => {
                     vast_warn!("offer {} could not be rented; trying next", offer.id().unwrap_or_default());
@@ -808,13 +865,16 @@ impl VastVocalSeparator {
     /// Only the port flag differs between the two OpenSSH tools: scp uses
     /// capital `-P`, while `-p` means "preserve times". Everything else is
     /// shared, including `root@HOST` being a *destination prefix* for scp.
+    /// Readiness probes use the shorter connect timeout so a dead host is
+    /// detected within the launch deadline.
     fn transport_args(
         &self,
         private_key: &Path,
         port_flag: &str,
         port: u16,
+        connect_timeout: Duration,
     ) -> Vec<String> {
-        let connect_secs = self.config.http_timeout.as_secs().max(1).to_string();
+        let connect_secs = connect_timeout.as_secs().max(1).to_string();
         vec![
             "-i".to_string(),
             private_key.to_string_lossy().into_owned(),
@@ -832,7 +892,7 @@ impl VastVocalSeparator {
     }
 
     fn ssh_args(&self, lease: &Lease, private_key: &Path) -> Vec<String> {
-        let mut args = self.transport_args(private_key, "-p", lease.port);
+        let mut args = self.transport_args(private_key, "-p", lease.port, self.config.http_timeout);
         args.push(format!("root@{}", lease.host));
         args
     }
@@ -840,7 +900,28 @@ impl VastVocalSeparator {
     /// Both transfers are single files, so no `-r`. Callers pass the remote
     /// operand as `root@HOST:/path`, never as a bare `root@HOST`.
     fn scp_args(&self, lease: &Lease, private_key: &Path) -> Vec<String> {
-        self.transport_args(private_key, "-P", lease.port)
+        self.transport_args(private_key, "-P", lease.port, self.config.http_timeout)
+    }
+
+    /// Runs one child and converts its outcome into a value the retry and
+    /// probe loops can inspect without losing the sanitized stderr tail.
+    async fn command_output(
+        &self,
+        cmd: &mut Command,
+        timeout: Duration,
+    ) -> Result<Output, CommandFailure> {
+        match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(output)) if output.status.success() => Ok(output),
+            Ok(Ok(output)) => Err(CommandFailure::Exit {
+                code: output.status.code().unwrap_or(-1),
+                stderr: sanitized_stderr(&output.stderr, &self.config.api_key),
+            }),
+            Ok(Err(error)) => Err(CommandFailure::Spawn(sanitized_body(
+                &error.to_string(),
+                &self.config.api_key,
+            ))),
+            Err(_) => Err(CommandFailure::Timeout),
+        }
     }
 
     async fn scp(
@@ -852,34 +933,40 @@ impl VastVocalSeparator {
         timeout: Duration,
         step: &str,
     ) -> Result<(), VocalSeparationError> {
-        let mut cmd = Command::new(&self.config.scp_bin);
-        cmd.kill_on_drop(true);
-        cmd.args(self.scp_args(lease, private_key))
-            .arg(source)
-            .arg(destination);
-        cmd.stdin(Stdio::null());
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::piped());
-        match tokio::time::timeout(timeout, cmd.output()).await {
-            Ok(Ok(output)) if output.status.success() => Ok(()),
-            Ok(Ok(output)) => {
-                vast_warn!(
-                    "{step} failed: exit={} stderr={}",
-                    output.status.code().unwrap_or(-1),
-                    sanitized_stderr(&output.stderr, &self.config.api_key)
-                );
-                Err(VocalSeparationError::SeparationFailed)
-            }
-            Ok(Err(error)) => {
-                vast_warn!(
-                    "{step} failed: spawn error={}",
-                    sanitized_body(&error.to_string(), &self.config.api_key)
-                );
-                Err(VocalSeparationError::SeparationFailed)
-            }
-            Err(_) => {
+        let started = Instant::now();
+        let mut attempt = 0;
+        loop {
+            let mut cmd = Command::new(&self.config.scp_bin);
+            cmd.kill_on_drop(true);
+            cmd.args(self.scp_args(lease, private_key))
+                .arg(source)
+                .arg(destination);
+            cmd.stdin(Stdio::null());
+            cmd.stdout(Stdio::null());
+            cmd.stderr(Stdio::piped());
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
                 vast_warn!("{step} timed out after {}s", timeout.as_secs());
-                Err(VocalSeparationError::SeparationFailed)
+                return Err(VocalSeparationError::SeparationFailed);
+            }
+            match self.command_output(&mut cmd, remaining).await {
+                Ok(_) => return Ok(()),
+                Err(failure) => {
+                    let retry = failure.is_transient_connection()
+                        && attempt == 0
+                        && !self.config.transient_retry_delay.is_zero();
+                    if retry {
+                        vast_info!(
+                            "{step} transient connection failure, retrying: {}",
+                            failure.detail()
+                        );
+                        tokio::time::sleep(self.config.transient_retry_delay).await;
+                        attempt += 1;
+                        continue;
+                    }
+                    vast_warn!("{step} failed: {}", failure.detail());
+                    return Err(VocalSeparationError::SeparationFailed);
+                }
             }
         }
     }
@@ -889,41 +976,128 @@ impl VastVocalSeparator {
         lease: &Lease,
         private_key: &Path,
         remote_command: &str,
-        stdin_file: Option<std::fs::File>,
+        stdin_path: Option<&Path>,
         timeout: Duration,
         step: &str,
     ) -> Result<Output, VocalSeparationError> {
+        let started = Instant::now();
+        let mut attempt = 0;
+        loop {
+            let stdin = match stdin_path {
+                Some(path) => match std::fs::File::open(path) {
+                    Ok(file) => Stdio::from(file),
+                    Err(_) => {
+                        vast_warn!("{step} failed: cannot open stdin file");
+                        return Err(VocalSeparationError::SeparationFailed);
+                    }
+                },
+                None => Stdio::null(),
+            };
+            let mut cmd = Command::new(&self.config.ssh_bin);
+            cmd.kill_on_drop(true);
+            let mut args = self.ssh_args(lease, private_key);
+            args.push(remote_command.to_string());
+            cmd.args(&args);
+            cmd.stdin(stdin);
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                vast_warn!("{step} timed out after {}s", timeout.as_secs());
+                return Err(VocalSeparationError::SeparationFailed);
+            }
+            match self.command_output(&mut cmd, remaining).await {
+                Ok(output) => return Ok(output),
+                Err(failure) => {
+                    let retry = failure.is_transient_connection()
+                        && attempt == 0
+                        && !self.config.transient_retry_delay.is_zero();
+                    if retry {
+                        vast_info!(
+                            "{step} transient connection failure, retrying: {}",
+                            failure.detail()
+                        );
+                        tokio::time::sleep(self.config.transient_retry_delay).await;
+                        attempt += 1;
+                        continue;
+                    }
+                    vast_warn!("{step} failed: {}", failure.detail());
+                    return Err(VocalSeparationError::SeparationFailed);
+                }
+            }
+        }
+    }
+
+    /// A single `ssh ... true` attempt. Unlike `ssh_command`, its failures
+    /// are ordinary probe results: they are logged by the caller at a bounded
+    /// rate, not as pipeline warnings.
+    async fn ssh_probe_once(
+        &self,
+        lease: &Lease,
+        private_key: &Path,
+    ) -> Result<(), CommandFailure> {
         let mut cmd = Command::new(&self.config.ssh_bin);
         cmd.kill_on_drop(true);
-        let mut args = self.ssh_args(lease, private_key);
-        args.push(remote_command.to_string());
+        let mut args = self.transport_args(
+            private_key,
+            "-p",
+            lease.port,
+            self.config.ssh_probe_connect_timeout,
+        );
+        args.push(format!("root@{}", lease.host));
+        args.push("true".to_string());
         cmd.args(&args);
-        cmd.stdin(match stdin_file {
-            Some(file) => Stdio::from(file),
-            None => Stdio::null(),
-        });
-        cmd.stdout(Stdio::piped());
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::piped());
-        match tokio::time::timeout(timeout, cmd.output()).await {
-            Ok(Ok(output)) if output.status.success() => Ok(output),
-            Ok(Ok(output)) => {
+        let timeout = self.config.ssh_probe_connect_timeout + Duration::from_secs(3);
+        self.command_output(&mut cmd, timeout).await.map(|_| ())
+    }
+
+    /// Polls ssh until it accepts, bounded by this offer's remaining launch
+    /// deadline. Failures are logged on attempts 1, 3, 6, ... so a slow host
+    /// cannot flood the log while the deadline runs out.
+    async fn wait_for_ssh(
+        &self,
+        instance_id: &str,
+        lease: &Lease,
+        private_key: &Path,
+        deadline: Instant,
+    ) -> Result<Duration, VocalSeparationError> {
+        let started = Instant::now();
+        let mut attempt = 0usize;
+        let mut next = started;
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
                 vast_warn!(
-                    "{step} failed: exit={} stderr={}",
-                    output.status.code().unwrap_or(-1),
-                    sanitized_stderr(&output.stderr, &self.config.api_key)
+                    "instance {instance_id} ssh never accepted before deadline ({attempt} probes)"
                 );
-                Err(VocalSeparationError::SeparationFailed)
+                return Err(VocalSeparationError::ColabUnavailable);
             }
-            Ok(Err(error)) => {
-                vast_warn!(
-                    "{step} failed: spawn error={}",
-                    sanitized_body(&error.to_string(), &self.config.api_key)
-                );
-                Err(VocalSeparationError::SeparationFailed)
+            if now < next {
+                tokio::time::sleep((next - now).min(deadline - now)).await;
+                continue;
             }
-            Err(_) => {
-                vast_warn!("{step} timed out after {}s", timeout.as_secs());
-                Err(VocalSeparationError::SeparationFailed)
+            attempt += 1;
+            match self.ssh_probe_once(lease, private_key).await {
+                Ok(()) => {
+                    let elapsed = started.elapsed();
+                    vast_info!(
+                        "ssh accepted after {}ms (attempt {attempt})",
+                        elapsed.as_millis()
+                    );
+                    return Ok(elapsed);
+                }
+                Err(failure) => {
+                    if attempt == 1 || attempt % 3 == 0 {
+                        vast_info!(
+                            "ssh probe attempt {attempt} failed: {}",
+                            failure.tail()
+                        );
+                    }
+                    next = Instant::now() + self.config.ssh_probe_interval;
+                }
             }
         }
     }
@@ -1016,11 +1190,9 @@ impl VastVocalSeparator {
         request: &VocalSeparationRequest,
         deadline: Instant,
     ) -> Result<SeparatedAudio, VocalSeparationError> {
-        let left = || {
-            deadline
-                .saturating_duration_since(Instant::now())
-                .min(self.config.launch_timeout)
-        };
+        // The launch timeout bounds renting, not the transfer itself: a
+        // separation started close to it still owns the caller's deadline.
+        let left = || deadline.saturating_duration_since(Instant::now());
 
         // 1. Upload audio. The worker image has no install step; the script is
         //    the exact one used for Colab, so both paths share its contract.
@@ -1065,17 +1237,13 @@ impl VastVocalSeparator {
 
         // A login shell is required: Vast replaces the image entrypoint, and the
         // worker image exports its venv PATH from /etc/profile.d/venv.sh.
-        let script_file = std::fs::File::open(&script_path).map_err(|_| {
-            vast_warn!("script failed: cannot open local script file");
-            VocalSeparationError::SeparationFailed
-        })?;
         let script_started = Instant::now();
         let output = self
             .ssh_command(
                 lease,
                 private_key,
                 "bash -lc 'cd /content && python -'",
-                Some(script_file),
+                Some(&script_path),
                 left(),
                 "script",
             )
@@ -1174,9 +1342,10 @@ impl VastVocalSeparator {
         })
     }
 
-    /// True when an instance from an earlier separation is still rented and
-    /// inside the ten-minute retention window. A dead instance is destroyed at
-    /// once instead of being offered to the next request.
+    /// True when an instance from an earlier separation is still rented,
+    /// inside the ten-minute retention window AND accepting ssh. The API's
+    /// `running` status alone is not enough (see L36): a warm lease whose
+    /// sshd is unreachable is destroyed so the next request rents fresh.
     pub async fn warm_instance_available(&self) -> bool {
         let lease = {
             let guard = self.lease.lock().await;
@@ -1185,11 +1354,44 @@ impl VastVocalSeparator {
                 _ => return false,
             }
         };
-        if self.instance_is_running(&lease.instance_id).await {
-            vast_info!("reusing warm instance {}", lease.instance_id);
-            return true;
+        if !self.instance_is_running(&lease.instance_id).await {
+            vast_warn!("warm instance {} is not running; destroying", lease.instance_id);
+            let _ = self.destroy_instance(&lease.instance_id).await;
+            self.forget_instance(&lease.instance_id).await;
+            return false;
         }
-        vast_warn!("warm instance {} is not running; destroying", lease.instance_id);
+        let Ok((private_key, _)) = self.ensure_ssh_key().await else {
+            vast_warn!("warm instance {} ssh key unavailable; not reusing", lease.instance_id);
+            return false;
+        };
+        for attempt in 1..=2 {
+            match self.ssh_probe_once(&lease, &private_key).await {
+                Ok(()) => {
+                    let mut guard = self.lease.lock().await;
+                    if let Some(current) = guard.as_mut()
+                        && current.instance_id == lease.instance_id
+                    {
+                        current.last_used = Instant::now();
+                    }
+                    drop(guard);
+                    vast_info!("reusing warm instance {}", lease.instance_id);
+                    return true;
+                }
+                Err(failure) => vast_info!(
+                    "warm instance {} ssh probe attempt {attempt} failed: {}",
+                    lease.instance_id,
+                    failure.tail()
+                ),
+            }
+            if attempt < 2 {
+                tokio::time::sleep(self.config.ssh_probe_interval.min(Duration::from_secs(1)))
+                    .await;
+            }
+        }
+        vast_warn!(
+            "warm instance {} does not accept ssh; destroying",
+            lease.instance_id
+        );
         let _ = self.destroy_instance(&lease.instance_id).await;
         self.forget_instance(&lease.instance_id).await;
         false
@@ -1235,7 +1437,7 @@ impl VastVocalSeparator {
         let preflight = self
             .run_ffprobe_duration(
                 &request.source_path,
-                request.timeout.min(Duration::from_secs(5)),
+                request.timeout.min(self.config.preflight_timeout),
             )
             .await?;
         if preflight > 600.0 {
@@ -1253,10 +1455,10 @@ impl VastVocalSeparator {
                     vast_info!("using already rented instance {}", lease.instance_id);
                     lease
                 }
-                None => self.acquire_instance(deadline, &cancelled).await?,
+                None => self.acquire_instance(deadline, &cancelled, &private_key).await?,
             }
         } else {
-            self.acquire_instance(deadline, &cancelled).await?
+            self.acquire_instance(deadline, &cancelled, &private_key).await?
         };
 
         // A rental that lands after the deadline or after the caller went away

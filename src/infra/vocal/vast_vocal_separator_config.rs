@@ -31,6 +31,14 @@ pub const DEFAULT_LAUNCH_TIMEOUT: Duration = Duration::from_secs(150);
 pub const FAST_INET_DOWN_MBPS: f64 = 1000.0;
 pub const MIN_INET_DOWN_MBPS: f64 = 500.0;
 pub const FAST_OFFER_MIN_COUNT: usize = 5;
+/// Vast can report `running` before the container's sshd accepts connections.
+/// Probe with a short connect timeout at this interval until the launch
+/// deadline expires.
+pub const DEFAULT_SSH_PROBE_INTERVAL: Duration = Duration::from_secs(3);
+pub const DEFAULT_SSH_PROBE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// A refused/closed/reset connection during scp or script ssh is often just
+/// the sshd coming up; retry the operation once after this pause.
+pub const DEFAULT_TRANSIENT_RETRY_DELAY: Duration = Duration::from_secs(3);
 
 /// How long a Vast instance stays warm after the last separation.
 pub const VAST_SESSION_IDLE_RETENTION: Duration = Duration::from_secs(600);
@@ -57,6 +65,10 @@ pub struct VastVocalSeparatorConfig {
     pub launch_timeout: Duration,
     pub retention: Duration,
     pub poll_interval: Duration,
+    pub preflight_timeout: Duration,
+    pub ssh_probe_interval: Duration,
+    pub ssh_probe_connect_timeout: Duration,
+    pub transient_retry_delay: Duration,
     /// GPU assignment window granted to Colab before Vast takes over.
     pub fallback_after: Duration,
     pub gpu: Arc<Semaphore>,
@@ -106,6 +118,10 @@ impl VastVocalSeparatorConfig {
             launch_timeout: DEFAULT_LAUNCH_TIMEOUT,
             retention: VAST_SESSION_IDLE_RETENTION,
             poll_interval: Duration::from_secs(2),
+            preflight_timeout: Duration::from_secs(5),
+            ssh_probe_interval: DEFAULT_SSH_PROBE_INTERVAL,
+            ssh_probe_connect_timeout: DEFAULT_SSH_PROBE_CONNECT_TIMEOUT,
+            transient_retry_delay: DEFAULT_TRANSIENT_RETRY_DELAY,
             fallback_after: Duration::from_secs(DEFAULT_VAST_FALLBACK_AFTER_SECS),
             gpu,
         }
