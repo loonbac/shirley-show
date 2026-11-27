@@ -48,19 +48,35 @@ macro_rules! vast_warn {
 }
 
 /// Flatten and redact before printing: Vast error bodies can echo input.
-fn sanitized_body(text: &str, secret: &str) -> String {
+fn flattened_redacted(text: &str, secret: &str) -> String {
     let flat: String = text
         .chars()
         .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
         .collect();
-    let redacted = if secret.is_empty() {
+    if secret.is_empty() {
         flat
     } else {
         flat.replace(secret, "<redacted>")
-    };
+    }
+}
+
+fn sanitized_body(text: &str, secret: &str) -> String {
+    let redacted = flattened_redacted(text, secret);
     let mut out: String = redacted.chars().take(300).collect();
     if redacted.chars().count() > 300 {
         out.push_str("...");
+    }
+    out
+}
+
+/// scp/ssh put the useful part of a failure at the end of stderr.
+fn sanitized_stderr(stderr: &[u8], secret: &str) -> String {
+    let redacted = flattened_redacted(&String::from_utf8_lossy(stderr), secret);
+    let count = redacted.chars().count();
+    let start = count.saturating_sub(300);
+    let mut out: String = redacted.chars().skip(start).collect();
+    if start > 0 {
+        out.insert_str(0, "...");
     }
     out
 }
@@ -789,13 +805,21 @@ impl VastVocalSeparator {
         })
     }
 
-    fn ssh_args(&self, lease: &Lease, private_key: &Path) -> Vec<String> {
+    /// Only the port flag differs between the two OpenSSH tools: scp uses
+    /// capital `-P`, while `-p` means "preserve times". Everything else is
+    /// shared, including `root@HOST` being a *destination prefix* for scp.
+    fn transport_args(
+        &self,
+        private_key: &Path,
+        port_flag: &str,
+        port: u16,
+    ) -> Vec<String> {
         let connect_secs = self.config.http_timeout.as_secs().max(1).to_string();
         vec![
             "-i".to_string(),
             private_key.to_string_lossy().into_owned(),
-            "-p".to_string(),
-            lease.port.to_string(),
+            port_flag.to_string(),
+            port.to_string(),
             "-o".to_string(),
             "StrictHostKeyChecking=no".to_string(),
             "-o".to_string(),
@@ -804,8 +828,19 @@ impl VastVocalSeparator {
             "BatchMode=yes".to_string(),
             "-o".to_string(),
             format!("ConnectTimeout={connect_secs}"),
-            format!("root@{}", lease.host),
         ]
+    }
+
+    fn ssh_args(&self, lease: &Lease, private_key: &Path) -> Vec<String> {
+        let mut args = self.transport_args(private_key, "-p", lease.port);
+        args.push(format!("root@{}", lease.host));
+        args
+    }
+
+    /// Both transfers are single files, so no `-r`. Callers pass the remote
+    /// operand as `root@HOST:/path`, never as a bare `root@HOST`.
+    fn scp_args(&self, lease: &Lease, private_key: &Path) -> Vec<String> {
+        self.transport_args(private_key, "-P", lease.port)
     }
 
     async fn scp(
@@ -815,20 +850,37 @@ impl VastVocalSeparator {
         source: &str,
         destination: &str,
         timeout: Duration,
+        step: &str,
     ) -> Result<(), VocalSeparationError> {
         let mut cmd = Command::new(&self.config.scp_bin);
         cmd.kill_on_drop(true);
-        let mut args = self.ssh_args(lease, private_key);
-        args.push("-r".to_string());
-        args.push(source.to_string());
-        args.push(destination.to_string());
-        cmd.args(&args);
+        cmd.args(self.scp_args(lease, private_key))
+            .arg(source)
+            .arg(destination);
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::null());
-        match tokio::time::timeout(timeout, cmd.status()).await {
-            Ok(Ok(status)) if status.success() => Ok(()),
-            _ => Err(VocalSeparationError::SeparationFailed),
+        cmd.stderr(Stdio::piped());
+        match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(output)) if output.status.success() => Ok(()),
+            Ok(Ok(output)) => {
+                vast_warn!(
+                    "{step} failed: exit={} stderr={}",
+                    output.status.code().unwrap_or(-1),
+                    sanitized_stderr(&output.stderr, &self.config.api_key)
+                );
+                Err(VocalSeparationError::SeparationFailed)
+            }
+            Ok(Err(error)) => {
+                vast_warn!(
+                    "{step} failed: spawn error={}",
+                    sanitized_body(&error.to_string(), &self.config.api_key)
+                );
+                Err(VocalSeparationError::SeparationFailed)
+            }
+            Err(_) => {
+                vast_warn!("{step} timed out after {}s", timeout.as_secs());
+                Err(VocalSeparationError::SeparationFailed)
+            }
         }
     }
 
@@ -839,6 +891,7 @@ impl VastVocalSeparator {
         remote_command: &str,
         stdin_file: Option<std::fs::File>,
         timeout: Duration,
+        step: &str,
     ) -> Result<Output, VocalSeparationError> {
         let mut cmd = Command::new(&self.config.ssh_bin);
         cmd.kill_on_drop(true);
@@ -850,10 +903,28 @@ impl VastVocalSeparator {
             None => Stdio::null(),
         });
         cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::null());
+        cmd.stderr(Stdio::piped());
         match tokio::time::timeout(timeout, cmd.output()).await {
             Ok(Ok(output)) if output.status.success() => Ok(output),
-            _ => Err(VocalSeparationError::SeparationFailed),
+            Ok(Ok(output)) => {
+                vast_warn!(
+                    "{step} failed: exit={} stderr={}",
+                    output.status.code().unwrap_or(-1),
+                    sanitized_stderr(&output.stderr, &self.config.api_key)
+                );
+                Err(VocalSeparationError::SeparationFailed)
+            }
+            Ok(Err(error)) => {
+                vast_warn!(
+                    "{step} failed: spawn error={}",
+                    sanitized_body(&error.to_string(), &self.config.api_key)
+                );
+                Err(VocalSeparationError::SeparationFailed)
+            }
+            Err(_) => {
+                vast_warn!("{step} timed out after {}s", timeout.as_secs());
+                Err(VocalSeparationError::SeparationFailed)
+            }
         }
     }
 
@@ -953,10 +1024,10 @@ impl VastVocalSeparator {
 
         // 1. Upload audio. The worker image has no install step; the script is
         //    the exact one used for Colab, so both paths share its contract.
-        let source = request
-            .source_path
-            .to_str()
-            .ok_or(VocalSeparationError::SeparationFailed)?;
+        let source = request.source_path.to_str().ok_or_else(|| {
+            vast_warn!("upload failed: invalid local source path");
+            VocalSeparationError::SeparationFailed
+        })?;
         let upload_started = Instant::now();
         self.scp(
             lease,
@@ -964,14 +1035,16 @@ impl VastVocalSeparator {
             source,
             &format!("root@{}:{REMOTE_INPUT_PATH}", lease.host),
             left(),
+            "upload",
         )
         .await?;
         vast_info!("upload completed in {}ms", upload_started.elapsed().as_millis());
 
         let work_dir = self.config.data_dir.join("vast").join("work");
-        tokio::fs::create_dir_all(&work_dir)
-            .await
-            .map_err(|_| VocalSeparationError::SeparationFailed)?;
+        tokio::fs::create_dir_all(&work_dir).await.map_err(|_| {
+            vast_warn!("script failed: cannot create local work directory");
+            VocalSeparationError::SeparationFailed
+        })?;
         let script_path = work_dir.join(format!("vast_script_{}.py", Uuid::new_v4()));
         let models = match request.mode {
             VocalSeparationMode::Coros => COROS_MODELS,
@@ -985,14 +1058,17 @@ impl VastVocalSeparator {
             "",
             REMOTE_INPUT_PATH,
         );
-        tokio::fs::write(&script_path, script)
-            .await
-            .map_err(|_| VocalSeparationError::SeparationFailed)?;
+        tokio::fs::write(&script_path, script).await.map_err(|_| {
+            vast_warn!("script failed: cannot write local script file");
+            VocalSeparationError::SeparationFailed
+        })?;
 
         // A login shell is required: Vast replaces the image entrypoint, and the
         // worker image exports its venv PATH from /etc/profile.d/venv.sh.
-        let script_file = std::fs::File::open(&script_path)
-            .map_err(|_| VocalSeparationError::SeparationFailed)?;
+        let script_file = std::fs::File::open(&script_path).map_err(|_| {
+            vast_warn!("script failed: cannot open local script file");
+            VocalSeparationError::SeparationFailed
+        })?;
         let script_started = Instant::now();
         let output = self
             .ssh_command(
@@ -1001,6 +1077,7 @@ impl VastVocalSeparator {
                 "bash -lc 'cd /content && python -'",
                 Some(script_file),
                 left(),
+                "script",
             )
             .await?;
         vast_info!(
@@ -1009,17 +1086,22 @@ impl VastVocalSeparator {
         );
         let _ = tokio::fs::remove_file(&script_path).await;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let result = parse_execution_result(&stdout)
-            .ok_or(VocalSeparationError::InvalidSeparatorOutput)?;
+        let result = parse_execution_result(&stdout).ok_or_else(|| {
+            vast_warn!(
+                "json parse failed: stdout={}",
+                sanitized_body(&stdout, &self.config.api_key)
+            );
+            VocalSeparationError::InvalidSeparatorOutput
+        })?;
 
         // 2. Download the plain MP3 the script leaves on the worker.
         if let Some(parent) = request.output_path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
         }
-        let destination = request
-            .output_path
-            .to_str()
-            .ok_or(VocalSeparationError::InvalidSeparatorOutput)?;
+        let destination = request.output_path.to_str().ok_or_else(|| {
+            vast_warn!("download failed: invalid local output path");
+            VocalSeparationError::InvalidSeparatorOutput
+        })?;
         let download_started = Instant::now();
         self.scp(
             lease,
@@ -1027,6 +1109,7 @@ impl VastVocalSeparator {
             &format!("root@{}:{REMOTE_OUTPUT_PATH}", lease.host),
             destination,
             left(),
+            "download",
         )
         .await?;
         vast_info!(
@@ -1036,16 +1119,29 @@ impl VastVocalSeparator {
 
         // 3. Same verification as Colab: SHA-256 and ffprobe duration against
         //    the single JSON line printed by the shared script.
-        let local_hash = self.sha256(&request.output_path, left()).await?;
+        let local_hash = match self.sha256(&request.output_path, left()).await {
+            Ok(hash) => hash,
+            Err(error) => {
+                vast_warn!("verification failed: sha256 step could not run: {error:?}");
+                return Err(error);
+            }
+        };
         let hash_matches = local_hash == result.sha256.to_lowercase();
         vast_info!("verification sha256_match={hash_matches}");
         if !hash_matches {
             vast_warn!("verification failed: sha256 mismatch");
             return Err(VocalSeparationError::InvalidSeparatorOutput);
         }
-        let local_duration = self
+        let local_duration = match self
             .run_ffprobe_duration(&request.output_path, left())
-            .await?;
+            .await
+        {
+            Ok(duration) => duration,
+            Err(error) => {
+                vast_warn!("verification failed: ffprobe step could not run: {error:?}");
+                return Err(error);
+            }
+        };
         let duration_delta = (local_duration - result.duration).abs();
         vast_info!(
             "verification duration: reported={} local={} delta={duration_delta}",
@@ -1069,6 +1165,7 @@ impl VastVocalSeparator {
                 &format!("rm -f {REMOTE_INPUT_PATH} {REMOTE_OUTPUT_PATH}"),
                 None,
                 Duration::from_secs(5).min(left()),
+                "cleanup",
             )
             .await;
         Ok(SeparatedAudio {
