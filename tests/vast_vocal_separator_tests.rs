@@ -22,11 +22,13 @@ use shirley_show::domain::vocal_separation_mode::VocalSeparationMode;
 use shirley_show::infra::vocal::fallback_vocal_separator::FallbackVocalSeparator;
 use shirley_show::infra::vocal::vast_vocal_separator::VastVocalSeparator;
 use shirley_show::infra::vocal::vast_vocal_separator_config::{
-    DEFAULT_LAUNCH_TIMEOUT, DEFAULT_SSH_PROBE_CONNECT_TIMEOUT, DEFAULT_SSH_PROBE_INTERVAL,
-    DEFAULT_TRANSIENT_RETRY_DELAY, DEFAULT_VAST_FALLBACK_AFTER_SECS, DEFAULT_VAST_IMAGE,
-    DEFAULT_VAST_MAX_DPH, VastVocalSeparatorConfig,
+    DEFAULT_LAUNCH_TIMEOUT, DEFAULT_MIN_RETRY_REMAINING, DEFAULT_SSH_PROBE_CONNECT_TIMEOUT,
+    DEFAULT_SSH_PROBE_INTERVAL, DEFAULT_TRANSIENT_RETRY_DELAY, DEFAULT_VAST_FALLBACK_AFTER_SECS,
+    DEFAULT_VAST_IMAGE, DEFAULT_VAST_MAX_DPH, VastVocalSeparatorConfig,
 };
-use shirley_show::ports::vocal_separator::{VocalSeparationRequest, VocalSeparator};
+use shirley_show::ports::vocal_separator::{
+    VocalSeparationError, VocalSeparationRequest, VocalSeparator,
+};
 
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -43,6 +45,9 @@ struct Calls {
     bundles: Vec<Value>,
     rents: Vec<(String, Value)>,
     deletes: Vec<String>,
+    /// Ordered rent/delete events: a retry must destroy the old instance
+    /// before renting the next offer, never hold two at once.
+    events: Vec<String>,
     ssh_posts: Vec<Value>,
     instance_gets: usize,
     list_queries: Vec<String>,
@@ -173,6 +178,7 @@ async fn rent(
     // The live probe reads `.new_contract`; keep legacy keys for compatibility.
     let instance_id = inner.next_instance_id;
     inner.next_instance_id += 1;
+    inner.calls.events.push(format!("rent:{instance_id}"));
     Json(json!({ "new_contract": instance_id })).into_response()
 }
 
@@ -221,7 +227,9 @@ async fn delete_instance(
     AxumPath(id): AxumPath<String>,
     State(state): State<FakeState>,
 ) -> Json<Value> {
-    state.inner.lock().unwrap().calls.deletes.push(id.clone());
+    let mut inner = state.inner.lock().unwrap();
+    inner.calls.deletes.push(id.clone());
+    inner.calls.events.push(format!("delete:{id}"));
     Json(json!({ "deleted": id }))
 }
 
@@ -604,6 +612,7 @@ impl Fixture {
             bundles: inner.calls.bundles.clone(),
             rents: inner.calls.rents.clone(),
             deletes: inner.calls.deletes.clone(),
+            events: inner.calls.events.clone(),
             ssh_posts: inner.calls.ssh_posts.clone(),
             instance_gets: inner.calls.instance_gets,
             list_queries: inner.calls.list_queries.clone(),
@@ -871,6 +880,7 @@ fn vast_config_env_defaults_and_key_is_never_in_debug_output() {
         "SHIRLEY_VAST_IMAGE",
         "SHIRLEY_VAST_MAX_DPH",
         "SHIRLEY_VAST_FALLBACK_AFTER_SECS",
+        "SHIRLEY_VAST_MIN_RETRY_REMAINING_SECS",
     ] {
         remove_env(key);
     }
@@ -885,6 +895,8 @@ fn vast_config_env_defaults_and_key_is_never_in_debug_output() {
     assert_eq!(cfg.ssh_probe_interval, DEFAULT_SSH_PROBE_INTERVAL);
     assert_eq!(cfg.ssh_probe_connect_timeout, DEFAULT_SSH_PROBE_CONNECT_TIMEOUT);
     assert_eq!(cfg.transient_retry_delay, DEFAULT_TRANSIENT_RETRY_DELAY);
+    assert_eq!(cfg.min_retry_remaining, DEFAULT_MIN_RETRY_REMAINING);
+    assert_eq!(DEFAULT_MIN_RETRY_REMAINING, Duration::from_secs(150));
     assert_eq!(DEFAULT_LAUNCH_TIMEOUT, Duration::from_secs(150));
     assert_eq!(DEFAULT_SSH_PROBE_INTERVAL, Duration::from_secs(3));
     assert_eq!(DEFAULT_SSH_PROBE_CONNECT_TIMEOUT, Duration::from_secs(5));
@@ -896,17 +908,20 @@ fn vast_config_env_defaults_and_key_is_never_in_debug_output() {
     set_env("SHIRLEY_VAST_MAX_DPH", "0.35");
     set_env("SHIRLEY_VAST_FALLBACK_AFTER_SECS", "45");
     set_env("SHIRLEY_VAST_LAUNCH_TIMEOUT_SECS", "120");
+    set_env("SHIRLEY_VAST_MIN_RETRY_REMAINING_SECS", "90");
     let from_env = VastVocalSeparatorConfig::from_env(PathBuf::from("/tmp/data"), gpu).unwrap();
     assert_eq!(from_env.image, "ghcr.io/loonbac/shirley-vast-worker:sha-123");
     assert_eq!(from_env.max_dph, 0.35);
     assert_eq!(from_env.fallback_after, Duration::from_secs(45));
     assert_eq!(from_env.launch_timeout, Duration::from_secs(120));
+    assert_eq!(from_env.min_retry_remaining, Duration::from_secs(90));
     for key in [
         "VAST_API_KEY",
         "SHIRLEY_VAST_IMAGE",
         "SHIRLEY_VAST_MAX_DPH",
         "SHIRLEY_VAST_FALLBACK_AFTER_SECS",
         "SHIRLEY_VAST_LAUNCH_TIMEOUT_SECS",
+        "SHIRLEY_VAST_MIN_RETRY_REMAINING_SECS",
     ] {
         remove_env(key);
     }
@@ -948,6 +963,53 @@ fn make_executable(path: &Path) {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
+}
+
+/// Fails the first remote script invocation, then delegates to the healthy
+/// fake ssh. The counter lets a test prove exactly one pipeline step failed.
+fn write_fail_once_ssh(dir: &Path, real_ssh: &Path) -> (PathBuf, PathBuf) {
+    std::fs::create_dir_all(dir).unwrap();
+    let path = dir.join("ssh_fail_once");
+    let counter = dir.join("python_failures_left");
+    std::fs::write(&counter, "1").unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\ncounter='{counter}'\ncase \"$*\" in\n  *python*)\n    if [ -f \"$counter\" ]; then n=$(cat \"$counter\"); else n=0; fi\n    if [ \"$n\" -gt 0 ]; then\n      n=$((n - 1)); echo \"$n\" > \"$counter\"\n      cat >/dev/null\n      echo 'ssh: simulated remote script failure' >&2\n      exit 1\n    fi\n    ;;\nesac\nexec '{real}' \"$@\"\n",
+            counter = counter.display(),
+            real = real_ssh.display(),
+        ),
+    )
+    .unwrap();
+    make_executable(&path);
+    (path, counter)
+}
+
+/// Fails the first script, then refuses the very next readiness probe. The
+/// flag is cleared by that refusal so the replacement instance can rent and
+/// run normally: this isolates one failed pipeline + one failed ssh probe.
+fn write_fail_once_then_refuse_probe_ssh(
+    dir: &Path,
+    real_ssh: &Path,
+) -> (PathBuf, PathBuf) {
+    std::fs::create_dir_all(dir).unwrap();
+    let path = dir.join("ssh_fail_then_probe");
+    let counter = dir.join("python_failures_left");
+    let flag = dir.join("pipeline_failed_flag");
+    std::fs::write(&counter, "1").unwrap();
+    std::fs::write(&flag, "0").unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nflag='{flag}'\ncounter='{counter}'\ncase \"$*\" in\n  *python*)\n    echo 1 > \"$flag\"\n    if [ -f \"$counter\" ]; then n=$(cat \"$counter\"); else n=0; fi\n    if [ \"$n\" -gt 0 ]; then\n      n=$((n - 1)); echo \"$n\" > \"$counter\"\n      cat >/dev/null\n      echo 'ssh: simulated remote script failure' >&2\n      exit 1\n    fi\n    ;;\n  *true*)\n    if [ -f \"$flag\" ] && [ \"$(cat \"$flag\")\" = \"1\" ]; then\n      echo 0 > \"$flag\"\n      echo 'ssh: connect to host 127.0.0.1 port 2222: Connection refused' >&2\n      exit 255\n    fi\n    ;;\nesac\nexec '{real}' \"$@\"\n",
+            counter = counter.display(),
+            flag = flag.display(),
+            real = real_ssh.display(),
+        ),
+    )
+    .unwrap();
+    make_executable(&path);
+    (path, counter)
 }
 
 /// Wraps the fake ssh with a delay long enough to cancel the request mid-pipeline.
@@ -1551,6 +1613,168 @@ fn transient_connection_logs_are_reported() {
         "the scp retry must be logged: {stderr}"
     );
     assert!(stderr.contains("Connection closed"), "scp stderr tail: {stderr}");
+    assert!(
+        !stderr.contains("TEST PRIVATE KEY"),
+        "no key material may be logged: {stderr}"
+    );
+}
+
+/// S1: one failed pipeline step is retried on the SAME instance when its ssh
+/// still works. No second rent, and the healthy GPU stays warm afterwards.
+#[tokio::test]
+async fn pipeline_failure_retries_once_on_the_same_healthy_instance() {
+    let mut fixture = Fixture::new(vec![offer(101, 0.20, "RTX 3090", "PL")]).await;
+    fixture.config.retention = Duration::from_secs(5);
+    fixture.config.min_retry_remaining = Duration::from_millis(100);
+    let (ssh, counter) = write_fail_once_ssh(
+        &fixture._tmp.path().join("bin_retry"),
+        &fixture.config.ssh_bin,
+    );
+    fixture.config.ssh_bin = ssh;
+    let separator = fixture.separator();
+
+    let result = separator
+        .separate(fixture.request(Duration::from_secs(200)))
+        .await
+        .expect("the retry on the same instance completes the separation");
+    assert_eq!(result.duration_secs, 12);
+    assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "0");
+
+    let calls = fixture.calls();
+    assert_eq!(calls.rents.len(), 1, "no second GPU may be rented");
+    assert_eq!(calls.events, vec!["rent:7001".to_string()]);
+    assert!(calls.deletes.is_empty(), "the healthy instance stays warm");
+    assert_eq!(
+        scp_calls(&fixture.scp_argv_log).len(),
+        3,
+        "first attempt uploaded before the script failed; the retry uploads and downloads"
+    );
+    let log = std::fs::read_to_string(&fixture.ssh_log).unwrap();
+    assert_eq!(
+        log.lines().filter(|line| line.contains("python")).count(),
+        1,
+        "the successful retry runs on the already rented worker: {log}"
+    );
+    assert!(separator.warm_instance_available().await);
+}
+
+/// S1: when the quick probe proves the failed instance is dead, it is
+/// destroyed BEFORE the next offer is rented. Only one instance is ever live.
+#[tokio::test]
+async fn failed_retry_probe_destroys_instance_and_rents_next_offer() {
+    let mut fixture = Fixture::new(vec![
+        offer(102, 0.20, "RTX 3090", "PL"),
+        offer(103, 0.22, "L4", "US"),
+    ])
+    .await;
+    fixture.config.retention = Duration::from_secs(5);
+    fixture.config.min_retry_remaining = Duration::from_millis(100);
+    let (ssh, counter) = write_fail_once_then_refuse_probe_ssh(
+        &fixture._tmp.path().join("bin_retry_probe"),
+        &fixture.config.ssh_bin,
+    );
+    fixture.config.ssh_bin = ssh;
+
+    let result = fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(200)))
+        .await
+        .expect("the replacement instance completes the separation");
+    assert_eq!(result.duration_secs, 12);
+    assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "0");
+
+    let calls = fixture.calls();
+    assert_eq!(
+        calls.rents.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+        vec!["102", "103"],
+        "the next offer must be tried"
+    );
+    assert_eq!(
+        calls.events,
+        vec![
+            "rent:7001".to_string(),
+            "delete:7001".to_string(),
+            "rent:7002".to_string()
+        ],
+        "destroy must precede the replacement rent; never two concurrently"
+    );
+    assert_eq!(scp_calls(&fixture.scp_argv_log).len(), 3);
+}
+
+/// S1: with a retry floor longer than this turn, the original error is
+/// returned unchanged and no attempt is spent on a retry.
+#[tokio::test]
+async fn pipeline_failure_without_enough_time_returns_the_original_error() {
+    let mut fixture = Fixture::new(vec![offer(104, 0.20, "RTX 3090", "PL")]).await;
+    fixture.config.retention = Duration::from_secs(5);
+    fixture.config.min_retry_remaining = Duration::from_secs(60);
+    let (ssh, counter) = write_fail_once_ssh(
+        &fixture._tmp.path().join("bin_no_retry"),
+        &fixture.config.ssh_bin,
+    );
+    fixture.config.ssh_bin = ssh;
+
+    let err = fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(30)))
+        .await
+        .unwrap_err();
+    assert_eq!(err, VocalSeparationError::SeparationFailed);
+    assert_eq!(err.code(), "separation_failed");
+    assert_eq!(std::fs::read_to_string(&counter).unwrap().trim(), "0");
+    let calls = fixture.calls();
+    assert_eq!(calls.events, vec!["rent:7001".to_string()]);
+    assert!(calls.deletes.is_empty(), "the healthy GPU stays warm");
+    assert_eq!(
+        scp_calls(&fixture.scp_argv_log).len(),
+        1,
+        "no retry pipeline may start"
+    );
+}
+
+/// eprintln! from the library cannot be captured in-process; this ignored
+/// helper is invoked as a child by the assertion below.
+#[tokio::test]
+#[ignore = "invoked by retry_logs_include_the_failure_reason"]
+async fn retry_log_helper() {
+    let mut fixture = Fixture::new(vec![offer(105, 0.20, "RTX 3090", "PL")]).await;
+    fixture.config.retention = Duration::from_secs(5);
+    fixture.config.min_retry_remaining = Duration::from_millis(100);
+    let (ssh, _) = write_fail_once_ssh(
+        &fixture._tmp.path().join("bin_retry_log"),
+        &fixture.config.ssh_bin,
+    );
+    fixture.config.ssh_bin = ssh;
+    fixture
+        .separator()
+        .separate(fixture.request(Duration::from_secs(200)))
+        .await
+        .expect("the retry succeeds");
+}
+
+#[test]
+fn retry_logs_include_the_failure_reason() {
+    let exe = std::env::current_exe().unwrap();
+    let output = Command::new(exe)
+        .args([
+            "--exact",
+            "retry_log_helper",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "helper failed: {stderr}");
+    assert!(
+        stderr.contains("[vast] INFO retry needed after pipeline failure on instance 7001: reason=separation_failed"),
+        "the failure reason must be logged: {stderr}"
+    );
+    assert!(
+        stderr.contains("[vast] INFO retry reason=separation_failed: instance 7001 ssh healthy"),
+        "the same-instance decision must be logged: {stderr}"
+    );
     assert!(
         !stderr.contains("TEST PRIVATE KEY"),
         "no key material may be logged: {stderr}"

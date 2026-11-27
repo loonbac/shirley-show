@@ -1,6 +1,7 @@
 //! T2/T3: fallback composition and the honest "no GPU" message.
 
 use std::future::Future;
+use std::process::Command;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -19,6 +20,9 @@ struct RecordingSeparator {
     name: &'static str,
     warm: bool,
     fail: bool,
+    /// Fails only after the assignment window elapsed, i.e. after Google gave
+    /// us a GPU and the pipeline itself went wrong.
+    fail_after_assignment: bool,
     delay: Duration,
     calls: Arc<Mutex<Vec<Call>>>,
 }
@@ -37,6 +41,7 @@ impl RecordingSeparator {
             name,
             warm: false,
             fail: false,
+            fail_after_assignment: false,
             delay: Duration::ZERO,
             calls,
         }
@@ -44,6 +49,11 @@ impl RecordingSeparator {
 
     fn failing(mut self) -> Self {
         self.fail = true;
+        self
+    }
+
+    fn failing_after_assignment(mut self) -> Self {
+        self.fail_after_assignment = true;
         self
     }
 
@@ -98,7 +108,16 @@ impl VocalSeparator for RecordingSeparator {
             budget: Some(budget),
             at: Instant::now(),
         });
-        self.execute(request)
+        let this = self.clone();
+        Box::pin(async move {
+            if this.fail_after_assignment {
+                // A GPU was assigned: the error comes from the work on it,
+                // not from the short assignment window.
+                tokio::time::sleep(budget + Duration::from_millis(20)).await;
+                return Err(VocalSeparationError::SeparationFailed);
+            }
+            this.execute(request).await
+        })
     }
 
     fn separate(
@@ -248,4 +267,79 @@ fn no_gpu_message_is_honest_and_keeps_the_error_code() {
     assert_eq!(err.to_string(), EXPECTED);
     assert!(!err.message().to_lowercase().contains("cuota"));
     assert!(!err.message().to_lowercase().contains("agot"));
+}
+
+/// S1: a failure AFTER Colab got a GPU is not the end of the turn. Vast takes
+/// over with whatever time is left, without a second Colab assignment.
+#[tokio::test]
+async fn colab_failure_after_gpu_assignment_falls_through_to_vast() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let colab = RecordingSeparator::new("colab", calls.clone()).failing_after_assignment();
+    let vast = RecordingSeparator::new("vast", calls.clone());
+    let composed = FallbackVocalSeparator::new(
+        Arc::new(colab),
+        Some(Arc::new(vast)),
+        Duration::from_millis(50),
+    );
+
+    let result = composed
+        .separate(request(Duration::from_secs(10)))
+        .await
+        .expect("Vast finishes the separation");
+    assert_eq!(result.duration_secs, 12);
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2, "one Colab attempt, then one Vast attempt");
+    assert_eq!(calls[0].name, "colab");
+    assert_eq!(calls[0].budget, Some(Duration::from_millis(50)));
+    assert_eq!(calls[1].name, "vast");
+    assert!(calls[1].timeout < Duration::from_secs(10));
+    assert!(calls[1].timeout > Duration::from_secs(9));
+}
+
+/// eprintln! from the library cannot be captured in-process; this ignored
+/// helper is invoked as a child by the assertion below.
+#[tokio::test]
+#[ignore = "invoked by fallback_logs_post_assignment_fallthrough"]
+async fn fallback_post_assignment_log_helper() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let colab = RecordingSeparator::new("colab", calls.clone()).failing_after_assignment();
+    let vast = RecordingSeparator::new("vast", calls.clone());
+    let composed = FallbackVocalSeparator::new(
+        Arc::new(colab),
+        Some(Arc::new(vast)),
+        Duration::from_millis(50),
+    );
+    composed
+        .separate(request(Duration::from_secs(10)))
+        .await
+        .expect("Vast finishes the separation");
+}
+
+#[test]
+fn fallback_logs_post_assignment_fallthrough() {
+    let exe = std::env::current_exe().unwrap();
+    let output = Command::new(exe)
+        .args([
+            "--exact",
+            "fallback_post_assignment_log_helper",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "helper failed: {stderr}");
+    assert!(
+        stderr.contains("[fallback] INFO colab failed after"),
+        "the fall-through decision must be logged: {stderr}"
+    );
+    assert!(
+        stderr.contains("reason=separation_failed"),
+        "the failure reason must be logged: {stderr}"
+    );
+    assert!(
+        stderr.contains("trying Vast with"),
+        "the remaining time must be logged: {stderr}"
+    );
 }

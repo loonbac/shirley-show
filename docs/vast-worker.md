@@ -138,6 +138,18 @@ refused`, `Connection closed` or `Connection reset`; other failures are not
 retried. The launch timeout bounds renting only -- once a GPU is ready, the
 transfers own the caller's full deadline.
 
+A failed pipeline step also gets **one** retry when the caller's deadline still
+has at least `SHIRLEY_VAST_MIN_RETRY_REMAINING_SECS` left (150 s by default).
+The adapter probes ssh first: if the instance answers, the same upload/script/
+download/verify pipeline runs again on it; if the probe fails, that instance is
+destroyed and the next offer is rented, so two instances are never live at
+once. The `[vast] INFO retry ...` lines name the original failure reason
+(error code) and the chosen path. A turn with less time left returns the
+original error unchanged; no replacement is rented and a healthy instance is
+still kept warm. The Colab-first composition (`FallbackVocalSeparator`) likewise
+hands a Colab failure after GPU assignment to Vast with whatever time remains;
+the `[fallback] INFO` line records that hand-off.
+
 Every HTTP and SSH call has its own timeout. The instance is labelled
 `shirley-show`, kept warm for ten minutes after the last separation (including
 a failed attempt while the machine proves healthy), and destroyed at once when

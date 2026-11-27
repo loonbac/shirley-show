@@ -153,6 +153,9 @@ struct Lease {
     host: String,
     port: u16,
     last_used: Instant,
+    /// Offer used for this contract, so a retry can skip a host that already
+    /// failed instead of renting the same cheapest offer again.
+    offer_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -732,6 +735,7 @@ impl VastVocalSeparator {
                             host: host.clone(),
                             port,
                             last_used: Instant::now(),
+                            offer_id: Some(id.clone()),
                         };
                         // Vast flips to `running` before sshd is reachable.
                         // Readiness only means a real ssh command succeeded.
@@ -763,8 +767,12 @@ impl VastVocalSeparator {
         deadline: Instant,
         cancelled: &AtomicBool,
         private_key: &Path,
+        skip_offer_id: Option<&str>,
     ) -> Result<Lease, VocalSeparationError> {
         for offer in self.offers().await? {
+            if offer.id().as_deref() == skip_offer_id {
+                continue; // this offer already failed in this request
+            }
             if Instant::now() >= deadline || cancelled.load(Ordering::SeqCst) {
                 break;
             }
@@ -1449,16 +1457,19 @@ impl VastVocalSeparator {
         let (private_key, _) = self.ensure_ssh_key().await?;
         // S3/S4: a GPU already rented for this app is reused instead of
         // paying a cold start for the next separation.
-        let lease = if self.warm_instance_available().await {
+        let mut lease = if self.warm_instance_available().await {
             match self.lease.lock().await.clone() {
                 Some(lease) => {
                     vast_info!("using already rented instance {}", lease.instance_id);
                     lease
                 }
-                None => self.acquire_instance(deadline, &cancelled, &private_key).await?,
+                None => self
+                    .acquire_instance(deadline, &cancelled, &private_key, None)
+                    .await?,
             }
         } else {
-            self.acquire_instance(deadline, &cancelled, &private_key).await?
+            self.acquire_instance(deadline, &cancelled, &private_key, None)
+                .await?
         };
 
         // A rental that lands after the deadline or after the caller went away
@@ -1476,9 +1487,122 @@ impl VastVocalSeparator {
             return Err(VocalSeparationError::SeparationTimeout);
         }
 
-        let result = self
+        let mut result = self
             .run_pipeline(&lease, &private_key, &request, deadline)
             .await;
+
+        // S1: a failed step is not the answer while the turn can still fit
+        // another attempt. One retry is allowed: on this instance if ssh still
+        // works, otherwise on the next offer after destroying this one.
+        let mut retry_reason = None;
+        if let Err(error) = &result {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if cancelled.load(Ordering::SeqCst) {
+                vast_info!(
+                    "no retry after pipeline failure on instance {}: reason={}, cancelled",
+                    lease.instance_id,
+                    error.code()
+                );
+            } else if remaining < self.config.min_retry_remaining {
+                vast_info!(
+                    "no retry after pipeline failure on instance {}: reason={}, remaining={}s < minimum={}s",
+                    lease.instance_id,
+                    error.code(),
+                    remaining.as_secs(),
+                    self.config.min_retry_remaining.as_secs()
+                );
+            } else {
+                let reason = error.code().to_string();
+                vast_info!(
+                    "retry needed after pipeline failure on instance {}: reason={reason}, remaining={}s",
+                    lease.instance_id,
+                    remaining.as_secs()
+                );
+                retry_reason = Some(reason);
+            }
+        }
+
+        if let Some(reason) = retry_reason {
+            match self.ssh_probe_once(&lease, &private_key).await {
+                Ok(()) => {
+                    vast_info!(
+                        "retry reason={reason}: instance {} ssh healthy, retrying pipeline",
+                        lease.instance_id
+                    );
+                    result = self
+                        .run_pipeline(&lease, &private_key, &request, deadline)
+                        .await;
+                    match &result {
+                        Ok(_) => vast_info!(
+                            "retry reason={reason}: pipeline succeeded on instance {}",
+                            lease.instance_id
+                        ),
+                        Err(error) => vast_info!(
+                            "retry reason={reason}: pipeline failed again on instance {}: reason={}",
+                            lease.instance_id,
+                            error.code()
+                        ),
+                    }
+                }
+                Err(failure) => {
+                    vast_info!(
+                        "retry reason={reason}: instance {} ssh probe failed ({}), destroying and renting next offer",
+                        lease.instance_id,
+                        failure.tail()
+                    );
+                    let failed_id = lease.instance_id.clone();
+                    let failed_offer_id = lease.offer_id.clone();
+                    let _ = self.destroy_instance(&failed_id).await;
+                    self.forget_instance(&failed_id).await;
+                    match self
+                        .acquire_instance(
+                            deadline,
+                            &cancelled,
+                            &private_key,
+                            failed_offer_id.as_deref(),
+                        )
+                        .await
+                    {
+                        Ok(next) => {
+                            if cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
+                                vast_warn!(
+                                    "replacement instance {} has no consumer; destroying",
+                                    next.instance_id
+                                );
+                                let _ = self.destroy_instance(&next.instance_id).await;
+                                self.forget_instance(&next.instance_id).await;
+                                drop(permit);
+                                return Err(VocalSeparationError::SeparationTimeout);
+                            }
+                            vast_info!(
+                                "retry reason={reason}: rented replacement instance {}",
+                                next.instance_id
+                            );
+                            lease = next;
+                            result = self
+                                .run_pipeline(&lease, &private_key, &request, deadline)
+                                .await;
+                            match &result {
+                                Ok(_) => vast_info!(
+                                    "retry reason={reason}: pipeline succeeded on replacement instance {}",
+                                    lease.instance_id
+                                ),
+                                Err(error) => vast_info!(
+                                    "retry reason={reason}: pipeline failed on replacement instance {}: reason={}",
+                                    lease.instance_id,
+                                    error.code()
+                                ),
+                            }
+                        }
+                        Err(_) => {
+                            vast_warn!(
+                                "retry reason={reason}: no replacement instance available"
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         // A healthy instance is kept for ten minutes after success OR after
         // a failed separation; only a proven dead one is destroyed now.
