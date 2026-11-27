@@ -9,36 +9,23 @@ use crate::domain::vocal_separation_mode::VocalSeparationMode;
 ///    explicitly avoiding full-filename substring checks because model filenames may contain `"instrumental"`.
 /// 4. Averaging stems of the target type element-wise across models using numpy and soundfile.
 /// 5. High-quality 320k MP3 encoding with ffmpeg.
-/// 6. SHA-256 calculation, openssl AES-256-CBC encryption with PBKDF2 and salt, and upload to litterbox.catbox.moe.
-/// 7. Emits exactly ONE line to stdout containing JSON: `{"url":..., "sha256":..., "duration":..., "size":...}`.
+/// 6. SHA-256 calculation, duration, and size, then emits exactly ONE line to
+///    stdout containing JSON: `{"url": "", "sha256":..., "duration":..., "size":...}`.
+///    The result is left as a plain MP3 at `REMOTE_OUTPUT_PATH` for the official
+///    `colab download` command to fetch; there is no encryption or external upload.
 pub fn generate_remote_script(
     mode: VocalSeparationMode,
     models: &[&str],
     overlap: u32,
     batch_size: u32,
-    password: &str,
+    _password: &str,
     remote_input_path: &str,
 ) -> String {
     let mode_str =
         serde_json::to_string(mode.as_str()).unwrap_or_else(|_| "\"instrumental\"".to_string());
     let models_json = serde_json::to_string(models).unwrap_or_else(|_| "[]".to_string());
-    let password_json = serde_json::to_string(password).unwrap_or_else(|_| "\"\"".to_string());
     let input_path_json = serde_json::to_string(remote_input_path)
         .unwrap_or_else(|_| "\"/content/input_audio\"".to_string());
-
-    // The uploader chain is built as Python source, then injected as a literal.
-    // It goes through json.dumps later anyway, so escaping it here would only
-    // add a second, divergent layer.
-    // Must match the remote script's own `enc_path`, which is
-    // `work_dir / "output.mp3.enc"` under `work_dir = Path("/content/colab_sep_work")`.
-    // A literal that does not match would make every uploader fail on a missing
-    // file and report a transfer error instead of the real one.
-    let upload_block = crate::infra::vocal::colab_transfer::build_uploader_block(
-        "/content/colab_sep_work/output.mp3.enc",
-        "/content/colab_sep_work/output.mp3.enc",
-    );
-    let upload_block_python =
-        serde_json::to_string(&upload_block).unwrap_or_else(|_| "\"\"".to_string());
 
     format!(
         r#"#!/usr/bin/env python3
@@ -99,7 +86,6 @@ MODE = {mode_str}
 MODELS = {models_json}
 OVERLAP = {overlap}
 BATCH_SIZE = {batch_size}
-PASSWORD = {password_json}
 INPUT_AUDIO = {input_path_json}
 
 def get_parenthetical_label(path):
@@ -211,38 +197,12 @@ probe_res = subprocess.run(
 )
 duration_secs = float(probe_res.stdout.strip())
 
-# 6. Encrypt with openssl (AES-256-CBC, PBKDF2, salt)
-enc_path = work_dir / "output.mp3.enc"
-openssl_cmd = [
-    "openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-salt",
-    "-pass", f"pass:{{PASSWORD}}",
-    "-in", str(output_mp3),
-    "-out", str(enc_path)
-]
-subprocess.run(openssl_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-
-# 7. Upload the encrypted payload through the fallback chain.
-#
-# A single hardcoded host is what broke this pipeline: litterbox answers HTTP
-# 412 "Invalid uploader" to Google Cloud addresses, so the separation consumed
-# real GPU time and then threw the result away. The chain tries each host in
-# order and keeps the first that yields a real file URL.
-upload_block = {upload_block_python}
-upload_res = subprocess.run(["bash", "-c", upload_block], capture_output=True, text=True)
-url = ""
-for line in upload_res.stdout.splitlines():
-    if line.startswith("TRANSFER_OK "):
-        url = line[len("TRANSFER_OK "):].strip()
-        break
-if not url.startswith("http"):
-    raise RuntimeError(
-        "Transfer failed on every uploader: "
-        + (upload_res.stdout.strip() or upload_res.stderr.strip() or "no output")
-    )
-
-# 8. Output strictly ONE small JSON line
+# 6. Output strictly ONE small JSON line. The result is a plain MP3 left in
+# place at `output.mp3` (REMOTE_OUTPUT_PATH); the official `colab download`
+# fetches it. `url` is kept as an empty string for compatibility with the result
+# parser, which requires the field — there is no external upload anymore.
 payload = {{
-    "url": url,
+    "url": "",
     "sha256": sha256_hex,
     "duration": duration_secs,
     "size": size_bytes
@@ -250,8 +210,8 @@ payload = {{
 print(json.dumps(payload))
 sys.stdout.flush()
 
-# 9. The result is already uploaded. If the client never confirms the stop,
-# free the GPU anyway once the grace period expires.
+# 7. The result is already on disk. If the client never confirms the stop, free
+# the GPU anyway once the grace period expires.
 _arm_watchdog(WATCHDOG_GRACE_SECS)
 "#
     )
@@ -275,7 +235,6 @@ mod tests {
 
         assert!(script.contains("MODE = \"instrumental\""));
         assert!(script.contains("OVERLAP = 12"));
-        assert!(script.contains("PASSWORD = \"secret_pass\""));
         assert!(script.contains("INPUT_AUDIO = \"/content/audio.mp3\""));
         for m in INSTRUMENTAL_MODELS {
             assert!(script.contains(m));
@@ -285,8 +244,18 @@ mod tests {
         assert!(script.contains("np.mean"));
         assert!(script.contains("libmp3lame"));
         assert!(script.contains("320k"));
-        assert!(script.contains("litterbox.catbox.moe"));
         assert!(script.contains("json.dumps(payload)"));
+        assert!(script.contains("\"url\": \"\""));
+        // T3: the catbox/AES/curl workaround is gone. The result must be a
+        // plain file at REMOTE_OUTPUT_PATH fetched by `colab download`.
+        assert!(!script.contains("openssl"), "openssl encryption must be removed");
+        assert!(!script.contains("catbox"), "catbox upload must be removed");
+        assert!(!script.contains("litterbox"), "litterbox upload must be removed");
+        assert!(!script.contains("enc_path"), "the encrypted payload path must be removed");
+        assert!(
+            !script.contains("TRANSFER_OK"),
+            "the uploader-chain protocol must be removed"
+        );
         // S2: a client crash must not leave the GPU allocated.
         assert!(script.contains("_arm_watchdog(WATCHDOG_ABSOLUTE_SECS)"));
         assert!(script.contains("_arm_watchdog(WATCHDOG_GRACE_SECS)"));
@@ -331,7 +300,6 @@ mod tests {
 
         assert!(script.contains("MODE = \"chorus\""));
         assert!(script.contains("OVERLAP = 8"));
-        assert!(script.contains("PASSWORD = \"pass_coros\""));
         for m in COROS_MODELS {
             assert!(script.contains(m));
         }

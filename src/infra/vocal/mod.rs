@@ -8,7 +8,7 @@ pub mod colab_vocal_separator_config;
 pub use colab_orphan_reaper::{ReapDecision, boot_reap_decision, reap_decision, stop_all_runtimes};
 pub use colab_remote_script::generate_remote_script;
 pub use colab_session_cache::ColabSessionCache;
-pub use colab_transfer::{SESSION_IDLE_RETENTION, TRANSFER_UPLOADERS, TransferUploader};
+pub use colab_transfer::SESSION_IDLE_RETENTION;
 pub use colab_vocal_separator::{ColabExecutionResult, ColabSessionGuard, ColabVocalSeparator};
 pub use colab_vocal_separator_config::{
     COROS_MODELS, ColabVocalSeparatorConfig, INSTRUMENTAL_MODELS,

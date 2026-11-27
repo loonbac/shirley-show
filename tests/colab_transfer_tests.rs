@@ -1,128 +1,69 @@
-use shirley_show::infra::vocal::colab_transfer::{
-    TRANSFER_UPLOADERS, TransferUploader, build_uploader_block, extract_direct_link,
+use shirley_show::domain::vocal_separation_mode::VocalSeparationMode;
+use shirley_show::infra::vocal::colab_remote_script::generate_remote_script;
+use shirley_show::infra::vocal::colab_transfer::{SESSION_IDLE_RETENTION, UploadVerdict, upload_verdict};
+use shirley_show::infra::vocal::colab_vocal_separator_config::{
+    COROS_MODELS, INSTRUMENTAL_MODELS,
 };
 
-// T1. The uploader chain must lead with a host that actually works from a
-// Google Cloud datacenter IP. Litterbox answers 412 "Invalid uploader" there,
-// which is the defect this chain exists to survive, so it can never be first.
+// T3. The catbox/AES/curl workaround is gone: the remote script leaves the
+// result as a plain MP3 at REMOTE_OUTPUT_PATH and `colab download` fetches it.
+// The generated script must no longer reach for openssl, catbox, litterbox, or
+// any upload host/URL. This runs for both ensembles so neither mode reintroduces
+// the old arc.
 #[test]
-fn test_uploader_chain_starts_with_google_cloud_safe_host() {
-    let first = TRANSFER_UPLOADERS
-        .first()
-        .expect("the chain must not be empty");
-    assert_eq!(
-        first.name, "tmpfiles",
-        "the first uploader must be the one verified from a Colab node"
-    );
-    assert!(
-        first.body.contains("tmpfiles.org"),
-        "the first uploader must target tmpfiles.org"
-    );
-}
+fn test_remote_script_has_no_encryption_or_upload() {
+    for (mode, models) in [
+        (VocalSeparationMode::Instrumental, &INSTRUMENTAL_MODELS[..]),
+        (VocalSeparationMode::Coros, &COROS_MODELS[..]),
+    ] {
+        let script = generate_remote_script(mode, models, 12, 8, "pw", "/content/in.wav");
 
-// T2. Every uploader in the chain carries a complete, runnable shell snippet
-// with the three contract placeholders substituted by the generator. A chain
-// entry that cannot compile into the remote script is worse than no entry.
-#[test]
-fn test_every_uploader_block_is_complete() {
-    let block = build_uploader_block("/tmp/in.enc", "/tmp/in.enc");
-    for uploader in TRANSFER_UPLOADERS {
+        assert!(!script.contains("openssl"), "openssl encryption must be removed");
+        assert!(!script.contains("catbox"), "catbox upload must be removed");
+        assert!(!script.contains("litterbox"), "litterbox upload must be removed");
+        assert!(!script.contains("catbox.moe"), "catbox host must be removed");
+        assert!(!script.contains("litterbox.catbox.moe"), "litterbox host must be removed");
+        assert!(!script.contains("enc_path"), "the encrypted payload path must be removed");
+        assert!(!script.contains("TRANSFER_OK"), "the uploader-chain protocol must be removed");
+        assert!(!script.contains("ALL_UPLOADERS_FAILED"), "the uploader-chain failure path must be removed");
+        assert!(!script.contains("tmpfiles"), "the tmpfiles uploader must be removed");
+        // No upload URL of any host may appear in the generated script.
         assert!(
-            block.contains(uploader.name),
-            "the generated block must label the {} attempt",
-            uploader.name
-        );
-        assert!(
-            !uploader.body.contains("{url}")
-                && !uploader.body.contains("{status}")
-                && !uploader.body.contains("{file}"),
-            "uploader {} still has unsubstituted placeholders",
-            uploader.name
+            !script.contains("https://") && !script.contains("http://"),
+            "the script must not reach an upload URL"
         );
     }
 }
 
-// T3. The generated block must try every uploader, keep the first success, and
-// only fail when the whole chain failed. Order matters: it must not stop at the
-// first uploader that merely answers.
+// T3. The single-line JSON contract still holds, and it is the only vertical
+// signal the separator relies on (`colab exec` truncates large outputs). The
+// payload must keep `url` (empty, for the result parser that requires the
+// field), `sha256`, `duration` and `size`. Only one JSON line is emitted.
 #[test]
-fn test_uploader_block_tries_chain_in_order_and_fails_last() {
-    let block = build_uploader_block("/tmp/a.enc", "/tmp/a.enc");
-    let mut last = 0usize;
-    for uploader in TRANSFER_UPLOADERS {
-        let pos = block
-            .find(uploader.name)
-            .unwrap_or_else(|| panic!("missing {} in block", uploader.name));
-        assert!(
-            pos >= last,
-            "uploader {} is out of order in the generated block",
-            uploader.name
-        );
-        last = pos;
-    }
-    assert!(
-        block.contains("TRANSFER_OK"),
-        "the block must announce success explicitly"
-    );
-    assert!(
-        block.contains("ALL_UPLOADERS_FAILED"),
-        "the block must fail loudly when every uploader failed"
-    );
-}
-
-// T4. tmpfiles answers with a landing page, not the file. The direct link lives
-// inside that HTML, so the extractor has to pull it out; a naive replace of
-// "tmpfiles.org/" with "tmpfiles.org/dl/" returns a 302 back to the page.
-#[test]
-fn test_extract_direct_link_from_tmpfiles_page() {
-    let html = r#"<p><a class="download"
-        href="https://tmpfiles.org/dl/1793811490.b0d46bbbc4cf1ae6/wVA2o0NX7Vvy/payload.bin">
-        Download (2.00 MB)</a></p>"#;
-    let link = extract_direct_link(html).expect("the direct link must be found");
-    assert_eq!(
-        link,
-        "https://tmpfiles.org/dl/1793811490.b0d46bbbc4cf1ae6/wVA2o0NX7Vvy/payload.bin"
-    );
-}
-
-// T5. A response that is already a direct file URL is returned unchanged, so
-// uploaders that answer with the file itself need no special case.
-#[test]
-fn test_extract_direct_link_accepts_plain_url() {
-    let body = "https://litter.catbox.moe/abc123.enc";
-    let link = extract_direct_link(body).expect("a plain URL must be accepted");
-    assert_eq!(link, "https://litter.catbox.moe/abc123.enc");
-}
-
-// T6. A host that answers with an error must not be mistaken for a success.
-// "Invalid uploader" has no URL in it, so extraction fails and the chain moves
-// on instead of downloading 16 bytes of error text as if it were audio.
-#[test]
-fn test_extract_direct_link_rejects_error_bodies() {
-    assert!(extract_direct_link("Invalid uploader").is_none());
-    assert!(extract_direct_link("No expire time specified.").is_none());
-    assert!(extract_direct_link("").is_none());
-    assert!(
-        extract_direct_link("Uploads paused until I can resolve storage issues. Sorry!").is_none()
-    );
-}
-
-// T7. The downloader must never accept an HTML body as the payload. That is the
-// exact failure mode that produced a "successful" 2797-byte transfer when the
-// real file was 2 MiB.
-#[test]
-fn test_downloader_rejects_html_bodies() {
-    let html = "<!DOCTYPE html><html><head><title>/tmp/files</title></head></html>";
-    assert!(
-        shirley_show::infra::vocal::colab_transfer::looks_like_html(html.as_bytes()),
-        "an HTML landing page must be rejected before decryption"
+fn test_remote_script_emits_single_line_json_with_required_fields() {
+    let script = generate_remote_script(
+        VocalSeparationMode::Instrumental,
+        &INSTRUMENTAL_MODELS,
+        12,
+        8,
+        "pw",
+        "/content/in.wav",
     );
 
-    let mp3_prefix = b"\xff\xfb\x90\x64";
-    assert!(
-        !shirley_show::infra::vocal::colab_transfer::looks_like_html(mp3_prefix),
-        "an MP3 frame header is not HTML"
-    );
+    assert!(script.contains("\"url\": \"\""), "url must be present and empty");
+    assert!(script.contains("\"sha256\""), "sha256 field must be present");
+    assert!(script.contains("\"duration\""), "duration field must be present");
+    assert!(script.contains("\"size\""), "size field must be present");
+    assert!(script.contains("json.dumps(payload)"), "the payload must be dumped as JSON");
+    assert!(script.contains("print(json.dumps(payload))"), "exactly one JSON line must be printed");
+
+    // The JSON is emitted as one literal object; there must be no upload/URL
+    // handling that could inject a second line.
+    let payload_lines: Vec<&str> = script
+        .lines()
+        .filter(|l| l.contains("json.dumps(payload)"))
+        .collect();
+    assert_eq!(payload_lines.len(), 1, "the payload must be dumped exactly once");
 }
 
 // T8. The retention window is a named constant, not a literal scattered in the
@@ -130,14 +71,7 @@ fn test_downloader_rejects_html_bodies() {
 // minutes after the last request.
 #[test]
 fn test_retention_window_is_three_minutes() {
-    assert_eq!(
-        shirley_show::infra::vocal::colab_transfer::SESSION_IDLE_RETENTION.as_secs(),
-        180
-    );
-    let _ = TransferUploader {
-        name: "x",
-        body: "y",
-    };
+    assert_eq!(SESSION_IDLE_RETENTION.as_secs(), 180);
 }
 
 // T9. `colab exec --json` does not print the script's stdout: it wraps it in
@@ -146,7 +80,7 @@ fn test_retention_window_is_three_minutes() {
 // "invalid output", which is indistinguishable from a real failure.
 #[test]
 fn test_parse_recovers_payload_from_colab_exec_envelope() {
-    let inner = r#"{"url": "https://tmpfiles.org/dl/1.a/b/output.mp3.enc", "sha256": "e85cba", "duration": 60.03, "size": 2402264}"#;
+    let inner = r#"{"url": "", "sha256": "e85cba", "duration": 60.03, "size": 2402264}"#;
     let envelope = serde_json::json!({
         "duration": 133.8,
         "gpu": "G4",
@@ -158,7 +92,7 @@ fn test_parse_recovers_payload_from_colab_exec_envelope() {
     let parsed =
         shirley_show::infra::vocal::colab_vocal_separator::parse_execution_result(&envelope)
             .expect("the envelope must be unwrapped");
-    assert_eq!(parsed.url, "https://tmpfiles.org/dl/1.a/b/output.mp3.enc");
+    assert_eq!(parsed.url, "");
     assert_eq!(parsed.sha256, "e85cba");
     assert_eq!(parsed.size, 2402264);
 }
@@ -167,10 +101,10 @@ fn test_parse_recovers_payload_from_colab_exec_envelope() {
 // `colab exec` without --json and the probes both produce that shape.
 #[test]
 fn test_parse_accepts_bare_payload_line() {
-    let bare = r#"{"url": "https://x/y.enc", "sha256": "abc", "duration": 1.0, "size": 10}"#;
+    let bare = r#"{"url": "", "sha256": "abc", "duration": 1.0, "size": 10}"#;
     let parsed = shirley_show::infra::vocal::colab_vocal_separator::parse_execution_result(bare)
         .expect("a bare line must parse");
-    assert_eq!(parsed.url, "https://x/y.enc");
+    assert_eq!(parsed.url, "");
 }
 
 // T11. A runtime that failed must NOT be parsed as success. The envelope says
@@ -181,7 +115,7 @@ fn test_parse_rejects_envelope_without_payload() {
     let envelope = serde_json::json!({
         "duration": 12.0,
         "gpu": "G4",
-        "output": "RuntimeError: Litterbox upload failed: Invalid uploader\n",
+        "output": "RuntimeError: separation failed\n",
         "status": "success"
     })
     .to_string();
@@ -201,34 +135,13 @@ fn test_parse_handles_pretty_printed_multiline_envelope() {
     let raw = r#"{
   "duration": 128.975650017,
   "gpu": "G4",
-  "output": "{\"url\": \"https://tmpfiles.org/dl/1.a/b/output.mp3.enc\", \"sha256\": \"e85cba\", \"duration\": 60.029388, \"size\": 2402264}\n",
+  "output": "{\"url\": \"\", \"sha256\": \"e85cba\", \"duration\": 60.029388, \"size\": 2402264}\n",
   "status": "success"
 }"#;
     let parsed = shirley_show::infra::vocal::colab_vocal_separator::parse_execution_result(raw)
         .expect("a multi-line envelope must be unwrapped");
-    assert_eq!(parsed.url, "https://tmpfiles.org/dl/1.a/b/output.mp3.enc");
+    assert_eq!(parsed.url, "");
     assert_eq!(parsed.size, 2402264);
-}
-
-// T13. tmpfiles (behind Cloudflare) publishes AAAA records that are not routable
-// from here: the connect to [::]:443 is refused while the same host over IPv4
-// answers 200. reqwest offered no way to prefer IPv4, so the download runs
-// through curl with -4. The flag must be there, and --fail must be there so an
-// HTTP error is never written to disk as if it were the payload.
-#[test]
-fn test_transfer_curl_args_pin_ipv4_and_fail_on_http_errors() {
-    let args = shirley_show::infra::vocal::colab_transfer::transfer_curl_args(
-        "https://example.test/x.enc",
-        "/tmp/x.enc",
-        300,
-    );
-    assert!(args.contains(&"-4".to_string()), "IPv4 must be pinned");
-    assert!(
-        args.contains(&"--fail".to_string()),
-        "an HTTP error must not be saved as a file"
-    );
-    assert!(args.contains(&"https://example.test/x.enc".to_string()));
-    assert!(args.contains(&"/tmp/x.enc".to_string()));
 }
 
 // T14. The user's requirement, stated directly: after a request finishes, the
@@ -276,10 +189,7 @@ fn test_session_cache_drops_invalidated_session() {
 // silently become 10 seconds or an hour.
 #[test]
 fn test_retention_is_three_minutes() {
-    assert_eq!(
-        shirley_show::infra::vocal::colab_transfer::SESSION_IDLE_RETENTION.as_secs(),
-        180
-    );
+    assert_eq!(SESSION_IDLE_RETENTION.as_secs(), 180);
 }
 
 // T14b. The retention boundary must be checked against the age the session
@@ -313,201 +223,6 @@ fn test_session_cache_expires_against_real_age() {
     assert_eq!(
         cache.reusable(Duration::from_secs(180)).as_deref(),
         Some("sess-new")
-    );
-}
-
-// T17. A transient connection failure must be retried, because the same URL
-// answered 200 on four manual checks and failed once inside a run. One refusal
-// cannot be treated as "no uploader accepted the file": that discards minutes of
-// GPU work.
-//
-// An HTTP error must NOT be retried: a 404 or a 412 answers the same forever,
-// and retrying only adds latency to a decided failure. curl reports that case as
-// exit 22 via --fail, so the two are distinguishable.
-#[test]
-fn test_fetch_with_retry_succeeds_after_transient_failures() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-
-    // A server that drops the first two connections and then serves the payload.
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        let payload = b"PAYLOAD-BYTES";
-        let mut served = 0;
-        for stream in listener.incoming() {
-            let mut s = match stream {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            if served < 2 {
-                served += 1;
-                // Close without answering: a connection-level failure.
-                drop(s);
-                continue;
-            }
-            let mut buf = [0u8; 1024];
-            let _ = s.read(&mut buf);
-            let header = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                payload.len()
-            );
-            let _ = s.write_all(header.as_bytes());
-            let _ = s.write_all(payload);
-            let _ = s.flush();
-            served += 1;
-            if served >= 3 {
-                break;
-            }
-        }
-    });
-
-    let dest = std::env::temp_dir().join(format!("retry_{}.bin", std::process::id()));
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let url = format!("http://127.0.0.1:{port}/x");
-    let result = rt.block_on(async {
-        shirley_show::infra::vocal::colab_transfer::fetch_with_retry(
-            &url,
-            &dest,
-            std::time::Duration::from_secs(10),
-            4,
-        )
-        .await
-    });
-    let _ = std::fs::remove_file(&dest);
-
-    match result {
-        Ok(bytes) => assert_eq!(bytes, b"PAYLOAD-BYTES"),
-        Err(e) => panic!("a transient failure must be retried, got: {e}"),
-    }
-}
-
-// T18. An HTTP error is not transient. Retrying it wastes the caller's budget
-// on a decision that is already made.
-#[test]
-fn test_fetch_with_retry_does_not_retry_http_errors() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let hits = std::sync::Arc::new(AtomicUsize::new(0));
-    let hits_srv = hits.clone();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let mut s = match stream {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let mut buf = [0u8; 1024];
-            let _ = s.read(&mut buf);
-            hits_srv.fetch_add(1, Ordering::SeqCst);
-            let _ = s.write_all(b"HTTP/1.1 412 Precondition Failed\r\nContent-Length: 3\r\nConnection: close\r\n\r\nno!");
-            let _ = s.flush();
-        }
-    });
-
-    let dest = std::env::temp_dir().join(format!("noretry_{}.bin", std::process::id()));
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let url = format!("http://127.0.0.1:{port}/x");
-    let result = rt.block_on(async {
-        shirley_show::infra::vocal::colab_transfer::fetch_with_retry(
-            &url,
-            &dest,
-            std::time::Duration::from_secs(10),
-            4,
-        )
-        .await
-    });
-    let _ = std::fs::remove_file(&dest);
-
-    assert!(result.is_err(), "an HTTP error must fail");
-    assert_eq!(
-        hits.load(Ordering::SeqCst),
-        1,
-        "an HTTP error must not be retried"
-    );
-}
-
-// R4-002 / R3-003. The generated chain emitted "break" outside any loop. Bash
-// reports that as an error and *continues*, so a successful uploader did not end
-// the chain: it uploaded the same encrypted payload to every fallback host and
-// could spend 300s more after already succeeding. Found by native review.
-//
-// This runs the real generated block against a fake curl and counts calls.
-#[test]
-fn test_uploader_chain_stops_after_first_success() {
-    use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = std::env::temp_dir().join(format!("chain_{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
-
-    // Fake tools: curl always reports a URL, python3 passes stdin through.
-    let fake_curl = dir.join("curl");
-    let mut f = std::fs::File::create(&fake_curl).unwrap();
-    writeln!(f, "#!/bin/sh").unwrap();
-    writeln!(f, "echo CALLED >> {}", dir.join("calls").display()).unwrap();
-    writeln!(f, "echo https://fake.example/file.enc").unwrap();
-    drop(f);
-    std::fs::set_permissions(&fake_curl, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-    // The tmpfiles uploader pipes curl through python3 to extract the URL. A real
-    // python3 would parse the fake response and fail, so the fake must cover it
-    // too: emit a direct link and let the shell continue.
-    let fake_py = dir.join("python3");
-    let mut p = std::fs::File::create(&fake_py).unwrap();
-    writeln!(p, "#!/bin/sh").unwrap();
-    writeln!(p, "cat > /dev/null").unwrap();
-    writeln!(p, "echo https://fake.example/direct.enc").unwrap();
-    drop(p);
-    std::fs::set_permissions(&fake_py, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-    let block_path = dir.join("block.sh");
-    let block = shirley_show::infra::vocal::colab_transfer::build_uploader_block(
-        "/tmp/nonexistent.enc",
-        "/tmp/nonexistent.enc",
-    );
-    std::fs::write(&block_path, &block).unwrap();
-
-    let path_with_fake = format!(
-        "{}:{}",
-        dir.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-
-    let out = std::process::Command::new("bash")
-        .arg(&block_path)
-        .env("PATH", &path_with_fake)
-        .output()
-        .expect("bash must run");
-
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    let calls = std::fs::read_to_string(dir.join("calls"))
-        .map(|s| s.lines().count())
-        .unwrap_or(0);
-
-    let _ = std::fs::remove_dir_all(&dir);
-
-    assert!(
-        stdout.contains("TRANSFER_OK"),
-        "the chain must report success, got: {stdout} / {stderr}"
-    );
-    assert!(
-        !stderr.contains("break: "),
-        "the generated shell must not emit break outside a loop: {stderr}"
-    );
-    // Three uploaders exist; a working chain stops at the first.
-    // tmpfiles legitimately makes two requests: the upload and then the landing
-    // page it must read to find the direct link. What matters is that the chain
-    // stopped there instead of falling through to litterbox and catbox, which
-    // would be four to six requests. Counting hosts is the assertion; counting
-    // requests would pin an implementation detail.
-    assert!(
-        calls <= 2,
-        "the chain must stop after the first uploader succeeds, made {calls} requests"
     );
 }
 
@@ -588,57 +303,6 @@ fn test_cache_is_stamped_at_finish_not_at_start() {
         cache.reusable(retention).as_deref(),
         Some("sess-1"),
         "a fresh stamp at finish makes the window count from completion"
-    );
-}
-
-// R3-004. Each retry attempt used to receive the full caller timeout, so four
-// attempts could run about four times past the separation's deadline. The budget
-// belongs to the caller: total time must stay inside it.
-#[test]
-fn test_retry_respects_the_callers_total_budget() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::time::{Duration, Instant};
-
-    // A server that never answers properly: it accepts and stalls, forcing
-    // retries until the budget is spent.
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        let mut held = Vec::new();
-        for stream in listener.incoming() {
-            let mut s = match stream {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let mut buf = [0u8; 64];
-            let _ = s.read(&mut buf);
-            // Keep the connection open without responding.
-            held.push(s);
-            let _: &mut Vec<std::net::TcpStream> = &mut held;
-        }
-    });
-
-    let dest = std::env::temp_dir().join(format!("budget_{}.bin", std::process::id()));
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let budget = Duration::from_secs(3);
-    let started = Instant::now();
-    let result = rt.block_on(async {
-        shirley_show::infra::vocal::colab_transfer::fetch_with_retry(
-            &format!("http://127.0.0.1:{port}/x"),
-            &dest,
-            budget,
-            6,
-        )
-        .await
-    });
-    let elapsed = started.elapsed();
-    let _ = std::fs::remove_file(&dest);
-
-    assert!(result.is_err(), "a stalling server must fail");
-    assert!(
-        elapsed < budget + Duration::from_secs(3),
-        "six attempts must not each get the full budget: took {elapsed:?} for a {budget:?} budget"
     );
 }
 
@@ -821,8 +485,6 @@ fn test_boot_sweep_stops_regardless_of_retention() {
 // not match, so the decision belongs to the verification, not the exit status.
 #[test]
 fn test_upload_exit_code_alone_does_not_decide_success() {
-    use shirley_show::infra::vocal::colab_transfer::{UploadVerdict, upload_verdict};
-
     // The exact production case: exit 1, file intact.
     assert_eq!(
         upload_verdict(false, Some(289_689), 289_689),

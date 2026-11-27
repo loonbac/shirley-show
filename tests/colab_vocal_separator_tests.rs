@@ -169,8 +169,9 @@ fn test_remote_script_generation_content() {
     }
     // Check overlap
     assert!(script.contains("OVERLAP = 12") || script.contains("--mdxc_overlap"));
-    // Check password
-    assert!(script.contains("super_secret_pw"));
+    // Check no password leaks into the script
+    assert!(!script.contains("super_secret_pw"));
+    assert!(!script.contains("password"));
     // Check conditional import of audio-separator
     assert!(script.contains("audio_separator"));
     assert!(script.contains("ImportError"));
@@ -182,13 +183,17 @@ fn test_remote_script_generation_content() {
     // Check ffmpeg mp3 320k encoding
     assert!(script.contains("libmp3lame"));
     assert!(script.contains("320k"));
-    // Check openssl encryption and curl upload to litterbox
-    assert!(script.contains("openssl"));
-    assert!(script.contains("-aes-256-cbc"));
-    assert!(script.contains("-pbkdf2"));
-    assert!(script.contains("litterbox.catbox.moe"));
+    // Check no openssl encryption, catbox or upload URL in the script
+    assert!(!script.contains("openssl"));
+    assert!(!script.contains("catbox"));
+    assert!(!script.contains("litterbox"));
+    assert!(!script.contains("http"));
     // Check single JSON output line
     assert!(script.contains("json.dumps"));
+    assert!(script.contains("\"url\""));
+    assert!(script.contains("\"sha256\""));
+    assert!(script.contains("\"duration\""));
+    assert!(script.contains("\"size\""));
 }
 
 #[test]
@@ -205,7 +210,16 @@ fn test_remote_script_generation_coros_mode() {
     for m in COROS_MODELS {
         assert!(script.contains(m), "Script missing coros model {m}");
     }
-    assert!(script.contains("another_pass"));
+    assert!(!script.contains("another_pass"));
+    assert!(!script.contains("password"));
+    assert!(!script.contains("openssl"));
+    assert!(!script.contains("catbox"));
+    assert!(!script.contains("litterbox"));
+    assert!(!script.contains("http"));
+    assert!(script.contains("\"url\""));
+    assert!(script.contains("\"sha256\""));
+    assert!(script.contains("\"duration\""));
+    assert!(script.contains("\"size\""));
 }
 
 #[test]
