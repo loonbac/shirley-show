@@ -56,15 +56,29 @@ pub const SUPPORTED_COLAB_GPUS: [&str; 5] = ["T4", "L4", "G4", "H100", "A100"];
 ///
 /// * `G4` (RTX PRO 6000 Blackwell, 102 GB) is the measured fastest device in
 ///   this codebase.
-/// * `H100` is next.
 /// * `A100` is the device this project measured its models on; it is slower than
-///   the two above and faster than the rest.
+///   G4 and faster than the rest.
 /// * `L4` is the reliable floor: it is the one that has answered every time it
 ///   was asked, at a real cost in throughput.
 /// * `T4` is last and is not in the default chain. A separation on it does not
 ///   fit the pipeline reserve, so it is only ever reached when the
 ///   configuration names it explicitly and everything faster has refused.
-pub const PERFORMANCE_GPU_ORDER: [&str; 5] = ["G4", "H100", "A100", "L4", "T4"];
+///
+/// `H100` is deliberately absent: the CLI accepts the spelling, but this account
+/// cannot be assigned one. Every H100 request in production answered HTTP 400,
+/// so a slot in the ranking was a slot spent on an impossible assignment. See
+/// [`GPU_UNAVAILABLE_FOR_ACCOUNT`].
+pub const PERFORMANCE_GPU_ORDER: [&str; 4] = ["G4", "A100", "L4", "T4"];
+
+/// Accelerators the CLI accepts but this account cannot be assigned.
+///
+/// The Colab UI greys `H100` out for this account and production proved it: every
+/// H100 assignment returned HTTP 400. The user's instruction is to discard it,
+/// so it is filtered exactly like a value the CLI rejects — configured or not, it
+/// never becomes an attempt. Keeping the name here instead of deleting it
+/// documents the difference between "the CLI does not know it" and "this account
+/// cannot use it".
+pub const GPU_UNAVAILABLE_FOR_ACCOUNT: [&str; 1] = ["H100"];
 
 /// Splits the request budget in two: GPU assignment may not touch the half that
 /// upload, exec and download still need.
@@ -103,9 +117,9 @@ pub const GPU_MAX_ROUNDS_DEFAULT: u32 = 4;
 /// The chain used when the configuration names no usable accelerator.
 ///
 /// Same order as the documented defaults: the fastest measured option first,
-/// then the other fast ones, then the measured floor. `T4` is deliberately
-/// absent.
-pub const DEFAULT_GPU_CHAIN: [&str; 4] = ["G4", "H100", "A100", "L4"];
+/// then A100, then the measured floor. `T4` is deliberately absent, and `H100`
+/// is absent because this account cannot assign one.
+pub const DEFAULT_GPU_CHAIN: [&str; 3] = ["G4", "A100", "L4"];
 
 /// Canonical, uppercase name of a configured accelerator, or `None` when the
 /// CLI does not accept it.
@@ -124,25 +138,44 @@ pub fn normalize_gpu(value: &str) -> Option<String> {
         .map(|gpu| gpu.to_string())
 }
 
+/// Whether this account can really assign `value`, as opposed to whether the CLI
+/// accepts the spelling.
+///
+/// `normalize_gpu` answers the CLI's question; this answers the account's. `H100`
+/// is the case that separates them: `colab new --gpu H100` is a valid command and
+/// a guaranteed HTTP 400 here, so configured or not it is dropped before it can
+/// spend an attempt.
+pub fn gpu_is_supported(value: &str) -> bool {
+    match normalize_gpu(value) {
+        Some(gpu) => !GPU_UNAVAILABLE_FOR_ACCOUNT.contains(&gpu.as_str()),
+        None => false,
+    }
+}
+
 /// The accelerators to attempt, ALWAYS ordered by performance.
 ///
 /// The configuration decides WHICH devices are eligible; it never decides the
 /// order. Production still carries `SHIRLEY_COLAB_GPU=a100` from an old
 /// mitigation, and honouring that order put the third-fastest device first: a
-/// separation then waited for A100 capacity while G4 and H100 sat free, which is
+/// separation then waited for A100 capacity while G4 sat free, which is
 /// the slowness the user reported.
 ///
 /// The eligible set is the normalized configured values plus the fast defaults,
 /// so a busy configured pair is never the whole rotation: once the configured
 /// accelerators refuse, the remaining supported ones are tried too. Values the
-/// CLI does not accept (`14` was one) are dropped instead of attempted, and T4
-/// stays at the end of [`PERFORMANCE_GPU_ORDER`], reachable only when the
-/// configuration names it.
+/// CLI does not accept (`14` was one) are dropped instead of attempted, and so
+/// are values the CLI accepts but this account cannot assign (`H100`). T4 stays
+/// at the end of [`PERFORMANCE_GPU_ORDER`], reachable only when the configuration
+/// names it.
 pub fn gpu_candidates(primary: &str, fallbacks: &[String]) -> Vec<String> {
     let mut configured: Vec<String> = Vec::new();
     for raw in std::iter::once(primary).chain(fallbacks.iter().map(String::as_str)) {
         if let Some(gpu) = normalize_gpu(raw) {
-            if !configured.contains(&gpu) {
+            // `H100` is dropped exactly like an invalid value: the CLI knows the
+            // name, this account cannot use it, and attempting it wastes the
+            // attempt that a real device could have used.
+            if !GPU_UNAVAILABLE_FOR_ACCOUNT.contains(&gpu.as_str()) && !configured.contains(&gpu)
+            {
                 configured.push(gpu);
             }
         }
@@ -314,7 +347,7 @@ impl ColabVocalSeparatorConfig {
         // accelerators are eligible; the attempt order is always
         // `PERFORMANCE_GPU_ORDER`, fastest first, so a deployment that still
         // carries `SHIRLEY_COLAB_GPU=a100` from an old mitigation can never push
-        // A100 ahead of G4 or H100.
+        // A100 ahead of G4.
         //
         // The variable keeps its singular name even though it now holds a list.
         // Renaming it to `_FALLBACKS` would silently restore the default chain
@@ -322,11 +355,12 @@ impl ColabVocalSeparatorConfig {
         // would complain: the chain is read from the environment, not compiled
         // in. Keep the name.
         //
-        // A value that names no accelerator the CLI accepts is treated as unset
-        // rather than as an empty chain: production carries `14`, which the CLI
-        // rejects with `unsupported value '14'. Supported: T4, L4, G4, H100,
-        // A100.` Keeping it would leave the primary as the only option and turn
-        // one 503 into a failed, already-paid request.
+        // A value this account cannot use is treated as unset rather than as an
+        // empty chain: production carries `14`, which the CLI rejects with
+        // `unsupported value '14'. Supported: T4, L4, G4, H100, A100.`, and a
+        // deployment may carry `h100`, which the CLI accepts but always answers
+        // with HTTP 400. Either way, keeping it would leave the primary as the
+        // only option and turn one 503 into a failed, already-paid request.
         let gpu_fallbacks: Vec<String> = match std::env::var("SHIRLEY_COLAB_GPU_FALLBACK") {
             Ok(raw) => {
                 let parsed: Vec<String> = raw
@@ -335,7 +369,7 @@ impl ColabVocalSeparatorConfig {
                     .filter(|s| !s.is_empty())
                     .map(str::to_string)
                     .collect();
-                if !parsed.is_empty() && parsed.iter().all(|v| normalize_gpu(v).is_none()) {
+                if !parsed.is_empty() && parsed.iter().all(|v| !gpu_is_supported(v)) {
                     default_gpu_fallbacks()
                 } else {
                     parsed

@@ -416,6 +416,10 @@ struct MockColabFixture {
     /// When present, `stop` exits 1 with "Session not found" on stderr, which
     /// the adapter must treat as a successful cleanup.
     trigger_stop_not_found: PathBuf,
+    /// When present, the runtime is gone: the health probe (`colab exec` of a
+    /// trivial script) and `status -s` both fail the way the real CLI does when
+    /// the session or its kernel no longer exists.
+    trigger_dead_session: PathBuf,
     sample_wav: PathBuf,
     token_file: PathBuf,
 }
@@ -435,6 +439,7 @@ impl MockColabFixture {
         let trigger_bad_sha = temp_dir.path().join("bad_sha");
         let trigger_bad_duration = temp_dir.path().join("bad_duration");
         let trigger_stop_not_found = temp_dir.path().join("stop_not_found");
+        let trigger_dead_session = temp_dir.path().join("dead_session");
 
         let sample_wav = temp_dir.path().join("sample_input.wav");
         write_silence_wav(&sample_wav, 1);
@@ -462,6 +467,7 @@ impl MockColabFixture {
         let bad_sha_str = trigger_bad_sha.display().to_string();
         let bad_dur_str = trigger_bad_duration.display().to_string();
         let stop_not_found_str = trigger_stop_not_found.display().to_string();
+        let dead_session_str = trigger_dead_session.display().to_string();
         let temp_dir_str = temp_dir.path().display().to_string();
 
         let script = format!(
@@ -543,6 +549,11 @@ elif [ "$cmd" = "exec" ]; then
     # `-f`, so it is detected by content, not by flag shape.
     is_probe=0
     if grep -q "SIZE=" "$script_file" 2>/dev/null; then is_probe=1; fi
+    # The health probe is a trivial script that only prints a marker. It is how
+    # the adapter proves a runtime still answers after a failed separation, so
+    # it is detected by content too.
+    is_ping=0
+    if grep -q "SHIRLEY_PING" "$script_file" 2>/dev/null; then is_ping=1; fi
 
     # The real CLI aborts a call whose kernel prints nothing for `--timeout`
     # seconds (default 30) and reports it on stderr. The production run died
@@ -560,6 +571,17 @@ elif [ "$cmd" = "exec" ]; then
         ""|*[!0-9]*) too_short=1 ;;
         *) if [ "$silence" -gt 30 ]; then too_short=0; fi ;;
     esac
+    if [ "$is_ping" = "1" ]; then
+        # A live runtime answers a trivial exec; a reclaimed one answers exactly
+        # like the CLI does when the session or its kernel is gone.
+        echo "ping $@" >> "{log_str}"
+        if [ -f "{dead_session_str}" ]; then
+            echo "Session not found" >&2
+            exit 1
+        fi
+        echo "SHIRLEY_PING_OK"
+        exit 0
+    fi
     if [ -f "{require_timeout_str}" ] && [ "$too_short" = "1" ]; then
         echo "execfail $@" >> "{log_str}"
         echo "Traceback (most recent call last):" >&2
@@ -614,6 +636,7 @@ elif [ "$cmd" = "exec" ]; then
     exit 0
 elif [ "$cmd" = "status" ]; then
     echo "status $@" >> "{log_str}"
+    if [ -f "{dead_session_str}" ]; then exit 1; fi
     exit 0
 elif [ "$cmd" = "download" ]; then
     echo "download $@" >> "{log_str}"
@@ -658,6 +681,7 @@ fi
             trigger_bad_sha,
             trigger_bad_duration,
             trigger_stop_not_found,
+            trigger_dead_session,
             sample_wav,
             token_file,
         }
@@ -756,8 +780,15 @@ async fn test_colab_vocal_separator_start_failure_returns_colab_unavailable() {
     assert_eq!(gpu.available_permits(), 1);
 }
 
+/// A failure AFTER the GPU was assigned must not throw the machine away.
+///
+/// The user's rule: once Google gives us a GPU we keep it until it is really not
+/// going to be used. A failed `colab exec` leaves the runtime perfectly healthy,
+/// so stopping it here made the retry fight Colab's 503s again from zero. The
+/// healthy session must stay cached under the same ten-minute window, counted
+/// from the end of the failed attempt, and the next request must reuse it.
 #[tokio::test]
-async fn test_colab_vocal_separator_exec_failure_still_runs_stop() {
+async fn test_colab_vocal_separator_exec_failure_keeps_the_healthy_session() {
     let fixture = MockColabEnv::new_fixture();
     std::fs::write(&fixture.trigger_fail_exec, b"fail").unwrap();
 
@@ -778,12 +809,100 @@ async fn test_colab_vocal_separator_exec_failure_still_runs_stop() {
 
     let log = fixture.read_log();
     assert!(log.contains("new"));
-    assert!(log.contains("stop"), "Must call stop even on exec failure");
-    assert_eq!(gpu.available_permits(), 1);
+    // The health probe proves the runtime still answers...
+    assert!(
+        log.lines().any(|l| l.starts_with("ping ")),
+        "a failed attempt must probe the session before deciding, log was: {log}"
+    );
+    // ...so the machine must NOT be stopped: it stays warm for the next try.
+    assert!(
+        !log.lines().any(|l| l.starts_with("stop ")),
+        "a healthy session must be kept after a failed attempt, log was: {log}"
+    );
+    assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
+
+    // A second request reuses the same machine instead of paying another
+    // assignment round. The failure trigger is removed first: the point is that
+    // the retry lands on the SAME runtime, not that it fails again.
+    std::fs::remove_file(&fixture.trigger_fail_exec).unwrap();
+    let req2 = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("retry_out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+    sep.separate(req2).await.expect("the retry must reuse the kept session");
+
+    let log = fixture.read_log();
+    let new_lines: Vec<&str> = log.lines().filter(|l| l.starts_with("new ")).collect();
+    assert_eq!(
+        new_lines.len(),
+        1,
+        "the retry must reuse the kept runtime, not assign another one, log was: {log}"
+    );
 }
 
+/// The counterpart of the rule above: a session that is provably gone must never
+/// stay cached. The retry would then hand a dead id to `colab exec` and fail far
+/// from the cause, so it is released at once.
 #[tokio::test]
-async fn test_colab_vocal_separator_sha256_mismatch_fails_and_runs_stop() {
+async fn test_colab_vocal_separator_dead_session_is_released_after_failure() {
+    let fixture = MockColabEnv::new_fixture();
+    std::fs::write(&fixture.trigger_fail_exec, b"fail").unwrap();
+    // The runtime is gone: the health probe answers "Session not found" and
+    // `status -s` fails, exactly like a reclaimed Colab machine.
+    std::fs::write(&fixture.trigger_dead_session, b"dead").unwrap();
+
+    let gpu = Arc::new(Semaphore::new(1));
+    let cfg = fixture.make_config(gpu.clone());
+    let sep = ColabVocalSeparator::new(cfg);
+
+    let req = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("dead_out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+
+    let res = sep.separate(req).await;
+    assert_eq!(res.unwrap_err(), VocalSeparationError::SeparationFailed);
+
+    let log = fixture.read_log();
+    assert!(
+        log.lines().any(|l| l.starts_with("stop ")),
+        "a session proven dead must be released, log was: {log}"
+    );
+    assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
+
+    // Nothing dead is cached: the next request assigns a fresh runtime. The
+    // failure trigger is removed so a healthy runtime can complete the retry.
+    std::fs::remove_file(&fixture.trigger_fail_exec).unwrap();
+    let req2 = VocalSeparationRequest {
+        source_path: fixture.sample_wav.clone(),
+        output_path: fixture.temp_dir.path().join("dead_retry_out.mp3"),
+        mode: VocalSeparationMode::Instrumental,
+        timeout: Duration::from_secs(60),
+    };
+    let res2 = sep.separate(req2).await;
+    assert!(
+        res2.is_ok(),
+        "a fresh runtime must be assigned after the dead one is released, got: {res2:?}"
+    );
+
+    let log = fixture.read_log();
+    let new_lines: Vec<&str> = log.lines().filter(|l| l.starts_with("new ")).collect();
+    assert_eq!(
+        new_lines.len(),
+        2,
+        "a dead session must never be reused, log was: {log}"
+    );
+}
+
+/// A verification failure after the pipeline ran leaves the runtime healthy, so
+/// the machine is kept under the retention window instead of being stopped (L14:
+/// once Google gives us a GPU, keep it until it is really not going to be used).
+#[tokio::test]
+async fn test_colab_vocal_separator_sha256_mismatch_keeps_the_healthy_session() {
     let fixture = MockColabEnv::new_fixture();
     std::fs::write(&fixture.trigger_bad_sha, b"bad").unwrap();
 
@@ -806,12 +925,21 @@ async fn test_colab_vocal_separator_sha256_mismatch_fails_and_runs_stop() {
     );
 
     let log = fixture.read_log();
-    assert!(log.contains("stop"), "Must call stop on sha256 mismatch");
+    assert!(
+        log.lines().any(|l| l.starts_with("ping ")),
+        "the session must be probed before deciding, log was: {log}"
+    );
+    assert!(
+        !log.lines().any(|l| l.starts_with("stop ")),
+        "a checksum mismatch does not break the runtime, so it must be kept, log was: {log}"
+    );
     assert_eq!(gpu.available_permits(), 1);
 }
 
+/// Same rule for the duration check: a wrong duration is a result problem, not a
+/// dead machine.
 #[tokio::test]
-async fn test_colab_vocal_separator_duration_mismatch_fails_and_runs_stop() {
+async fn test_colab_vocal_separator_duration_mismatch_keeps_the_healthy_session() {
     let fixture = MockColabEnv::new_fixture();
     std::fs::write(&fixture.trigger_bad_duration, b"bad").unwrap();
 
@@ -834,7 +962,10 @@ async fn test_colab_vocal_separator_duration_mismatch_fails_and_runs_stop() {
     );
 
     let log = fixture.read_log();
-    assert!(log.contains("stop"), "Must call stop on duration mismatch");
+    assert!(
+        !log.lines().any(|l| l.starts_with("stop ")),
+        "a duration mismatch does not break the runtime, so it must be kept, log was: {log}"
+    );
     assert_eq!(gpu.available_permits(), 1);
 }
 
@@ -994,8 +1125,8 @@ async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
         "the broken GPU must not be logged as started, log was: {log}"
     );
     assert!(
-        starts[0].contains("--gpu H100"),
-        "the run must land on the next fastest GPU, log was: {log}"
+        starts[0].contains("--gpu A100"),
+        "the run must land on the next fastest usable GPU, log was: {log}"
     );
     assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
 }
@@ -1006,7 +1137,7 @@ async fn test_start_falls_back_to_secondary_gpu_when_primary_fails_to_assign() {
 #[tokio::test]
 async fn test_start_without_fallback_still_reports_colab_unavailable() {
     let fixture = MockColabEnv::new_fixture();
-    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100\nl4").unwrap();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\na100\nl4").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1033,7 +1164,7 @@ async fn test_start_without_fallback_still_reports_colab_unavailable() {
 #[tokio::test]
 async fn test_start_walks_the_whole_gpu_chain_until_one_assigns() {
     let fixture = MockColabEnv::new_fixture();
-    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100\n").unwrap();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\na100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1154,15 +1285,17 @@ fn test_stop_ok_treats_not_found_as_success() {
     assert!(!stop_ok(&other, b""));
 }
 
-/// When `stop` reports the session is already gone (exit 1, "not found"), the
-/// adapter treats it as a successful cleanup: the pipeline returns the real
-/// separation error (InvalidSeparatorOutput), not a masked SeparationFailed.
+/// When the separation fails on a checksum AND the session turns out to be gone
+/// (stop reports "not found"), the adapter returns the real separation error
+/// (InvalidSeparatorOutput) instead of masking it as SeparationFailed. The
+/// release is still attempted, which is the point of the test.
 #[tokio::test]
 async fn test_stop_on_missing_session_is_treated_as_success() {
     let fixture = MockColabEnv::new_fixture();
     // The separation itself fails on sha mismatch (InvalidSeparatorOutput), and
-    // the subsequent stop reports the session is gone.
+    // the session is already gone, so the probe fails and the cleanup runs.
     std::fs::write(&fixture.trigger_bad_sha, b"bad").unwrap();
+    std::fs::write(&fixture.trigger_dead_session, b"gone").unwrap();
     std::fs::write(&fixture.trigger_stop_not_found, b"gone").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
@@ -1182,7 +1315,10 @@ async fn test_stop_on_missing_session_is_treated_as_success() {
     assert_eq!(gpu.available_permits(), 1);
 
     let log = fixture.read_log();
-    assert!(log.contains("stop"), "stop must be attempted on error");
+    assert!(
+        log.lines().any(|l| l.starts_with("stop ")),
+        "the dead session must be released, log was: {log}"
+    );
 }
 
 /// The legacy token copy must never overwrite a newer destination: the CLI
@@ -1494,7 +1630,8 @@ fn test_gpu_chain_normalizes_and_skips_unsupported_values() {
         DEFAULT_GPU_CHAIN, SUPPORTED_COLAB_GPUS, gpu_chain, normalize_gpu,
     };
 
-    // The exact list the CLI prints for an invalid value.
+    // The exact list the CLI prints for an invalid value. This is the CLI's own
+    // contract, so H100 stays in it even though this account cannot use it.
     assert_eq!(SUPPORTED_COLAB_GPUS, ["T4", "L4", "G4", "H100", "A100"]);
     assert_eq!(normalize_gpu("g4"), Some("G4".to_string()));
     assert_eq!(normalize_gpu(" A100 "), Some("A100".to_string()));
@@ -1506,7 +1643,7 @@ fn test_gpu_chain_normalizes_and_skips_unsupported_values() {
 
     let fallbacks = vec!["14".to_string(), "l4".to_string(), "G4".to_string()];
     let chain = gpu_chain("g4", &fallbacks);
-    assert_eq!(chain, vec!["G4", "H100", "A100", "L4"]);
+    assert_eq!(chain, vec!["G4", "A100", "L4"]);
     assert!(!chain.iter().any(|g| g == "14"), "the typo must never be attempted");
     let mut sorted = chain.clone();
     sorted.sort();
@@ -1515,17 +1652,18 @@ fn test_gpu_chain_normalizes_and_skips_unsupported_values() {
 
     // When nothing configured is usable the documented chain is used instead of
     // failing a paid request on a configuration typo.
-    assert_eq!(gpu_chain("14", &["v100".to_string()]), vec!["G4", "H100", "A100", "L4"]);
+    assert_eq!(gpu_chain("14", &["v100".to_string()]), vec!["G4", "A100", "L4"]);
 
     // A configured accelerator the CLI does not accept must not disable the
     // chain either: `14` alone still rotates through the fastest options.
-    assert_eq!(gpu_chain("14", &[]), vec!["G4", "H100", "A100", "L4"]);
+    assert_eq!(gpu_chain("14", &[]), vec!["G4", "A100", "L4"]);
 
-    // The default chain is the measured performance ranking, T4 excluded.
+    // The default chain is the measured performance ranking this account can
+    // really assign, T4 and H100 excluded.
     assert_eq!(
         DEFAULT_GPU_CHAIN.to_vec(),
-        vec!["G4", "H100", "A100", "L4"],
-        "the default chain must be the fast-first ranking"
+        vec!["G4", "A100", "L4"],
+        "the default chain must be the fast-first ranking this account can use"
     );
 }
 
@@ -1541,39 +1679,94 @@ fn test_gpu_chain_is_ordered_by_performance_not_by_configuration() {
     // The production configuration today.
     assert_eq!(
         gpu_chain("a100", &["l4".to_string()]),
-        vec!["G4", "H100", "A100", "L4"],
+        vec!["G4", "A100", "L4"],
         "a configured primary must not outrank a faster accelerator"
     );
 
     // Any other configuration order still yields the same attempt order.
     assert_eq!(
         gpu_chain("l4", &["a100".to_string(), "g4".to_string()]),
-        vec!["G4", "H100", "A100", "L4"]
+        vec!["G4", "A100", "L4"]
     );
     // A restricted configuration cannot demote the fastest device either.
-    assert_eq!(gpu_chain("h100", &[]), vec!["G4", "H100", "A100", "L4"]);
+    assert_eq!(gpu_chain("a100", &[]), vec!["G4", "A100", "L4"]);
     // T4 is excluded by default: these models do not fit in the pipeline
     // reserve on it. Naming it explicitly is the only way to reach it, and even
     // then it goes last because it is the slowest device.
     assert_eq!(
         gpu_chain("t4", &["l4".to_string()]),
-        vec!["G4", "H100", "A100", "L4", "T4"]
+        vec!["G4", "A100", "L4", "T4"]
     );
     // Unsupported configured values neither break the chain nor add an attempt.
-    assert_eq!(gpu_chain("14", &["v100".to_string()]), vec!["G4", "H100", "A100", "L4"]);
+    assert_eq!(gpu_chain("14", &["v100".to_string()]), vec!["G4", "A100", "L4"]);
     // Every extra supported accelerator is reached even when it is configured
     // nowhere: a busy configured pair must not be the whole rotation.
-    assert_eq!(gpu_chain("g4", &[]), vec!["G4", "H100", "A100", "L4"]);
+    assert_eq!(gpu_chain("g4", &[]), vec!["G4", "A100", "L4"]);
+}
+
+/// H100 must never be attempted, even when the configuration names it.
+///
+/// This account has no H100 access: the Colab UI greys it out, and in
+/// production every H100 assignment answered HTTP 400, so each round spent an
+/// attempt on a device that cannot be assigned. The user's instruction is to
+/// discard it. It is therefore treated exactly like a value the CLI cannot use
+/// for this account: normalized away, never reaching `colab new`.
+#[test]
+fn test_configured_h100_is_skipped_like_an_unsupported_value() {
+    use shirley_show::infra::vocal::colab_vocal_separator_config::{
+        DEFAULT_GPU_CHAIN, PERFORMANCE_GPU_ORDER, gpu_chain, gpu_is_supported,
+    };
+
+    // Not part of the performance chain at all.
+    assert!(
+        !PERFORMANCE_GPU_ORDER.contains(&"H100"),
+        "H100 must not be in the attempt ranking, got {PERFORMANCE_GPU_ORDER:?}"
+    );
+    assert!(
+        !DEFAULT_GPU_CHAIN.contains(&"H100"),
+        "H100 must not be in the default chain, got {DEFAULT_GPU_CHAIN:?}"
+    );
+    // The CLI still accepts the spelling; this account does not.
+    assert!(gpu_is_supported("H100") == false, "H100 is unusable for this account");
+    assert!(gpu_is_supported("G4"));
+    assert!(gpu_is_supported("A100"));
+    assert!(gpu_is_supported("L4"));
+
+    // Configured as the primary, as a fallback, or both: never attempted.
+    for (primary, fallbacks) in [
+        ("h100", vec![]),
+        ("h100", vec!["l4".to_string()]),
+        ("g4", vec!["h100".to_string()]),
+        ("a100", vec!["h100".to_string(), "l4".to_string()]),
+        ("h100", vec!["a100".to_string(), "t4".to_string()]),
+    ] {
+        let chain = gpu_chain(primary, &fallbacks);
+        assert!(
+            !chain.iter().any(|g| g == "H100"),
+            "H100 must never be attempted, primary={primary} fallbacks={fallbacks:?} gave {chain:?}"
+        );
+        assert!(!chain.is_empty(), "the chain must never become empty");
+    }
+
+    // A configuration that names ONLY H100 falls back to the usable default
+    // chain instead of producing an empty rotation.
+    assert_eq!(gpu_chain("h100", &[]), vec!["G4", "A100", "L4"]);
+    assert_eq!(gpu_chain("h100", &["h100".to_string()]), vec!["G4", "A100", "L4"]);
+
+    // The rest of the ordering is untouched: G4 first, L4 last, T4 only when
+    // named.
+    assert_eq!(gpu_chain("l4", &["g4".to_string()]), vec!["G4", "A100", "L4"]);
 }
 
 /// An end-to-end pin of the attempt order, driven by the environment exactly as
 /// production has it (`SHIRLEY_COLAB_GPU=a100`): the first `new` must ask for G4,
-/// then H100, then A100, then L4. The default fixture has every other GPU
-/// refusing, so all four are really attempted and the run lands on L4.
+/// then A100, then L4 — H100 is never asked because this account cannot assign
+/// it. The default fixture has every other GPU refusing, so all three are really
+/// attempted and the run lands on L4.
 #[tokio::test]
-async fn test_assignment_asks_g4_then_h100_then_a100_then_l4_with_a100_configured() {
+async fn test_assignment_asks_g4_then_a100_then_l4_with_a100_configured() {
     let fixture = MockColabEnv::new_fixture();
-    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100").unwrap();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\na100").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1608,8 +1801,8 @@ async fn test_assignment_asks_g4_then_h100_then_a100_then_l4_with_a100_configure
         .collect();
     assert_eq!(
         attempts,
-        vec!["G4", "H100", "A100", "L4"],
-        "attempts must follow the performance ranking, log was: {log}"
+        vec!["G4", "A100", "L4"],
+        "attempts must follow the performance ranking with H100 discarded, log was: {log}"
     );
     assert_eq!(gpu.available_permits(), 1, "the GPU permit must be released");
 }
@@ -1779,9 +1972,9 @@ async fn test_hanging_first_gpu_rotates_to_a_later_candidate() {
 
     let fixture = MockColabEnv::new_fixture();
     std::fs::write(&fixture.trigger_hang_gpu, b"g4\n").unwrap();
-    // The two accelerators between the hanging G4 and L4 refuse outright, so the
-    // rotation really walks the ranking and lands on the last candidate.
-    std::fs::write(&fixture.trigger_fail_gpu, b"h100\na100\n").unwrap();
+    // The only accelerator between the hanging G4 and L4 refuses outright, so
+    // the rotation really walks the ranking and lands on the last candidate.
+    std::fs::write(&fixture.trigger_fail_gpu, b"a100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1836,9 +2029,10 @@ async fn test_timed_out_gpu_attempt_is_stopped_before_rotation() {
 
     let fixture = MockColabEnv::new_fixture();
     std::fs::write(&fixture.trigger_hang_gpu, b"g4\n").unwrap();
-    // The two accelerators between the hanging G4 and L4 refuse outright, so the
-    // rotation really reaches L4 and the assertion below names the last attempt.
-    std::fs::write(&fixture.trigger_fail_gpu, b"h100\na100\n").unwrap();
+    // The only accelerator between the hanging G4 and L4 refuses outright, so
+    // the rotation really reaches L4 and the assertion below names the last
+    // attempt.
+    std::fs::write(&fixture.trigger_fail_gpu, b"a100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1943,7 +2137,7 @@ async fn test_unsupported_configured_gpu_is_never_attempted() {
     let fixture = MockColabEnv::new_fixture();
     // Only L4 answers, so the run has to reach the end of the ranking, and the
     // unsupported configured value must not be one of the attempts on the way.
-    std::fs::write(&fixture.trigger_fail_gpu, b"g4\nh100\na100\n").unwrap();
+    std::fs::write(&fixture.trigger_fail_gpu, b"g4\na100\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
@@ -1988,7 +2182,7 @@ async fn test_unsupported_configured_gpu_is_never_attempted() {
 async fn test_gpu_assignment_window_stays_fixed_while_every_candidate_hangs() {
     let fixture = MockColabEnv::new_fixture();
     // Every accelerator the chain can try hangs for the full attempt bound.
-    std::fs::write(&fixture.trigger_hang_gpu, b"g4\na100\nl4\nt4\nh100\n").unwrap();
+    std::fs::write(&fixture.trigger_hang_gpu, b"g4\na100\nl4\nt4\n").unwrap();
 
     let gpu = Arc::new(Semaphore::new(1));
     let mut cfg = fixture.make_config(gpu.clone());
