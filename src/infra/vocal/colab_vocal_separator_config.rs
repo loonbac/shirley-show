@@ -68,9 +68,7 @@ impl ColabVocalSeparatorConfig {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("colab"));
 
-        let token_path = std::env::var("SHIRLEY_COLAB_TOKEN")
-            .map(expand_tilde)
-            .unwrap_or_else(|_| default_token_path());
+        let token_path = token_path_from_env();
 
         let gpu_type = std::env::var("SHIRLEY_COLAB_GPU").unwrap_or_else(|_| "g4".to_string());
 
@@ -152,6 +150,17 @@ impl ColabVocalSeparatorConfig {
         Self::validate_token_file(&self.token_path)
     }
 
+    /// Ensures the host token is available to the official CLI at its legacy path.
+    ///
+    /// Call this after `validate_token` and before any CLI invocation. A failure
+    /// surfaces as `ColabTokenMissing`: if the copy cannot be made, the CLI has
+    /// no token to authenticate with.
+    pub fn ensure_legacy_token(&self) -> Result<(), VocalSeparationError> {
+        let dest = legacy_token_path();
+        sync_token_to_legacy(&self.token_path, &dest)
+            .map_err(|_| VocalSeparationError::ColabTokenMissing)
+    }
+
     /// Pure validation function testing physical existence and refresh_token presence.
     pub fn validate_token_file(path: &Path) -> Result<(), VocalSeparationError> {
         let content =
@@ -171,6 +180,63 @@ impl ColabVocalSeparatorConfig {
             Err(VocalSeparationError::ColabTokenMissing)
         }
     }
+}
+
+/// The token path the host mounts at `SHIRLEY_COLAB_TOKEN`.
+///
+/// The official CLI keeps its own legacy token under `~/.config/colab-cli/`;
+/// the host token stays where it has always been mounted, and is copied into
+/// the legacy path before any CLI call (see `sync_token_to_legacy`).
+pub fn token_path_from_env() -> PathBuf {
+    std::env::var("SHIRLEY_COLAB_TOKEN")
+        .map(expand_tilde)
+        .unwrap_or_else(|_| default_token_path())
+}
+
+/// The path the official `google-colab-cli` reads its legacy token from.
+///
+/// Overridable via `SHIRLEY_COLAB_LEGACY_TOKEN` so tests can redirect the
+/// copy to a scratch directory instead of the user's real config.
+pub fn legacy_token_path() -> PathBuf {
+    if let Ok(p) = std::env::var("SHIRLEY_COLAB_LEGACY_TOKEN") {
+        return expand_tilde(p);
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config/colab-cli/token.json")
+    } else {
+        PathBuf::from(".config/colab-cli/token.json")
+    }
+}
+
+/// Copies the host token into the path the official CLI reads, unless that
+/// destination already holds a newer copy.
+///
+/// The CLI rewrites its token file when it refreshes the access token, so a
+/// newer destination must never be overwritten: doing so would throw away the
+/// refreshed token. The copy happens only when the destination is missing or
+/// strictly older than the source. The destination is created with 0600
+/// permissions on Unix. No token content is ever read into memory or logged.
+pub fn sync_token_to_legacy(source: &Path, dest: &Path) -> std::io::Result<()> {
+    if source == dest {
+        return Ok(());
+    }
+    let src_meta = std::fs::metadata(source)?;
+    let should_copy = match std::fs::metadata(dest) {
+        Ok(dst_meta) => src_meta.modified()? > dst_meta.modified()?,
+        Err(_) => true,
+    };
+    if should_copy {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(source, dest)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
+    Ok(())
 }
 
 fn expand_tilde(path_str: String) -> PathBuf {

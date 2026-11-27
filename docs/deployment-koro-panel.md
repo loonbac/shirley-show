@@ -136,12 +136,15 @@ contenedor solo necesita un token OAuth válido; el tráfico sale por la red
 normal del host.
 
 **De dónde sale el token.** En la máquina donde ejecutaste `colab login` una vez,
-el CLI guarda el token en `~/.config/colab/token.json`:
+el CLI oficial guarda su token heredado en `~/.config/colab-cli/token.json` y las
+sesiones en `~/.config/colab-cli/sessions.json`. El token del host se monta en
+`/home/shirley/.config/colab/token.json` y el adaptador lo copia a la vía
+heredada antes de cada uso:
 
 ```sh
 # en tu máquina
-colab quota        # si responde, el token sirve
-ls -l ~/.config/colab/token.json
+colab usage        # si responde, el token sirve
+ls -l ~/.config/colab-cli/token.json
 ```
 
 **Cómo llevarlo al servidor.** Cópialo y dale el propietario del contenedor:
@@ -158,12 +161,14 @@ chown 1000:1000 /srv/shirley/secrets/colab-token.json
 **Cómo comprobarlo desde el contenedor:**
 
 ```sh
-docker exec -it panel-app-shir colab quota
+docker exec -it panel-app-shir colab usage
 ```
 
-Si responde con tu cuota, la separación funcionará. Si dice que no hay token,
-revisa la ruta: el contenedor lo busca en `/home/shirley/.config/colab/token.json`
-y el usuario del contenedor es `shirley` (UID 1000).
+Si responde con tu uso, la separación funcionará. Si dice que no hay token,
+revisa la ruta: el contenedor monta el token en
+`/home/shirley/.config/colab/token.json`, el adaptador lo copia a
+`~/.config/colab-cli/token.json` (la vía que lee el CLI oficial) y el usuario del
+contenedor es `shirley` (UID 1000).
 
 **El token caduca y se renueva solo.** `access_token` dura una hora; `colab`
 lo refresca con el `refresh_token` y reescribe el archivo. Por eso el montaje es
@@ -336,7 +341,7 @@ docker exec panel-app-shir ls /app/frontend/js/data | wc -l        # 14
 curl -s -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:65529/assets/js/data/list-presentations.js      # 200
 curl -sS http://127.0.0.1:65529/api/agent/gpu-status   # {"mode":"remote","pc_online":true}
-docker exec panel-app-shir colab quota
+docker exec panel-app-shir colab usage
 ```
 
 Nota sobre el runtime: la imagen final solo contiene `data`, `frontend` y el
@@ -421,9 +426,9 @@ La evidencia válida es el log del release con su generación, o un `colab exec`
 que funciona antes del `stop` y falla después:
 
 ```sh
-colab exec --session <id> -c 'print("VIVA")'   # funciona si está viva
-colab stop
-colab exec --session <id> -c 'print("VIVA")'   # "no active runtime with endpoint"
+colab exec -s <id> -f probe.py   # funciona si está viva
+colab stop -s <id>
+colab exec -s <id> -f probe.py   # "no active runtime with endpoint"
 ```
 
 Con `SHIRLEY_COLAB_DEBUG_OUTPUT=1` el apagado diferido se registra:
@@ -458,7 +463,7 @@ Barrido de GPU al arrancar: runtimes huérfanos liberados=true
 
 ### 11.3 El barrido respeta un arrendamiento
 
-`colab stop` **sin `--session` libera todos los runtimes de la cuenta**, no solo
+`colab stop` **sin `-s` libera todos los runtimes de la cuenta**, no solo
 los propios. Un barrido ciego mataría el trabajo de otra instancia viva.
 
 Por eso el arranque consulta `<data>/colab-runtime-owner.pid`:
@@ -500,9 +505,9 @@ recién arrancada sin trabajo la recoge Colab sola. La prueba real es preguntar 
 la sesión concreta:
 
 ```sh
-colab exec --session <id> -c 'print("VIVA")'   # funciona si está viva
-colab stop
-colab exec --session <id> -c 'print("VIVA")'   # "no active runtime with endpoint"
+colab exec -s <id> -f probe.py   # funciona si está viva
+colab stop -s <id>
+colab exec -s <id> -f probe.py   # "no active runtime with endpoint"
 ```
 ---
 

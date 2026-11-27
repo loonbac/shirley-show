@@ -8,15 +8,25 @@ use std::time::{Duration, Instant};
 use tokio::process::Command;
 use uuid::Uuid;
 
+use super::colab_orphan_reaper::stop_ok;
 use super::colab_remote_script::generate_remote_script;
 use super::colab_vocal_separator_config::ColabVocalSeparatorConfig;
 use crate::ports::vocal_separator::{
     SeparatedAudio, VocalSeparationError, VocalSeparationRequest, VocalSeparator,
 };
 
-#[derive(serde::Deserialize, Debug)]
-struct ColabStartOutput {
-    session: Option<String>,
+/// The path on the runtime where the remote script writes the separated MP3.
+///
+/// The script keeps `output.mp3` at this path before encrypting it for the old
+/// catbox transfer arc; the official CLI downloads that plain file directly. The
+/// path is shared with `colab_remote_script` (which T3 will simplify next).
+pub const REMOTE_OUTPUT_PATH: &str = "/content/colab_sep_work/output.mp3";
+
+/// Generates a session name in the `shirley-<8 hex>` shape the official CLI
+/// expects. The name is generated client-side with the existing `uuid`
+/// dependency; it is never parsed back out of command output.
+fn generate_session_name() -> String {
+    format!("shirley-{}", &Uuid::new_v4().simple().to_string()[..8])
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
@@ -117,7 +127,7 @@ impl Drop for ColabSessionGuard {
         if self.active {
             if let Some(session_id) = self.session_id.take() {
                 let _ = std::process::Command::new(&self.colab_bin)
-                    .args(["stop", "--session", &session_id])
+                    .args(["stop", "-s", &session_id])
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
@@ -181,15 +191,26 @@ impl ColabVocalSeparator {
         let probe = format!(
             "import os\nprint('SIZE=%d' % os.path.getsize({remote_path:?}) if os.path.exists({remote_path:?}) else 'SIZE=absent')"
         );
+        // The official CLI only runs scripts from a file (`-f`), so the probe
+        // is written to the local work dir and executed with `-f`.
+        let probe_path = self
+            .config
+            .work_dir
+            .join(format!("colab_probe_{}.py", Uuid::new_v4()));
+        tokio::fs::write(&probe_path, &probe).await.ok()?;
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
-        cmd.args(["exec", "--session", session_id, "-c", &probe]);
+        cmd.args(["exec", "-s", session_id, "-f", probe_path.to_str()?]);
         cmd.stdin(Stdio::null());
         cmd.stderr(Stdio::null());
         let output = match tokio::time::timeout(timeout, cmd.output()).await {
             Ok(Ok(o)) => o,
-            _ => return None,
+            _ => {
+                let _ = tokio::fs::remove_file(&probe_path).await;
+                return None;
+            }
         };
+        let _ = tokio::fs::remove_file(&probe_path).await;
         let stdout = String::from_utf8_lossy(&output.stdout);
         stdout.lines().find_map(|line| {
             let line = line.trim();
@@ -201,7 +222,7 @@ impl ColabVocalSeparator {
     async fn session_is_alive(&self, session_id: &str) -> bool {
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
-        cmd.args(["exec", "--session", session_id, "-c", "print(1)"]);
+        cmd.args(["status", "-s", session_id]);
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::null());
@@ -246,14 +267,14 @@ impl ColabVocalSeparator {
 
             let mut cmd = Command::new(colab_bin);
             cmd.kill_on_drop(true);
-            cmd.args(["stop", "--session", &session_id]);
+            cmd.args(["stop", "-s", &session_id]);
             cmd.stdin(Stdio::null());
             cmd.stdout(Stdio::null());
-            cmd.stderr(Stdio::null());
-            let ok = matches!(
-                tokio::time::timeout(Duration::from_secs(60), cmd.status()).await,
-                Ok(Ok(st)) if st.success()
-            );
+            cmd.stderr(Stdio::piped());
+            let ok = match tokio::time::timeout(Duration::from_secs(60), cmd.output()).await {
+                Ok(Ok(o)) => stop_ok(&o.status, &o.stderr),
+                _ => false,
+            };
             if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
                 eprintln!("[release] stop {session_id} ok={ok}");
             }
@@ -376,6 +397,7 @@ impl ColabVocalSeparator {
 
         crate::infra::vocal::colab_orphan_reaper::spawn_periodic_reaper(
             self.config.colab_bin.clone(),
+            self.config.token_path.clone(),
             interval,
             has_active_work,
             inside_retention,
@@ -385,118 +407,15 @@ impl ColabVocalSeparator {
     async fn stop_session(&self, session_id: &str) -> bool {
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
-        cmd.args(["stop", "--session", session_id]);
+        cmd.args(["stop", "-s", session_id]);
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::null());
-        matches!(
-            tokio::time::timeout(Duration::from_secs(30), cmd.status()).await,
-            Ok(Ok(status)) if status.success()
-        )
-    }
-
-    /// Stops every runtime owned by this account. Used when `colab start`
-    /// succeeded but we could not identify the session it created: the GPU is
-    /// already allocated, so it must be released before returning an error.
-    async fn stop_all_sessions(&self) {
-        let mut cmd = Command::new(&self.config.colab_bin);
-        cmd.kill_on_drop(true);
-        cmd.args(["stop"]);
-        cmd.stdin(Stdio::null());
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::null());
-        let _ = tokio::time::timeout(Duration::from_secs(30), cmd.status()).await;
-    }
-
-    /// Resolves the URL that actually downloads bytes.
-    ///
-    /// Uploaders answer in two shapes. Some return the file URL directly, which
-    /// is passed through untouched. Others, tmpfiles among them, return a
-    /// landing page whose download anchor carries a tokenised `/dl/` link; that
-    /// page must be fetched and the anchor extracted, because rewriting the URL
-    /// by hand just redirects back to the page and the "file" ends up being
-    /// HTML.
-    ///
-    /// A URL that yields no link is not silently accepted: the caller would
-    /// then try to decrypt an HTML page. It reports a transfer failure, which is
-    /// what actually happened.
-    async fn resolve_direct_url(
-        &self,
-        url: &str,
-        timeout: Duration,
-    ) -> Result<String, VocalSeparationError> {
-        if let Some(stripped) = url.strip_prefix("file://") {
-            return Ok(format!("file://{stripped}"));
-        }
-
-        let probe = self
-            .config
-            .work_dir
-            .join(format!("colab_page_{}.txt", std::process::id()));
-
-        // Two attempts: the landing page is small, and a single transient
-        // refusal must not decide the whole transfer.
-        let body = crate::infra::vocal::colab_transfer::fetch_with_retry(url, &probe, timeout, 3)
-            .await
-            .map_err(|e| {
-                if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
-                    eprintln!("[resolve_direct_url] {e}");
-                }
-                VocalSeparationError::TransferFailed
-            })?;
-        let _ = tokio::fs::remove_file(&probe).await;
-
-        if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
-            eprintln!(
-                "[resolve_direct_url] body {} bytes, looks_like_html={}",
-                body.len(),
-                crate::infra::vocal::colab_transfer::looks_like_html(&body)
-            );
-        }
-
-        // The body is unambiguous: either the payload itself, or a page whose
-        // anchor holds the real link.
-        if !crate::infra::vocal::colab_transfer::looks_like_html(&body) {
-            return Ok(url.to_string());
-        }
-
-        let text = String::from_utf8_lossy(&body);
-        crate::infra::vocal::colab_transfer::extract_direct_link(&text)
-            .ok_or(VocalSeparationError::TransferFailed)
-    }
-
-    async fn download_file(
-        &self,
-        url: &str,
-        dest: &Path,
-        timeout: Duration,
-    ) -> Result<(), VocalSeparationError> {
-        if let Some(stripped) = url.strip_prefix("file://") {
-            tokio::fs::copy(stripped, dest)
-                .await
-                .map_err(|_| VocalSeparationError::TransferFailed)?;
-            return Ok(());
-        }
-
-        let bytes = crate::infra::vocal::colab_transfer::fetch_with_retry(url, dest, timeout, 4)
-            .await
-            .map_err(|e| {
-                if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
-                    eprintln!("[download_file] {e}");
-                }
-                VocalSeparationError::TransferFailed
-            })?;
-
-        // A 200 with an HTML landing page is the failure that hid here before:
-        // the transfer "succeeded", a few kilobytes of page were written as if
-        // they were audio, and the user got "invalid output" from decryption.
-        if crate::infra::vocal::colab_transfer::looks_like_html(&bytes) {
-            return Err(VocalSeparationError::TransferFailed);
-        }
-
-        // fetch_with_retry already rejected an empty body, so a real payload is
-        // guaranteed to be on disk here.
-        Ok(())
+        cmd.stderr(Stdio::piped());
+        let output = match tokio::time::timeout(Duration::from_secs(30), cmd.output()).await {
+            Ok(Ok(o)) => o,
+            _ => return false,
+        };
+        stop_ok(&output.status, &output.stderr)
     }
 
     async fn execute_pipeline(
@@ -519,7 +438,7 @@ impl ColabVocalSeparator {
         upload_cmd.kill_on_drop(true);
         upload_cmd.args([
             "upload",
-            "--session",
+            "-s",
             session_id,
             request
                 .source_path
@@ -614,9 +533,9 @@ impl ColabVocalSeparator {
         exec_cmd.kill_on_drop(true);
         exec_cmd.args([
             "exec",
-            "--session",
+            "-s",
             session_id,
-            "--json",
+            "-f",
             script_path
                 .to_str()
                 .ok_or(VocalSeparationError::SeparationFailed)?,
@@ -659,68 +578,41 @@ impl ColabVocalSeparator {
         let exec_res = parse_execution_result(&exec_stdout)
             .ok_or(VocalSeparationError::InvalidSeparatorOutput)?;
 
-        // 5. Resolve the real download link.
-        //
-        // Uploaders answer in two shapes: the file URL itself, or a landing
-        // page that carries a tokenised direct link. Asking for the page and
-        // following its download anchor is what makes tmpfiles usable; a naive
-        // rewrite of the URL returns the page again.
+        // 5. Download the separated MP3 straight from the runtime with the
+        // official CLI. The old curl/catbox + AES decrypt arc is gone: the
+        // remote script leaves the plain `output.mp3` on the runtime and
+        // `colab download -s NAME REMOTE LOCAL` fetches it. SHA-256 and
+        // duration are still verified below, exactly as before.
         let dl_timeout = remaining_timeout
             .checked_sub(start.elapsed())
             .ok_or(VocalSeparationError::SeparationTimeout)?;
 
-        let direct_url = self.resolve_direct_url(&exec_res.url, dl_timeout).await?;
-
-        let enc_path = self
-            .config
-            .work_dir
-            .join(format!("colab_download_{}.enc", script_id));
-
-        self.download_file(&direct_url, &enc_path, dl_timeout)
-            .await?;
-
-        // 6. Decrypt with openssl
         if let Some(parent) = request.output_path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
         }
 
-        let decrypt_timeout = remaining_timeout
-            .checked_sub(start.elapsed())
-            .ok_or(VocalSeparationError::SeparationTimeout)?;
-
-        let mut dec_cmd = Command::new(&self.config.openssl_bin);
-        dec_cmd.kill_on_drop(true);
-        dec_cmd.args([
-            "enc",
-            "-d",
-            "-aes-256-cbc",
-            "-pbkdf2",
-            "-salt",
-            "-pass",
-            &format!("pass:{}", password),
-            "-in",
-            enc_path
-                .to_str()
-                .ok_or(VocalSeparationError::InvalidSeparatorOutput)?,
-            "-out",
+        let mut dl_cmd = Command::new(&self.config.colab_bin);
+        dl_cmd.kill_on_drop(true);
+        dl_cmd.args([
+            "download",
+            "-s",
+            session_id,
+            REMOTE_OUTPUT_PATH,
             request
                 .output_path
                 .to_str()
                 .ok_or(VocalSeparationError::InvalidSeparatorOutput)?,
         ]);
-        dec_cmd.stdin(Stdio::null());
-        dec_cmd.stdout(Stdio::null());
-        dec_cmd.stderr(Stdio::null());
+        dl_cmd.stdin(Stdio::null());
+        dl_cmd.stdout(Stdio::null());
+        dl_cmd.stderr(Stdio::null());
 
-        let dec_status = match tokio::time::timeout(decrypt_timeout, dec_cmd.status()).await {
-            Ok(Ok(st)) if st.success() => st,
-            _ => {
-                let _ = tokio::fs::remove_file(&enc_path).await;
-                return Err(VocalSeparationError::InvalidSeparatorOutput);
-            }
-        };
-        let _ = dec_status;
-        let _ = tokio::fs::remove_file(&enc_path).await;
+        if !matches!(
+            tokio::time::timeout(dl_timeout, dl_cmd.status()).await,
+            Ok(Ok(st)) if st.success()
+        ) {
+            return Err(VocalSeparationError::SeparationFailed);
+        }
 
         // 7. Verify SHA-256 against runtime reported hash (S3)
         let verify_sha_timeout = remaining_timeout
@@ -810,8 +702,10 @@ impl VocalSeparator for ColabVocalSeparator {
                 return Err(VocalSeparationError::InvalidAudioDuration);
             }
 
-            // 2. Validate token without starting GPU (S4)
+            // 2. Validate token without starting GPU (S4), then make it
+            // available to the official CLI at its legacy path.
             this.config.validate_token()?;
+            this.config.ensure_legacy_token()?;
 
             // 3. Acquire GPU mutual exclusion permit (S7)
             let permit = match this.config.gpu.clone().try_acquire_owned() {
@@ -865,18 +759,25 @@ impl VocalSeparator for ColabVocalSeparator {
                         }
                     }
 
-                    let mut started = None;
+                    // The official CLI names the session client-side (`-s`), and
+                    // it only accepts uppercase GPU names (`G4`, `A100`, `L4`).
+                    // The configured values stay lowercase; they are uppercased
+                    // only at the command boundary.
+                    let session_name = generate_session_name();
+
+                    let mut started = false;
                     for gpu in &candidates {
+                        let gpu_arg = gpu.to_ascii_uppercase();
                         let mut start_cmd = Command::new(&this.config.colab_bin);
                         start_cmd.kill_on_drop(true);
-                        start_cmd.args(["start", "--gpu", gpu, "--json"]);
+                        start_cmd.args(["new", "-s", &session_name, "--gpu", &gpu_arg]);
                         start_cmd.stdin(Stdio::null());
-                        start_cmd.stdout(Stdio::piped());
+                        start_cmd.stdout(Stdio::null());
                         start_cmd.stderr(Stdio::null());
 
-                        match tokio::time::timeout(start_timeout, start_cmd.output()).await {
-                            Ok(Ok(o)) if o.status.success() => {
-                                started = Some(o);
+                        match tokio::time::timeout(start_timeout, start_cmd.status()).await {
+                            Ok(Ok(st)) if st.success() => {
+                                started = true;
                                 break;
                             }
                             _ => {
@@ -887,25 +788,11 @@ impl VocalSeparator for ColabVocalSeparator {
                         }
                     }
 
-                    let Some(start_output) = started else {
+                    if !started {
                         return Err(VocalSeparationError::ColabUnavailable);
-                    };
-
-                    // The runtime is already allocated at this point. When the
-                    // output cannot be parsed there is no id to stop, so every
-                    // runtime is torn down before returning: leaving one running
-                    // would burn quota with nobody holding the handle.
-                    match serde_json::from_slice::<ColabStartOutput>(&start_output.stdout)
-                        .ok()
-                        .and_then(|parsed| parsed.session)
-                        .filter(|s| !s.trim().is_empty())
-                    {
-                        Some(id) => id,
-                        None => {
-                            this.stop_all_sessions().await;
-                            return Err(VocalSeparationError::ColabUnavailable);
-                        }
                     }
+
+                    session_name
                 }
             };
 
