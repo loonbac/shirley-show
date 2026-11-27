@@ -21,7 +21,16 @@ pub const DEFAULT_VAST_MAX_DPH: f64 = 0.6;
 pub const DEFAULT_VAST_FALLBACK_AFTER_SECS: u64 = 60;
 pub const VAST_INSTANCE_LABEL: &str = "shirley-show";
 pub const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
-pub const DEFAULT_LAUNCH_TIMEOUT: Duration = Duration::from_secs(300);
+/// A rental that is still `loading` after this deadline is destroyed and the
+/// next offer is tried: on the live hosts the image took >4.5 min to appear
+/// once, which is longer than the whole chat turn.
+pub const DEFAULT_LAUNCH_TIMEOUT: Duration = Duration::from_secs(150);
+/// Preferred download speed. Popular cached base layers reach a Vast host much
+/// faster, so slow hosts are only used when there are fewer than five fast
+/// acceptable offers.
+pub const FAST_INET_DOWN_MBPS: f64 = 1000.0;
+pub const MIN_INET_DOWN_MBPS: f64 = 500.0;
+pub const FAST_OFFER_MIN_COUNT: usize = 5;
 
 /// How long a Vast instance stays warm after the last separation.
 pub const VAST_SESSION_IDLE_RETENTION: Duration = Duration::from_secs(600);
@@ -125,6 +134,10 @@ impl VastVocalSeparatorConfig {
         config.fallback_after = env_secs(
             "SHIRLEY_VAST_FALLBACK_AFTER_SECS",
             DEFAULT_VAST_FALLBACK_AFTER_SECS,
+        );
+        config.launch_timeout = env_secs(
+            "SHIRLEY_VAST_LAUNCH_TIMEOUT_SECS",
+            DEFAULT_LAUNCH_TIMEOUT.as_secs(),
         );
         Some(config)
     }

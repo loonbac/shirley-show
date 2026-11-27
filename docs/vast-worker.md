@@ -10,10 +10,10 @@ Image: `ghcr.io/loonbac/shirley-vast-worker` (tags `:<git-sha>` and `:latest`).
 
 | Piece | Why |
 | :--- | :--- |
-| Writable CUDA PyTorch build (`torch` 2.5.1, cu124 wheels) | The separation models are PyTorch RoFormers; the cu124 wheels carry the whole CUDA runtime, so the host only has to provide a driver supporting CUDA **>= 12.4** — nothing CUDA is baked into the image and no `nvidia/cuda` base is needed. |
+| `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime` base with its own `torch` 2.5.1 cu124 | The separation models are PyTorch RoFormers and the host only has to provide a driver supporting CUDA **>= 12.4**. The important property is the **popular base layer**: Vast hosts already have it cached. The previous `python:3.10-slim` + downloaded cu124 wheels image stayed `loading` for >4.5 min on two RTX 3090 hosts; probes with this base were `running` in 36 s and 175 s. |
 | `audio-separator[gpu]==0.48.0` in `/opt/venv` | Pinned, exactly the package the generated script imports. `[gpu]` brings `onnxruntime-gpu`; `audio_separator` imports `onnxruntime` unconditionally, and the CPU build would make its ONNX paths unusably slow on a GPU worker. |
-| `diffq` compiled from source, in the builder stage | `diffq` is a **mandatory** dependency of `audio-separator` (`Requires-Dist: diffq`) and has no linux wheel, so `pip install` compiles `bitpack.c`. That is the failure the live probe saw; see "Why the probe failed" below. |
-| ffmpeg + ffprobe | The script encodes the averaged stem to MP3 320k and probes its duration. On a fresh Vast instance `apt-get install ffmpeg` costs 220-480s — the largest single saving of this image. |
+| `diffq` compiled from source, in the builder stage | `diffq` is a **mandatory** dependency of `audio-separator` (`Requires-Dist: diffq`) and has no linux wheel, so `pip install` compiles `bitpack.c`. That is the failure the live probe saw; see "Why the probe failed" below. The builder installs `build-essential` on the same cached runtime base; only the small venv additions are copied to the published stage, never the compiler. |
+| Static ffmpeg + ffprobe from johnvansickle, checksum verified | The script encodes the averaged stem to MP3 320k and probes its duration. On a fresh Vast instance `apt-get install ffmpeg` costs 220-480s. The tarball is pinned by SHA-256 (`abda8d77…c87cf67`, whose published MD5 is `7fa72b652e19bf84c9461e332ea1cdf3`), checked with `sha256sum -c` during the build, and only the two binaries are copied to the runtime. |
 | `libsndfile1`, `libsamplerate0` | Native libraries behind the `soundfile` and `samplerate` Python packages the separator imports. |
 | Both separation models in `/opt/models` | `INSTRUMENTAL_MODELS` = `model_bs_roformer_ep_317_sdr_12.9755.ckpt`, `COROS_MODELS` = `mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt`, each with its YAML config plus the shared `download_checks.json`. |
 | `openssh-server`, `ca-certificates` | Vast's SSH launch mode needs an sshd in the image. |
@@ -59,34 +59,43 @@ immediately. It is not a network, quota or mirror problem: on the same image
 with network and DNS working, the failure is the missing `gcc`, and in the probe
 itself the `-q` plus suppressed stderr hid exactly this message.
 
-This image compiles `diffq` in a builder stage that has `build-essential`; the
-runtime stage keeps only the finished `/opt/venv`, so the compiler is not
-shipped.
+This image compiles `diffq` in a builder stage based on the same
+`pytorch/pytorch:*-runtime` image, with `build-essential` installed only there.
+(The `*-devel` alternative is equivalent, but its multi-GB CUDA development
+layers were not cached on this build machine.) The venv is created with
+`--system-site-packages`, so installing
+`audio-separator[gpu]` under a torch constraint adds only the new packages and
+reuses the base torch: the runtime stage copies that small venv, never a second
+CUDA build and never the compiler.
 
 ## Size
 
-**13.5 GB** on disk (`docker image inspect` → `13_516_915_871` bytes), ~4.86 GB
-compressed in the registry, for `linux/amd64`. The largest layers:
+Measured locally with `docker image inspect` and `docker history` (containerd
+image store, `linux/amd64`): the final `shirley-vast-worker:t2` reports
+**4,915,898,198 bytes (4.92 GB)**. The shared `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`
+base reports 6,294,734,767 bytes, so that number includes store-level sharing.
+The layers **added on top of the popular PyTorch base**:
 
 | Layer | Size |
 | :--- | :--- |
-| `COPY /opt/venv /opt/venv` (torch cu124 + audio-separator + onnxruntime-gpu) | 6.47 GB |
-| `COPY /opt/models /opt/models` (two checkpoints + their YAML) | 1.55 GB |
-| `apt-get install ffmpeg libsndfile1 libsamplerate0 openssh-server ca-certificates` | 475 MB |
+| `COPY /opt/venv /opt/venv` (audio-separator, onnxruntime-gpu and dependencies; torch is reused from the base) | 897 MB |
+| `COPY /usr/local/bin/ffmpeg` + `ffprobe` (static) | 160 MB |
+| `COPY /opt/models /opt/models` (two checkpoints + YAML) | ~1.55 GB on a fresh host; shown as 0 B locally because the identical layer is already in the store |
+| `apt-get install libsndfile1 libsamplerate0 openssh-server ca-certificates` | 12.4 MB |
 
-The two models alone are 639 MB + 913 MB, so two thirds of "half the image
-without models" is the CUDA-enabled PyTorch build. The equivalent `nvidia/cuda`
-base image is ~9.6 GiB before ffmpeg or the models, which is why this image is
-built from `python:3.10-slim-bookworm` plus the cu124 wheels instead.
+So ~2.62 GB is added including models on a fresh host (target <2.5 GB missed
+by ~120 MB) and ~1.07 GB excluding the two baked checkpoints. The old image was
+13.5 GB uncompressed / ~4.9 GB compressed; the CUDA runtime and torch are now
+the cached base, which is what makes a Vast host reach `running` quickly.
 
 ## Pinning
 
-`torch` is pinned twice on purpose. `audio-separator` only declares
-`torch>=2.3,<3`, so a plain `pip install audio-separator` 
-replaces the cu124 build with whatever the default index prefers — during this
-work it silently produced `2.14.1+cu130`, a build that needs a newer driver than
-the CUDA 12.4 hosts this image targets. A constraint file pins `torch` for the
-rest of the build, and a build-time assertion fails the image if
+`torch` is pinned and asserted on purpose. `audio-separator` only declares
+`torch>=2.3,<3`, so a plain `pip install audio-separator` replaces the cu124
+build with whatever the default index prefers — during this work it silently
+produced `2.14.1+cu130`, a build that needs a newer driver than the CUDA 12.4
+hosts this image targets. A constraint file (`torch==2.5.1`) prevents pip from
+replacing the base torch, and a build-time assertion fails the image if
 `torch.__version__` or `torch.version.cuda` ever drift from `2.5.1` / `12.4`.
 
 ## How the adapter drives the image (T2)
@@ -111,8 +120,10 @@ billing; a periodic safety reaper does the same every five minutes for
 instances that are not the current warm lease. The rent/pipeline work runs in
 a detached task, so dropping the request future (agent deadline or client
 disconnect) cannot skip the destroy or the retention timer; a rental that lands
-after cancellation or its deadline is destroyed immediately. No key, token or
-API credential is ever written to a log line.
+after cancellation or its deadline is destroyed immediately. Vast is only
+rented after Colab has failed to assign a GPU inside its bounded window, so no
+second GPU is paid while Colab is still trying. No key, token or API credential
+is ever written to a log line.
 
 The live Vast response shape is authoritative: `PUT /asks/{id}/` returns the
 new instance id in `new_contract`; `GET /instances/{id}/` wraps the instance in
@@ -136,6 +147,10 @@ legacy `status`, and proxy `ssh_host`/`ssh_port` when the direct port is absent.
   those fields as floats.
 - `PUT /api/v0/asks/{id}/` must send `client_id: "me"` and
   `runtype: "ssh_direc ssh_proxy"` (not `"ssh"`), plus image, disk and label.
+- `POST /api/v0/bundles/` first asks for `inet_down.gte = 1000` (fast hosts).
+  When fewer than five acceptable offers survive, the adapter repeats the query
+  with `>= 500` before giving up. The cheapest acceptable offer wins inside
+  each set; CN/HK stays excluded client-side in both rounds.
 - Listing moved: `GET /api/v0/instances/` returns HTTP 410
   `deprecated_endpoint`. Both the boot orphan sweep and the five-minute safety
   reaper use `GET /api/v1/instances/`, with
@@ -154,7 +169,8 @@ are never printed.
 
 ## How it is built
 
-Locally, without pushing:
+Locally, without pushing (the exact build and smoke evidence is in the task
+log):
 
 ```sh
 docker build --network host -t shirley-vast-worker:local docker/vast-worker/
