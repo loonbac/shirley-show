@@ -25,6 +25,14 @@ use crate::ports::vocal_separator::{
 /// path is shared with `colab_remote_script` (which T3 will simplify next).
 pub const REMOTE_OUTPUT_PATH: &str = "/content/colab_sep_work/output.mp3";
 
+/// Bound for the kernel liveness probe.
+///
+/// A trivial `colab exec` that only prints a marker answers in a couple of
+/// seconds when the runtime is alive, and fails immediately when it is gone. The
+/// bound is generous enough for a cold kernel to start, and short enough that a
+/// dead runtime does not eat the budget the retry needs.
+pub const KERNEL_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Generates a session name in the `shirley-<8 hex>` shape the official CLI
 /// expects. The name is generated client-side with the existing `uuid`
 /// dependency; it is never parsed back out of command output.
@@ -300,7 +308,35 @@ impl ColabVocalSeparator {
         })
     }
 
+    /// Confirms the cached session is still alive before trusting it.
+    ///
+    /// A runtime can disappear on its own: Colab reclaims idle machines and can
+    /// preempt a GPU. Handing a dead id to `colab exec` produces a confusing
+    /// error far from the cause, so liveness is checked first and a dead id is
+    /// dropped.
+    ///
+    /// Two signals are used, cheapest first:
+    ///
+    /// 1. `colab status -s NAME`, a local session lookup that answers in
+    ///    milliseconds.
+    /// 2. A trivial `colab exec` that prints a marker. This is the only probe
+    ///    that proves the KERNEL answers: a session can be registered while its
+    ///    runtime is gone (connection dropped, machine reclaimed, kernel
+    ///    restarted), and `status` still says it exists. Sending a real
+    ///    separation to such a session fails far from the cause.
+    ///
+    /// The kernel probe is what makes "keep the GPU Google gave us" safe: the
+    /// session is only retained when something on the other side actually
+    /// answers.
     async fn session_is_alive(&self, session_id: &str) -> bool {
+        if !self.session_status_ok(session_id).await {
+            return false;
+        }
+        self.kernel_answers(session_id, KERNEL_PROBE_TIMEOUT).await
+    }
+
+    /// The local half of the liveness check: does the CLI still know the session?
+    async fn session_status_ok(&self, session_id: &str) -> bool {
         let mut cmd = Command::new(&self.config.colab_bin);
         cmd.kill_on_drop(true);
         cmd.args(["status", "-s", session_id]);
@@ -311,6 +347,54 @@ impl ColabVocalSeparator {
             tokio::time::timeout(Duration::from_secs(45), cmd.status()).await,
             Ok(Ok(st)) if st.success()
         )
+    }
+
+    /// The remote half of the liveness check: does the runtime's kernel still run
+    /// code for this session?
+    ///
+    /// The official CLI only runs scripts from a file (`-f`), so a trivial script
+    /// printing a marker is written to the work dir and executed. Any non-zero
+    /// exit or timeout is `false`: a session whose kernel does not answer is not
+    /// reusable, and caching it would turn the next request into an obscure
+    /// `exec` failure instead of a fresh assignment.
+    async fn kernel_answers(&self, session_id: &str, timeout: Duration) -> bool {
+        if tokio::fs::create_dir_all(&self.config.work_dir)
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        let probe_path = self
+            .config
+            .work_dir
+            .join(format!("colab_ping_{}.py", Uuid::new_v4()));
+        if tokio::fs::write(&probe_path, "print('SHIRLEY_PING_OK')\n")
+            .await
+            .is_err()
+        {
+            return false;
+        }
+        let silence_arg = cli_silence_timeout_secs(timeout).to_string();
+        let mut cmd = Command::new(&self.config.colab_bin);
+        cmd.kill_on_drop(true);
+        cmd.args([
+            "exec",
+            "-s",
+            session_id,
+            "--timeout",
+            silence_arg.as_str(),
+            "-f",
+            probe_path.to_str().unwrap_or("/dev/null"),
+        ]);
+        cmd.stdin(Stdio::null());
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+        let alive = matches!(
+            tokio::time::timeout(timeout, cmd.status()).await,
+            Ok(Ok(st)) if st.success()
+        );
+        let _ = tokio::fs::remove_file(&probe_path).await;
+        alive
     }
 
     /// Schedules the release of the session after the retention window.
@@ -506,7 +590,7 @@ impl ColabVocalSeparator {
     /// accelerator's assignment endpoint answered 503, and that the fastest
     /// device is always preferred: these models are heavy, so the GPU with the
     /// most throughput finishes a separation soonest. The chain is therefore
-    /// always ordered by performance (G4, H100, A100, L4) regardless of the
+    /// always ordered by performance (G4, A100, L4) regardless of the
     /// order the configuration names; configuration only widens the set. Each
     /// attempt is bounded by a cap barely above one assignment POST, so a busy
     /// best GPU is abandoned, stopped and retried in the next round instead of
@@ -523,7 +607,8 @@ impl ColabVocalSeparator {
     /// request into a 412.
     ///
     /// Every candidate the configuration names but the CLI does not accept is
-    /// skipped without an attempt (`14` was one).
+    /// skipped without an attempt (`14` was one), and so is one this account
+    /// cannot be assigned (`H100`, which answered HTTP 400 every time).
     async fn assign_session(&self, deadline: Instant) -> Result<String, VocalSeparationError> {
         let candidates = gpu_chain(&self.config.gpu_type, &self.config.gpu_fallbacks);
 
@@ -1007,8 +1092,16 @@ impl VocalSeparator for ColabVocalSeparator {
             // for ten minutes to keep a GPU alive would be worse than the cold
             // start it saves, so the release is a separate task.
             //
-            // On failure nothing is reused: the session is stopped now and the
-            // cache is cleared, because a failed runtime is not worth keeping.
+            // On failure the session is only released when it is provably gone.
+            // The product rule is explicit: once Google assigns a GPU we keep it
+            // until it is really not going to be used. A failed `exec`, a
+            // rejected upload, an unparseable payload or a bad download all
+            // leave the runtime healthy, and stopping it made the retry fight
+            // Colab's 503s again from zero. So the session is probed: if the
+            // kernel still answers it stays cached under the same ten-minute
+            // window (counted from the end of this failed attempt, which is when
+            // `refresh_at` stamps it), and the next request reuses it. A session
+            // that no longer answers is released at once and never cached.
             match &pipeline_result {
                 Ok(_) => {
                     // The age of the cached session is refreshed HERE, when the
@@ -1032,16 +1125,36 @@ impl VocalSeparator for ColabVocalSeparator {
                         );
                     }
                 }
-                Err(_) => {
-                    this.forget_session().await;
-                    let stopped = this.stop_session(&session_id).await;
-                    if stopped {
+                Err(err) => {
+                    // Never keep a broken session cached: the probe decides, not
+                    // the error kind. A `SeparationTimeout` that only means our
+                    // own outer bound fired leaves a perfectly usable runtime, so
+                    // the failure type is not a reason to throw the machine away.
+                    let alive = this.session_is_alive(&session_id).await;
+                    if alive {
+                        {
+                            let mut guard = this.sessions.lock().await;
+                            guard.refresh_at(Instant::now());
+                        }
                         session_guard.deactivate();
-                    }
-                    if !stopped {
-                        // Leave the guard armed: its Drop runs one more stop.
-                        drop(permit);
-                        return Err(VocalSeparationError::SeparationFailed);
+                        this.schedule_release(session_id.clone(), this.config.colab_bin.clone());
+                        if std::env::var("SHIRLEY_COLAB_DEBUG_OUTPUT").is_ok() {
+                            eprintln!(
+                                "[separate] fallo {err:?}; la sesion {session_id} sigue viva, se conserva {:?}",
+                                crate::infra::vocal::colab_transfer::SESSION_IDLE_RETENTION
+                            );
+                        }
+                    } else {
+                        this.forget_session().await;
+                        let stopped = this.stop_session(&session_id).await;
+                        if stopped {
+                            session_guard.deactivate();
+                        }
+                        if !stopped {
+                            // Leave the guard armed: its Drop runs one more stop.
+                            drop(permit);
+                            return Err(VocalSeparationError::SeparationFailed);
+                        }
                     }
                 }
             }

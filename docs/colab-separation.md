@@ -15,7 +15,24 @@ Sin token, la separación falla con colab_token_missing **antes** de encender la
 |---|---|---|
 | SHIRLEY_COLAB_BIN | colab | Binario de colab-cli |
 | SHIRLEY_COLAB_TOKEN | ~/.config/colab/token.json | Credenciales |
-| SHIRLEY_COLAB_GPU | g4 | Tipo de GPU. g4 = RTX PRO 6000 Blackwell, 102 GB |
+| SHIRLEY_COLAB_GPU | g4 | GPU preferida. g4 = RTX PRO 6000 Blackwell, 102 GB |
+| SHIRLEY_COLAB_GPU_FALLBACK | a100,l4 | GPUs adicionales elegibles, separadas por coma |
+
+La configuración decide **qué** GPUs son elegibles, nunca el orden: los intentos
+van siempre por rendimiento, la más rápida primero. La cadena por defecto es
+**G4 → A100 → L4**.
+
+- **G4** (RTX PRO 6000 Blackwell, 102 GB): la más rápida medida en este proyecto.
+- **A100**: la GPU sobre la que se midieron los modelos; más lenta que G4 y más
+  rápida que el resto.
+- **L4**: el piso fiable, la que siempre respondió cuando se le pidió.
+- **T4**: excluida por defecto (no cabe en la reserva del pipeline); sólo se
+  alcanza si la configuración la nombra, y siempre al final.
+- **H100**: descartada. El CLI acepta el nombre, pero esta cuenta no tiene acceso
+  (la interfaz de Colab la muestra en gris) y en producción toda asignación de
+  H100 devolvía HTTP 400, así que cada intento gastaba una vuelta en una máquina
+  imposible. Configurada o no, nunca se intenta: se trata igual que un valor que
+  el CLI no acepta.
 | SHIRLEY_COLAB_OVERLAP | 12 | Overlap de los modelos Roformer |
 | SHIRLEY_COLAB_TIMEOUT_SECS | 1800 | Tiempo máximo por separación |
 | SHIRLEY_COLAB_WORK_DIR | directorio de la app | Archivos temporales |
@@ -29,7 +46,17 @@ Sin token, la separación falla con colab_token_missing **antes** de encender la
    descarga del resultado con colab download -s <nombre> <remoto> <local> (el
    download propio del CLI).
 4. Verificación de SHA-256 y de duración contra lo que reportó el runtime.
-5. colab stop -s <nombre> siempre: éxito, error o timeout.
+5. La GPU se conserva: si la separación termina bien, o falla DESPUÉS de tener
+   GPU asignada (subida rechazada, exec distinto de cero o agotado, salida
+   ilegible, descarga fallida), la sesión sigue viva y queda en caché durante 10
+   minutos contados desde el final de ese intento. La siguiente separación la
+   reutiliza en vez de volver a pelear con los 503 de Colab. Sólo se apaga en el
+   acto cuando la sesión está probada muerta: el CLI responde que la sesión o el
+   runtime no existe, o la sonda de salud (un `colab exec` trivial) falla. Una
+   sesión rota nunca queda cacheada, y el reaper de huérfanos y la expiración de
+   10 minutos siguen aplicándose.
+6. colab stop -s <nombre> en el apagado diferido, o de inmediato si la sesión
+   está muerta.
 
 `--timeout` es el silencio que el CLI tolera del kernel, no el límite del
 proceso: el CLI aborta la llamada cuando el kernel no imprime nada durante ese
@@ -39,7 +66,7 @@ callada más tiempo mientras instala paquetes y carga los modelos, así que cada
 enteros redondeados hacia arriba y nunca `0` (`0` significa «sin límite»). El
 límite que corta de verdad sigue siendo el timeout de tokio del adaptador.
 
-Un guard con Drop lanza colab stop si el proceso entra en pánico o se cancela, para que la GPU no quede encendida.
+Un guard con Drop lanza colab stop si el proceso entra en pánico o se cancela, para que la GPU no quede encendida. Se desactiva cuando la sesión queda deliberadamente viva (éxito, o fallo con la sesión sana), porque entonces el apagado lo programa la tarea de retención.
 
 ## Diagnóstico de un fallo
 
